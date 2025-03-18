@@ -6,7 +6,7 @@ const HeroSection = () => {
       {/* Background Image */}
       <div className="absolute inset-0">
         <img
-          src="/assets/hero-image.jpg" // Sesuaikan dengan path gambar Anda
+          src="https://neswara.id/assets/frontend/images/avatars/journalist.jpg" // Sesuaikan dengan path gambar Anda
           alt="News Reporter"
           className="w-full h-full object-cover opacity-80"
         />

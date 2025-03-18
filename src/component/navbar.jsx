@@ -3,7 +3,7 @@ import { FaSearch, FaUserCircle, FaEllipsisH } from "react-icons/fa";
 
 const Navbar = () => {
   return (
-    <nav className="w-full bg-white shadow-md px-6 py-3">
+    <nav className="w-full bg-white shadow-md px-6 py-6">
       <div className="container mx-auto flex justify-between items-center px-10">
         {/* Logo */}
         <div className="flex items-center">
