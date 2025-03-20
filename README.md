@@ -77,6 +77,7 @@ git push origin fitur-baru
 
 ✅ [v1.1] - 2025-03-20
 
+✅ Bug Fix: Tidak bisa upload ke Vercel
 ✅ Bug Fix: Login Google & Facebook sekarang otomatis menutup modal.
 
 🆕 [v1.0] - 2025-03-19
