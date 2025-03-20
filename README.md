@@ -72,14 +72,24 @@ git push origin fitur-baru
 6. Buat Pull Request
 
 --------------------------------------------------------------------------------
+
 📌 Changelog
+
 ✅ [v1.1] - 2025-03-20
+
 ✅ Bug Fix: Login Google & Facebook sekarang otomatis menutup modal.
+
 🆕 [v1.0] - 2025-03-19
+
 🎉 Versi pertama dirilis!
+
 🔗 Buka Langsung di VS Code atau GitHub Codespaces
+
 Buka di VS Code Online
+
 Buka di GitHub Codespaces
+
 Made by ❤️ by Fari Noveri
+
 --------------------------------------------------------------------------------
 
