@@ -1,19 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { auth, googleProvider, facebookProvider } from "../firebaseconfig";
 import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
-import { app } from "../firebaseconfig"; 
-import { getAuth } from "firebase/auth";
-import { onAuthStateChanged } from "firebase/auth";
-
-
+import { auth } from "../firebaseconfig"; // Pastikan auth di-import
 import { 
-  GoogleAuthProvider,
-  FacebookAuthProvider, 
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut 
 } from "firebase/auth"; // Impor hanya sekali
 
 import logo from "../assets/neswara (1).jpg";
@@ -26,42 +19,13 @@ const Navbar = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isClosing, setIsClosing] = useState(false); // Untuk animasi keluar
   const [isSwitching, setIsSwitching] = useState(false); // Untuk animasi switch form
-  const [user, setUser] = useState(null);
-  const auth = getAuth(app); // Ambil auth dari Firebase
 
-
-  // Cek status login setiap kali komponen di-mount
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, [auth]);
-
-  const loginWithGoogle = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log("Login berhasil:", result.user);
-      handleCloseModal(); // Tutup modal setelah login sukses
-    } catch (error) {
-      console.error("Error saat login:", error.message);
-    }
-  };
-  
-  const loginWithFacebook = async () => {
-    try {
-      const result = await signInWithPopup(auth, facebookProvider);
-      console.log("Login berhasil:", result.user);
-      handleCloseModal(); // Tutup modal setelah login sukses
-    } catch (error) {
-      console.error("Error saat login:", error.message);
-    }
-  };
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);

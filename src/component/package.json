@@ -1,5 +1,5 @@
 {
-  "name": "s",
+  "name": "neswara-clone",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,10 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-<<<<<<< HEAD
-=======
-    "express": "^4.21.2",
->>>>>>> 5006fdc (Fix deploy to Vercel)
     "firebase": "^11.4.0",
     "framer-motion": "^12.5.0",
     "react": "^19.0.0",
@@ -35,9 +31,5 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "vite": "^6.2.2"
-  },
-  "description": "s",
-  "main": "eslint.config.js",
-  "author": "",
-  "license": "ISC"
+  }
 }
