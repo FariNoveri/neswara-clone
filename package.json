@@ -1,5 +1,5 @@
 {
-  "name": "s",
+  "name": "neswaraclone",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,10 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-<<<<<<< HEAD
-=======
     "express": "^4.21.2",
->>>>>>> 5006fdc (Fix deploy to Vercel)
     "firebase": "^11.4.0",
     "framer-motion": "^12.5.0",
     "react": "^19.0.0",
