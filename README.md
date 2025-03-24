@@ -157,10 +157,14 @@ Pastikan domain **vercel.app** sudah masuk di **Authorized Domains** Firebase ag
 --------------------------------------------------------------------------------
 
 📌 Changelog
+✅ [v1.2] - 2025-03-24
+
+✅ Menambahkan file komponen atomic design (Atoms, molecul dan organism)
 
 ✅ [v1.1] - 2025-03-20
 
 ✅ Bug Fix: Tidak bisa upload ke Vercel
+
 ✅ Bug Fix: Login Google & Facebook sekarang otomatis menutup modal.
 
 🆕 [v1.0] - 2025-03-19
