@@ -1,67 +1,85 @@
-import React, { useState, useEffect } from "react";
-import { auth, googleProvider, facebookProvider } from "../firebaseconfig";
-import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle } from "react-icons/fa";
+import React, { useState, useEffect, useRef } from "react";
+import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle, FaChevronRight } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
-import { app } from "../firebaseconfig"; 
-import { getAuth } from "firebase/auth";
-import { onAuthStateChanged } from "firebase/auth";
-
-
+import { auth } from "../firebaseconfig"; // Pastikan auth di-import
 import { 
-  GoogleAuthProvider,
-  FacebookAuthProvider, 
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut 
 } from "firebase/auth"; // Impor hanya sekali
 
 import logo from "../assets/neswara (1).jpg";
 import { registerUser, loginUser, loginWithGoogle, loginWithFacebook, logoutUser } from "./auth"; // Pastikan ini tidak mendeklarasikan ulang logoutUser
+import { useNavigate } from "react-router-dom";
+
 
 
 const Navbar = () => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openSubmenu, setOpenSubmenu] = useState(null);
+  const toggleMobileMenu = () => {
+    
+    setIsMobileMenuOpen(!isMobileMenuOpen);
+  };  
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isClosing, setIsClosing] = useState(false); // Untuk animasi keluar
   const [isSwitching, setIsSwitching] = useState(false); // Untuk animasi switch form
-  const [user, setUser] = useState(null);
-  const auth = getAuth(app); // Ambil auth dari Firebase
-
-
-  // Cek status login setiap kali komponen di-mount
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, [auth]);
-
-  const loginWithGoogle = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      console.log("Login berhasil:", result.user);
-      handleCloseModal(); // Tutup modal setelah login sukses
-    } catch (error) {
-      console.error("Error saat login:", error.message);
-    }
+  const navigate = useNavigate(); // Gunakan useNavigate untuk navigasi
+  // Simulasi isi folder "atomicdesign/navbar/"
+  const navbarItems = [
+    {
+      name: "Atomic Design",
+      path: "/atomicdesign",
+      children: [
+        {
+          name: "Atoms",
+          path: "/atomicdesign/atoms",
+          children: ["Button", "Icon", "Logo", "NavLink"].map((item) => ({
+            name: item,
+            path: `/atomicdesign/atoms/${item.toLowerCase()}`,
+          })),
+        },
+        {
+          name: "Molecules",
+          path: "/atomicdesign/molecules",
+          children: ["SearchBar", "UserMenu", "MobileMenuButton"].map((item) => ({
+            name: item,
+            path: `/atomicdesign/molecules/${item.toLowerCase()}`,
+          })),
+        },
+        {
+          name: "Organisms",
+          path: "/atomicdesign/organisms",
+          children: ["NavbarAtomicDesign"].map((item) => ({
+            name: item,
+            path: `/atomicdesign/organisms/${item.toLowerCase()}`,
+          })),
+        },
+      ],
+    },
+  ];
+  const [activeSubMenu, setActiveSubMenu] = React.useState(null);
+  const timeoutRef = useRef(null);
+  const handleMouseEnter = (menuName) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setActiveSubMenu(menuName);
   };
   
-  const loginWithFacebook = async () => {
-    try {
-      const result = await signInWithPopup(auth, facebookProvider);
-      console.log("Login berhasil:", result.user);
-      handleCloseModal(); // Tutup modal setelah login sukses
-    } catch (error) {
-      console.error("Error saat login:", error.message);
-    }
+  const handleMouseLeave = () => {
+    timeoutRef.current = setTimeout(() => setActiveSubMenu(null), 300);
   };
+
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
@@ -177,6 +195,48 @@ const Navbar = () => {
               transform: translateY(0);
             }
           }
+          
+          @keyframes slideInFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutToLeft {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+
+.mobile-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 70%;
+  max-width: 280px;
+  background: white;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  z-index: 50;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease-out;
+}
+
+.mobile-menu.open {
+  transform: translateX(0);
+}
+
 
           @keyframes fadeOut {
             from {
@@ -224,7 +284,10 @@ const Navbar = () => {
       <nav className="w-full bg-white shadow-md px-4 py-4">
         <div className="container mx-auto flex justify-between items-center px-4 md:px-20">
           <div className="flex items-center space-x-4">
-            <button className="md:hidden text-black text-2xl focus:outline-none">
+          <button 
+              className="md:hidden text-black text-2xl focus:outline-none"
+              onClick={() => setIsMobileMenuOpen(true)}
+            >
               <FaBars />
             </button>
             <img src={logo} alt="Neswara Logo" className="h-12 mr-1" />
@@ -238,10 +301,82 @@ const Navbar = () => {
             <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
             <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
             <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
-            <li>
-              <FaEllipsisH className="text-black text-lg cursor-pointer hover:text-yellow-500" />
-            </li>
+            
+            <li className="relative">
+  {/* Tombol tiga titik untuk membuka dropdown */}
+  <FaEllipsisH
+    className="text-black text-lg cursor-pointer hover:text-yellow-500"
+    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+  />
+
+  {/* Dropdown utama */}
+  {isDropdownOpen && (
+    <ul className="absolute right-0 mt-2 w-48 bg-white shadow-md rounded-md py-2 z-50">
+      {navbarItems.map((item, index) => (
+        <li
+          key={index}
+          className="relative group px-4 py-2 hover:bg-gray-100 cursor-pointer"
+          onMouseEnter={() => setActiveSubMenu(item.name)}
+          onMouseLeave={() => {
+            clearTimeout(window.subMenuTimeout);
+            window.subMenuTimeout = setTimeout(() => setActiveSubMenu(null), 300);
+          }}
+        >
+          {/* Jika item memiliki submenu, jangan kasih onClick */}
+          <span className="flex justify-between items-center">
+            {item.name}
+            {item.children && <FaChevronRight className="text-gray-500" />}
+          </span>
+
+          {/* Submenu */}
+          {activeSubMenu === item.name && item.children && (
+            <ul
+              className="absolute left-full top-0 w-48 bg-white shadow-md rounded-md py-2"
+              onMouseEnter={() => {
+                clearTimeout(window.subMenuTimeout);
+                setActiveSubMenu(item.name);
+              }}
+              onMouseLeave={() => {
+                window.subMenuTimeout = setTimeout(() => setActiveSubMenu(null), 300);
+              }}
+            >
+              {item.children.map((subItem, subIndex) => (
+                <li
+                  key={subIndex}
+                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => navigate(subItem.path)}
+                >
+                  {subItem.name}
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  )}
+</li>
+
+ 
           </ul>
+
+          <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 transition-all duration-300 ${isMobileMenuOpen ? "block" : "hidden"}`}>
+        <div className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg p-5 transform transition-transform duration-300 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+          <button className="absolute top-4 right-4 text-2xl text-gray-600" onClick={() => setIsMobileMenuOpen(false)}>
+            <FaTimes />
+          </button>
+
+          <ul className="mt-10 space-y-6 font-semibold text-black">
+            <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
+            <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
+            <li className="hover:text-yellow-500 cursor-pointer">REGION</li>
+            <li className="hover:text-yellow-500 cursor-pointer">SPORT</li>
+            <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
+            <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
+            <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
+          </ul>
+        </div>
+      </div>
 
           <div className="flex items-center space-x-4">
             <FaSearch aria-label="Search" className="text-black text-lg cursor-pointer hover:text-yellow-500" />
