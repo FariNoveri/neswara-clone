@@ -158,6 +158,9 @@ Pastikan domain **vercel.app** sudah masuk di **Authorized Domains** Firebase ag
 
 📌 Changelog
 
+❓ [v1.3] - 2025
+
+❓ Menambahkan atomic design ke dalam tampilan Website
 
 ✅ [v1.2] - 2025-03-24
 
