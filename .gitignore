@@ -1,24 +1,46 @@
-# Logs
-logs
-*.log
+# Dependency
+node_modules/
+
+# Environment
+.env
+
+# Build output
+dist/
+build/
+
+# Log files
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# System files
 .DS_Store
+Thumbs.db
+
+# IDE / Editor configs
+.vscode/
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+
+# Optional: jika generate coverage report
+coverage/
+
+# Optional: jika generate cache atau testing
+.cache/
+*.log
+
+# Ignore image assets that are large or generated (opsional)
+# /src/**/*.png
+# /src/**/*.jpg
+# /src/**/*.jpeg
+
+# Optional: jika kamu deploy pakai Vercel atau Netlify dan tidak ingin file mereka ikut git
+.vercel/
+.netlify/
+
+# Jika kamu pernah meng-*install* `firebase` CLI di folder
+.firebase/
+src/firebaseconfig.js

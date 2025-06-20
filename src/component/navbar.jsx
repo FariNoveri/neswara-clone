@@ -1,27 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle, FaChevronRight } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
-import { auth } from "../firebaseconfig"; // Pastikan auth di-import
+import { auth } from "../firebaseconfig";
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut 
-} from "firebase/auth"; // Impor hanya sekali
+} from "firebase/auth";
 
 import logo from "../assets/neswara (1).jpg";
-import { registerUser, loginUser, loginWithGoogle, loginWithFacebook, logoutUser } from "./auth"; // Pastikan ini tidak mendeklarasikan ulang logoutUser
+import { registerUser, loginUser, loginWithGoogle, loginWithFacebook, logoutUser } from "./auth";
 import { useNavigate } from "react-router-dom";
-
-
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState(null);
-  const toggleMobileMenu = () => {
-    
-    setIsMobileMenuOpen(!isMobileMenuOpen);
-  };  
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
@@ -32,10 +26,12 @@ const Navbar = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isClosing, setIsClosing] = useState(false); // Untuk animasi keluar
-  const [isSwitching, setIsSwitching] = useState(false); // Untuk animasi switch form
-  const navigate = useNavigate(); // Gunakan useNavigate untuk navigasi
-  // Simulasi isi folder "atomicdesign/navbar/"
+  const [isClosing, setIsClosing] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const navigate = useNavigate();
+
+  const timeoutRef = useRef(null); // ✅ Ref to store the timeout
+
   const navbarItems = [
     {
       name: "Atomic Design",
@@ -68,50 +64,108 @@ const Navbar = () => {
       ],
     },
   ];
-  const [activeSubMenu, setActiveSubMenu] = React.useState(null);
-  const timeoutRef = useRef(null);
+  
+  const [activeSubMenu, setActiveSubMenu] = useState(null);
+  const subMenuTimeoutRef = useRef(null);
+
+  // ✅ Function to reset the logout timer
+  const resetTimeout = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(() => {
+      signOut(auth)
+        .then(() => {
+          navigate('/');
+          alert("Session expired. You have been logged out.");
+        })
+        .catch((error) => {
+          console.error("Error signing out:", error);
+          setError("Failed to log out: " + error.message);
+        });
+    }, 5 * 60 * 1000); // 5 minutes in milliseconds
+  };
+
+  // ✅ Handle user activity to reset timer
+  const handleUserActivity = () => {
+    resetTimeout();
+  };
+
   const handleMouseEnter = (menuName) => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (subMenuTimeoutRef.current) clearTimeout(subMenuTimeoutRef.current);
     setActiveSubMenu(menuName);
   };
   
   const handleMouseLeave = () => {
-    timeoutRef.current = setTimeout(() => setActiveSubMenu(null), 300);
+    subMenuTimeoutRef.current = setTimeout(() => setActiveSubMenu(null), 300);
   };
-
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
+
+      if (user) {
+        // ✅ Start the timeout when user is authenticated
+        resetTimeout();
+
+        // ✅ Add event listeners for user activity
+        window.addEventListener('mousemove', handleUserActivity);
+        window.addEventListener('keydown', handleUserActivity);
+        window.addEventListener('click', handleUserActivity);
+      } else {
+        // ✅ Clear timeout and event listeners if user is not authenticated
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+        window.removeEventListener('mousemove', handleUserActivity);
+        window.removeEventListener('keydown', handleUserActivity);
+        window.removeEventListener('click', handleUserActivity);
+      }
     });
 
-    return () => unsubscribe();
+    // ✅ Cleanup on unmount
+    return () => {
+      unsubscribe();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (subMenuTimeoutRef.current) {
+        clearTimeout(subMenuTimeoutRef.current);
+      }
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('click', handleUserActivity);
+    };
   }, []);
+
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
+  };  
 
   const handleOpenModal = () => {
     setIsModalOpen(true);
-    setIsClosing(false); // Reset animasi keluar
+    setIsClosing(false);
   };
 
   const handleCloseModal = () => {
-    setIsClosing(true); // Memulai animasi keluar
+    setIsClosing(true);
     setTimeout(() => {
       setIsModalOpen(false);
       setEmail("");
       setPassword("");
       setConfirmPassword("");
       setError("");
-    }, 300); // Sesuaikan dengan durasi animasi
+    }, 300);
   };
 
   const handleSwitchForm = () => {
-    setIsSwitching(true); // Memulai animasi switch form
+    setIsSwitching(true);
     setTimeout(() => {
       setIsLogin(!isLogin);
-      setIsSwitching(false); // Reset animasi switch form
+      setIsSwitching(false);
       setError("");
-    }, 300); // Sesuaikan dengan durasi animasi
+    }, 300);
   };
 
   const handleRegister = async (e) => {
@@ -134,6 +188,7 @@ const Navbar = () => {
     try {
       await createUserWithEmailAndPassword(auth, email, password);
       handleCloseModal();
+      navigate('/profile');
     } catch (error) {
       setError(error.message);
     }
@@ -151,6 +206,7 @@ const Navbar = () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       handleCloseModal();
+      navigate('/profile');
     } catch (error) {
       setError(error.message);
     }
@@ -159,12 +215,32 @@ const Navbar = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      navigate('/');
     } catch (error) {
       setError(error.message);
     }
   };
 
-  // Menutup modal ketika menekan tombol ESC
+  const handleGoogleLogin = async () => {
+    try {
+      await loginWithGoogle();
+      handleCloseModal();
+      navigate('/profile');
+    } catch (error) {
+      setError(error.message);
+    }
+  };
+
+  const handleFacebookLogin = async () => {
+    try {
+      await loginWithFacebook();
+      handleCloseModal();
+      navigate('/profile');
+    } catch (error) {
+      setError(error.message);
+    }
+  };
+
   useEffect(() => {
     const handleEsc = (event) => {
       if (event.key === "Escape") {
@@ -182,7 +258,6 @@ const Navbar = () => {
 
   return (
     <>
-      {/* CSS Styles */}
       <style>
         {`
           @keyframes fadeIn {
@@ -197,46 +272,45 @@ const Navbar = () => {
           }
           
           @keyframes slideInFromLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
+            from {
+              opacity: 0;
+              transform: translateX(-100%);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(0);
+            }
+          }
 
-@keyframes slideOutToLeft {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-100%);
-  }
-}
+          @keyframes slideOutToLeft {
+            from {
+              opacity: 1;
+              transform: translateX(0);
+            }
+            to {
+              opacity: 0;
+              transform: translateX(-100%);
+            }
+          }
 
-.mobile-menu {
-  position: fixed;
-  top: 0;
-  left: 0;
-  height: 100vh;
-  width: 70%;
-  max-width: 280px;
-  background: white;
-  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
-  padding: 20px;
-  z-index: 50;
-  transform: translateX(-100%);
-  transition: transform 0.3s ease-out;
-}
+          .mobile-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: 70%;
+            max-width: 280px;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            z-index: 50;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-out;
+          }
 
-.mobile-menu.open {
-  transform: translateX(0);
-}
-
+          .mobile-menu.open {
+            transform: translateX(0);
+          }
 
           @keyframes fadeOut {
             from {
@@ -280,13 +354,12 @@ const Navbar = () => {
         `}
       </style>
 
-      {/* Navbar */}
       <nav className="w-full bg-white shadow-md px-4 py-4">
         <div className="container mx-auto flex justify-between items-center px-4 md:px-20">
           <div className="flex items-center space-x-4">
-          <button 
+            <button 
               className="md:hidden text-black text-2xl focus:outline-none"
-              onClick={() => setIsMobileMenuOpen(true)}
+              onClick={toggleMobileMenu}
             >
               <FaBars />
             </button>
@@ -303,90 +376,84 @@ const Navbar = () => {
             <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
             
             <li className="relative">
-  {/* Tombol tiga titik untuk membuka dropdown */}
-  <FaEllipsisH
-    className="text-black text-lg cursor-pointer hover:text-yellow-500"
-    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-  />
+              <FaEllipsisH
+                className="text-black text-lg cursor-pointer hover:text-yellow-500"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              />
 
-  {/* Dropdown utama */}
-  {isDropdownOpen && (
-    <ul className="absolute right-0 mt-2 w-48 bg-white shadow-md rounded-md py-2 z-50">
-      {navbarItems.map((item, index) => (
-        <li
-          key={index}
-          className="relative group px-4 py-2 hover:bg-gray-100 cursor-pointer"
-          onMouseEnter={() => setActiveSubMenu(item.name)}
-          onMouseLeave={() => {
-            clearTimeout(window.subMenuTimeout);
-            window.subMenuTimeout = setTimeout(() => setActiveSubMenu(null), 300);
-          }}
-        >
-          {/* Jika item memiliki submenu, jangan kasih onClick */}
-          <span className="flex justify-between items-center">
-            {item.name}
-            {item.children && <FaChevronRight className="text-gray-500" />}
-          </span>
+              {isDropdownOpen && (
+                <ul className="absolute right-0 mt-2 w-48 bg-white shadow-md rounded-md py-2 z-50">
+                  {navbarItems.map((item, index) => (
+                    <li
+                      key={index}
+                      className="relative group px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                      onMouseEnter={() => handleMouseEnter(item.name)}
+                      onMouseLeave={handleMouseLeave}
+                    >
+                      <span className="flex justify-between items-center">
+                        {item.name}
+                        {item.children && <FaChevronRight className="text-gray-500" />}
+                      </span>
 
-          {/* Submenu */}
-          {activeSubMenu === item.name && item.children && (
-            <ul
-              className="absolute left-full top-0 w-48 bg-white shadow-md rounded-md py-2"
-              onMouseEnter={() => {
-                clearTimeout(window.subMenuTimeout);
-                setActiveSubMenu(item.name);
-              }}
-              onMouseLeave={() => {
-                window.subMenuTimeout = setTimeout(() => setActiveSubMenu(null), 300);
-              }}
-            >
-              {item.children.map((subItem, subIndex) => (
-                <li
-                  key={subIndex}
-                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                  onClick={() => navigate(subItem.path)}
-                >
-                  {subItem.name}
-                </li>
-              ))}
-            </ul>
-          )}
-        </li>
-      ))}
-    </ul>
-  )}
-</li>
-
- 
+                      {activeSubMenu === item.name && item.children && (
+                        <ul
+                          className="absolute left-full top-0 w-48 bg-white shadow-md rounded-md py-2"
+                          onMouseEnter={() => handleMouseEnter(item.name)}
+                          onMouseLeave={handleMouseLeave}
+                        >
+                          {item.children.map((subItem, subIndex) => (
+                            <li
+                              key={subIndex}
+                              className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                              onClick={() => navigate(subItem.path)}
+                            >
+                              {subItem.name}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
           </ul>
 
           <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 transition-all duration-300 ${isMobileMenuOpen ? "block" : "hidden"}`}>
-        <div className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg p-5 transform transition-transform duration-300 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-          <button className="absolute top-4 right-4 text-2xl text-gray-600" onClick={() => setIsMobileMenuOpen(false)}>
-            <FaTimes />
-          </button>
+            <div className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg p-5 transform transition-transform duration-300 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+              <button className="absolute top-4 right-4 text-2xl text-gray-600" onClick={toggleMobileMenu}>
+                <FaTimes />
+              </button>
 
-          <ul className="mt-10 space-y-6 font-semibold text-black">
-            <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
-            <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
-            <li className="hover:text-yellow-500 cursor-pointer">REGION</li>
-            <li className="hover:text-yellow-500 cursor-pointer">SPORT</li>
-            <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
-            <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
-            <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
-          </ul>
-        </div>
-      </div>
+              <ul className="mt-10 space-y-6 font-semibold text-black">
+                <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
+                <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
+                <li className="hover:text-yellow-500 cursor-pointer">REGION</li>
+                <li className="hover:text-yellow-500 cursor-pointer">SPORT</li>
+                <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
+                <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
+                <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
+              </ul>
+            </div>
+          </div>
 
           <div className="flex items-center space-x-4">
             <FaSearch aria-label="Search" className="text-black text-lg cursor-pointer hover:text-yellow-500" />
             {user ? (
-              <button
-                className="text-black text-lg font-semibold cursor-pointer hover:text-yellow-500"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
+              <div className="flex items-center space-x-3">
+                <button
+                  className="text-black text-sm font-semibold cursor-pointer hover:text-yellow-500"
+                  onClick={() => navigate('/profile')}
+                >
+                  Profile
+                </button>
+                <button
+                  className="text-black text-sm font-semibold cursor-pointer hover:text-yellow-500"
+                  onClick={handleLogout}
+                >
+                  Logout
+                </button>
+              </div>
             ) : (
               <FaUserCircle
                 aria-label="User"
@@ -398,7 +465,6 @@ const Navbar = () => {
         </div>
       </nav>
 
-      {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50" onClick={handleCloseModal}>
           <div
@@ -454,14 +520,16 @@ const Navbar = () => {
 
             <div className="flex justify-center space-x-4 mt-4">
               <button
-              onClick={loginWithFacebook}
-               className="flex items-center justify-center bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700">
+                onClick={handleFacebookLogin}
+                className="flex items-center justify-center bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
+              >
                 <FaFacebook className="mr-2" />
                 Facebook
               </button>
               <button
-              onClick={loginWithGoogle}
-               className="flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700">
+                onClick={handleGoogleLogin}
+                className="flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
+              >
                 <FaGoogle className="mr-2" />
                 Google
               </button>
