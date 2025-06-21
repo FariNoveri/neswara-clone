@@ -6,10 +6,10 @@ import {
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  signOut 
+  signOut,
+  sendPasswordResetEmail
 } from "firebase/auth";
-
-import logo from "../assets/neswara (1).jpg";
+import logo from "../assets/neswara-logo.png";
 import { registerUser, loginUser, loginWithGoogle, loginWithFacebook, logoutUser } from "./auth";
 import { useNavigate } from "react-router-dom";
 
@@ -18,19 +18,21 @@ const Navbar = () => {
   const [openSubmenu, setOpenSubmenu] = useState(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLogin, setIsLogin] = useState(true);
+  const [formMode, setFormMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const navigate = useNavigate();
 
-  const timeoutRef = useRef(null); // ✅ Ref to store the timeout
+  const timeoutRef = useRef(null);
+  const subMenuTimeoutRef = useRef(null);
 
   const navbarItems = [
     {
@@ -64,11 +66,7 @@ const Navbar = () => {
       ],
     },
   ];
-  
-  const [activeSubMenu, setActiveSubMenu] = useState(null);
-  const subMenuTimeoutRef = useRef(null);
 
-  // ✅ Function to reset the logout timer
   const resetTimeout = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -83,10 +81,9 @@ const Navbar = () => {
           console.error("Error signing out:", error);
           setError("Failed to log out: " + error.message);
         });
-    }, 5 * 60 * 1000); // 5 minutes in milliseconds
+    }, 5 * 60 * 1000);
   };
 
-  // ✅ Handle user activity to reset timer
   const handleUserActivity = () => {
     resetTimeout();
   };
@@ -95,7 +92,7 @@ const Navbar = () => {
     if (subMenuTimeoutRef.current) clearTimeout(subMenuTimeoutRef.current);
     setActiveSubMenu(menuName);
   };
-  
+
   const handleMouseLeave = () => {
     subMenuTimeoutRef.current = setTimeout(() => setActiveSubMenu(null), 300);
   };
@@ -104,17 +101,12 @@ const Navbar = () => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
-
       if (user) {
-        // ✅ Start the timeout when user is authenticated
         resetTimeout();
-
-        // ✅ Add event listeners for user activity
         window.addEventListener('mousemove', handleUserActivity);
         window.addEventListener('keydown', handleUserActivity);
         window.addEventListener('click', handleUserActivity);
       } else {
-        // ✅ Clear timeout and event listeners if user is not authenticated
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
@@ -124,7 +116,6 @@ const Navbar = () => {
       }
     });
 
-    // ✅ Cleanup on unmount
     return () => {
       unsubscribe();
       if (timeoutRef.current) {
@@ -141,47 +132,64 @@ const Navbar = () => {
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
-  };  
+  };
 
-  const handleOpenModal = () => {
+  const handleOpenModal = (mode = "login") => {
+    setFormMode(mode);
     setIsModalOpen(true);
     setIsClosing(false);
+    setError("");
+    setSuccess("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
   };
 
   const handleCloseModal = () => {
     setIsClosing(true);
     setTimeout(() => {
       setIsModalOpen(false);
+      setFormMode("login");
       setEmail("");
       setPassword("");
       setConfirmPassword("");
       setError("");
+      setSuccess("");
     }, 300);
   };
 
-  const handleSwitchForm = () => {
+  const handleSwitchForm = (mode) => {
     setIsSwitching(true);
     setTimeout(() => {
-      setIsLogin(!isLogin);
+      setFormMode(mode);
       setIsSwitching(false);
       setError("");
+      setSuccess("");
+      setEmail("");
+      setPassword("");
+      setConfirmPassword("");
     }, 300);
   };
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
+    setLoading(true);
 
     if (!email || !password || !confirmPassword) {
-      setError("All fields are required.");
+      setError("Semua kolom harus diisi.");
+      setLoading(false);
       return;
     }
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError("Kata sandi tidak cocok.");
+      setLoading(false);
       return;
     }
     if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+      setError("Kata sandi harus minimal 6 karakter.");
+      setLoading(false);
       return;
     }
 
@@ -190,16 +198,30 @@ const Navbar = () => {
       handleCloseModal();
       navigate('/profile');
     } catch (error) {
-      setError(error.message);
+      console.error("Register error:", error.code, error.message);
+      switch (error.code) {
+        case "auth/email-already-in-use":
+          setError("Email sudah digunakan.");
+          break;
+        case "auth/invalid-email":
+          setError("Email tidak valid.");
+          break;
+        default:
+          setError("Gagal mendaftar: " + error.message);
+      }
     }
+    setLoading(false);
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
+    setLoading(true);
 
     if (!email || !password) {
-      setError("Email and password are required.");
+      setError("Email dan kata sandi harus diisi.");
+      setLoading(false);
       return;
     }
 
@@ -208,8 +230,85 @@ const Navbar = () => {
       handleCloseModal();
       navigate('/profile');
     } catch (error) {
-      setError(error.message);
+      console.error("Login error:", error.code, error.message);
+      switch (error.code) {
+        case "auth/user-not-found":
+          setError("Email tidak ditemukan.");
+          break;
+        case "auth/wrong-password":
+          setError("Kata sandi salah.");
+          break;
+        case "auth/invalid-email":
+          setError("Email tidak valid.");
+          break;
+        default:
+          setError("Gagal login: " + error.message);
+      }
     }
+    setLoading(false);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    setLoading(true);
+
+    if (!email) {
+      setError("Email harus diisi.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      console.log("Attempting to send password reset email to:", email);
+      await sendPasswordResetEmail(auth, email);
+      setSuccess("Email reset kata sandi telah dikirim. Silakan cek kotak masuk atau folder spam/junk Anda.");
+      setEmail("");
+      console.log("Password reset email sent successfully to:", email);
+    } catch (error) {
+      console.error("Forgot password error:", error.code, error.message);
+      switch (error.code) {
+        case "auth/invalid-email":
+          setError("Email tidak valid.");
+          break;
+        case "auth/user-not-found":
+          setError("Email tidak ditemukan.");
+          break;
+        case "auth/too-many-requests":
+          setError("Terlalu banyak percobaan. Coba lagi nanti.");
+          break;
+        default:
+          setError("Gagal mengirim email reset: " + error.message);
+      }
+    }
+    setLoading(false);
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+      handleCloseModal();
+      navigate('/profile');
+    } catch (error) {
+      console.error("Google login error:", error.code, error.message);
+      setError("Gagal login dengan Google: " + error.message);
+    }
+    setLoading(false);
+  };
+
+  const handleFacebookLogin = async () => {
+    setLoading(true);
+    try {
+      await loginWithFacebook();
+      handleCloseModal();
+      navigate('/profile');
+    } catch (error) {
+      console.error("Facebook login error:", error.code, error.message);
+      setError("Gagal login dengan Facebook: " + error.message);
+    }
+    setLoading(false);
   };
 
   const handleLogout = async () => {
@@ -217,27 +316,8 @@ const Navbar = () => {
       await signOut(auth);
       navigate('/');
     } catch (error) {
-      setError(error.message);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    try {
-      await loginWithGoogle();
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      setError(error.message);
-    }
-  };
-
-  const handleFacebookLogin = async () => {
-    try {
-      await loginWithFacebook();
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      setError(error.message);
+      console.error("Logout error:", error.code, error.message);
+      setError("Gagal logout: " + error.message);
     }
   };
 
@@ -261,38 +341,17 @@ const Navbar = () => {
       <style>
         {`
           @keyframes fadeIn {
-            from {
-              opacity: 0;
-              transform: translateY(-20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
           }
-          
           @keyframes slideInFromLeft {
-            from {
-              opacity: 0;
-              transform: translateX(-100%);
-            }
-            to {
-              opacity: 1;
-              transform: translateX(0);
-            }
+            from { opacity: 0; transform: translateX(-100%); }
+            to { opacity: 1; transform: translateX(0); }
           }
-
           @keyframes slideOutToLeft {
-            from {
-              opacity: 1;
-              transform: translateX(0);
-            }
-            to {
-              opacity: 0;
-              transform: translateX(-100%);
-            }
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(-100%); }
           }
-
           .mobile-menu {
             position: fixed;
             top: 0;
@@ -307,46 +366,27 @@ const Navbar = () => {
             transform: translateX(-100%);
             transition: transform 0.3s ease-out;
           }
-
           .mobile-menu.open {
             transform: translateX(0);
           }
-
           @keyframes fadeOut {
-            from {
-              opacity: 1;
-              transform: translateY(0);
-            }
-            to {
-              opacity: 0;
-              transform: translateY(-20px);
-            }
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-20px); }
           }
-
           .modal-content {
             animation: fadeIn 0.3s ease-out;
           }
-
           .modal-content.closing {
             animation: fadeOut 0.3s ease-in;
           }
-
           .modal-content.switching {
             animation: fadeOut 0.3s ease-out;
           }
-
           .modal-content.switching.active {
             animation: fadeIn 0.3s ease-in;
           }
-
-          .text-black {
-            color: black;
-          }
-
-          .text-green-500 {
-            color: #10B981;
-          }
-
+          .text-black { color: black; }
+          .text-green-500 { color: #10B981; }
           .text-green-500:hover {
             text-decoration: underline;
             cursor: pointer;
@@ -374,13 +414,11 @@ const Navbar = () => {
             <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
             <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
             <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
-            
             <li className="relative">
               <FaEllipsisH
                 className="text-black text-lg cursor-pointer hover:text-yellow-500"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               />
-
               {isDropdownOpen && (
                 <ul className="absolute right-0 mt-2 w-48 bg-white shadow-md rounded-md py-2 z-50">
                   {navbarItems.map((item, index) => (
@@ -394,7 +432,6 @@ const Navbar = () => {
                         {item.name}
                         {item.children && <FaChevronRight className="text-gray-500" />}
                       </span>
-
                       {activeSubMenu === item.name && item.children && (
                         <ul
                           className="absolute left-full top-0 w-48 bg-white shadow-md rounded-md py-2"
@@ -424,7 +461,6 @@ const Navbar = () => {
               <button className="absolute top-4 right-4 text-2xl text-gray-600" onClick={toggleMobileMenu}>
                 <FaTimes />
               </button>
-
               <ul className="mt-10 space-y-6 font-semibold text-black">
                 <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
                 <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
@@ -458,7 +494,7 @@ const Navbar = () => {
               <FaUserCircle
                 aria-label="User"
                 className="text-black text-2xl cursor-pointer hover:text-yellow-500"
-                onClick={handleOpenModal}
+                onClick={() => handleOpenModal("login")}
               />
             )}
           </div>
@@ -473,75 +509,152 @@ const Navbar = () => {
             }`}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-center text-black text-2xl font-bold mb-4">{isLogin ? "LOG IN" : "SIGN UP"}</h2>
+            <h2 className="text-center text-black text-2xl font-bold mb-4">
+              {formMode === "login" ? "LOG IN" : formMode === "register" ? "SIGN UP" : "LUPA KATA SANDI"}
+            </h2>
 
-            {error && <p className="text-red-500 text-center mb-4">{error}</p>}
+            {error && <p className="text-red-500 text-center bg-red-100 p-2 rounded-md text-sm mb-4">{error}</p>}
+            {success && <p className="text-green-500 text-center bg-green-100 p-2 rounded-md text-sm mb-4">{success}</p>}
 
-            <form onSubmit={isLogin ? handleLogin : handleRegister}>
-              <input
-                type="email"
-                placeholder="Your email"
-                className="w-full border border-gray-300 px-4 py-2 rounded-md mb-4"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <div className="relative">
+            {formMode === "forgot" ? (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
                 <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Password"
-                  className="w-full border border-gray-300 px-4 py-2 rounded-md mb-4"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  type="email"
+                  placeholder="Masukkan email Anda"
+                  className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
                 <button
-                  type="button"
-                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500"
-                  onClick={() => setShowPassword(!showPassword)}
+                  type="submit"
+                  disabled={loading}
+                  className={`w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 text-sm font-medium ${
+                    loading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
                 >
-                  {showPassword ? <FaEyeSlash /> : <FaEye />}
+                  {loading ? (
+                    <div className="flex justify-center">
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white"></div>
+                    </div>
+                  ) : (
+                    "Kirim Email Reset"
+                  )}
+                </button>
+                <p className="text-center mt-4 text-black text-sm">
+                  Kembali ke{" "}
+                  <span
+                    className="text-green-500 hover:underline cursor-pointer"
+                    onClick={() => handleSwitchForm("login")}
+                  >
+                    Log in
+                  </span>
+                </p>
+              </form>
+            ) : (
+              <form onSubmit={formMode === "login" ? handleLogin : handleRegister} className="space-y-4">
+                <input
+                  type="email"
+                  placeholder="Masukkan email Anda"
+                  className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Kata sandi"
+                    className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <FaEyeSlash /> : <FaEye />}
+                  </button>
+                </div>
+                {formMode === "register" && (
+                  <input
+                    type="password"
+                    placeholder="Konfirmasi kata sandi"
+                    className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                )}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 text-sm font-medium ${
+                    loading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                >
+                  {loading ? (
+                    <div className="flex justify-center">
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white"></div>
+                    </div>
+                  ) : (
+                    formMode === "login" ? "LOG IN" : "SIGN UP"
+                  )}
+                </button>
+              </form>
+            )}
+
+            {formMode !== "forgot" && (
+              <div className="flex justify-center space-x-4 mt-4">
+                <button
+                  onClick={handleFacebookLogin}
+                  disabled={loading}
+                  className={`flex items-center justify-center bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 text-sm ${
+                    loading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                >
+                  <FaFacebook className="mr-2" />
+                  Facebook
+                </button>
+                <button
+                  onClick={handleGoogleLogin}
+                  disabled={loading}
+                  className={`flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 text-sm ${
+                    loading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                >
+                  <FaGoogle className="mr-2" />
+                  Google
                 </button>
               </div>
-              {!isLogin && (
-                <input
-                  type="password"
-                  placeholder="Confirm Password"
-                  className="w-full border border-gray-300 px-4 py-2 rounded-md mb-4"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
-              )}
-              <button
-                type="submit"
-                className="w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600"
-              >
-                {isLogin ? "LOG IN" : "SIGN UP"}
-              </button>
-            </form>
+            )}
 
-            <div className="flex justify-center space-x-4 mt-4">
-              <button
-                onClick={handleFacebookLogin}
-                className="flex items-center justify-center bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
-              >
-                <FaFacebook className="mr-2" />
-                Facebook
-              </button>
-              <button
-                onClick={handleGoogleLogin}
-                className="flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700"
-              >
-                <FaGoogle className="mr-2" />
-                Google
-              </button>
-            </div>
-
-            <p className="text-center mt-4 text-black">
-              {isLogin ? (
-                <>Don't have an account? <span className="text-green-500" onClick={handleSwitchForm}>Sign up</span></>
-              ) : (
-                <>Already have an account? <span className="text-green-500" onClick={handleSwitchForm}>Log in</span></>
-              )}
-            </p>
+            {formMode === "login" ? (
+              <p className="text-center mt-4 text-black text-sm">
+                Belum punya akun?{" "}
+                <span
+                  className="text-green-500 hover:underline cursor-pointer"
+                  onClick={() => handleSwitchForm("register")}
+                >
+                  Sign up
+                </span>{" "}
+                |{" "}
+                <span
+                  className="text-green-500 hover:underline cursor-pointer"
+                  onClick={() => handleSwitchForm("forgot")}
+                >
+                  Lupa kata sandi?
+                </span>
+              </p>
+            ) : formMode === "register" ? (
+              <p className="text-center mt-4 text-black text-sm">
+                Sudah punya akun?{" "}
+                <span
+                  className="text-green-500 hover:underline cursor-pointer"
+                  onClick={() => handleSwitchForm("login")}
+                >
+                  Log in
+                </span>
+              </p>
+            ) : null}
           </div>
         </div>
       )}

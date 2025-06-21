@@ -178,7 +178,7 @@ const NewsArticle = () => {
                     {/* Image */}
                     <div className="w-full md:w-56 h-48 flex-shrink-0 relative group">
                       <img
-                        src={news.image}
+                        src={news.image?.trim() ? news.image.trim() : "https://source.unsplash.com/600x400/?news"}
                         alt={news.title}
                         className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-300"
                         onError={(e) => {

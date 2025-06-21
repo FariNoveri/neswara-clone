@@ -1,300 +1,272 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebaseconfig';
-import { 
-  collection, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  orderBy, 
+import { auth, db } from '../../firebaseconfig';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { useNavigate } from 'react-router-dom';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  orderBy,
   query,
-  serverTimestamp 
+  serverTimestamp,
+  collectionGroup,
+  where
 } from 'firebase/firestore';
-import { 
-  PlusCircle, 
-  Edit3, 
-  Trash2, 
-  Eye, 
-  MessageCircle, 
-  Calendar, 
-  User, 
-  Save, 
-  X, 
-  Search,
+import {
+  PlusCircle,
+  Edit3,
+  Trash2,
+  Eye,
+  MessageCircle,
+  User,
+  LogOut,
   BarChart3,
   FileText,
   Users
 } from 'lucide-react';
+import UnauthorizedModal from './UnauthorizedModal';
+import NewsModal from './NewsModal';
+import StatCard from './StatCard';
+import UserManagement from './UserManagement';
+import CommentManagement from './CommentManagement';
+import TrendsChart from './TrendsChart';
 
-// Pindahkan NewsModal ke luar komponen utama untuk menghindari re-render
-const NewsModal = ({ 
-  showModal, 
-  setShowModal, 
-  editingNews, 
-  formData, 
-  setFormData, 
-  handleSubmit, 
-  resetForm, 
-  loading 
-}) => {
-  if (!showModal) return null;
-
-  return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">
-            {editingNews ? 'Edit Berita' : 'Tambah Berita Baru'}
-          </h3>
-          <button
-            onClick={() => {
-              setShowModal(false);
-              resetForm();
-            }}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="h-6 w-6" />
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Judul Berita
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.judul}
-              onChange={(e) => setFormData(prev => ({...prev, judul: e.target.value}))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Masukkan judul berita..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Kategori
-            </label>
-            <select
-              required
-              value={formData.kategori}
-              onChange={(e) => setFormData(prev => ({...prev, kategori: e.target.value}))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              <option value="">Pilih Kategori</option>
-              <option value="Politik">Politik</option>
-              <option value="Ekonomi">Ekonomi</option>
-              <option value="Olahraga">Olahraga</option>
-              <option value="Teknologi">Teknologi</option>
-              <option value="Hiburan">Hiburan</option>
-              <option value="Kesehatan">Kesehatan</option>
-              <option value="Pendidikan">Pendidikan</option>
-              <option value="Daerah">Daerah</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Penulis
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.author}
-              onChange={(e) => setFormData(prev => ({...prev, author: e.target.value}))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Nama penulis..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              URL Gambar
-            </label>
-            <input
-              type="url"
-              value={formData.gambar}
-              onChange={(e) => setFormData(prev => ({...prev, gambar: e.target.value}))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="https://example.com/image.jpg"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Ringkasan
-            </label>
-            <textarea
-              value={formData.ringkasan}
-              onChange={(e) => setFormData(prev => ({...prev, ringkasan: e.target.value}))}
-              rows="3"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Ringkasan singkat berita..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Konten Berita
-            </label>
-            <textarea
-              required
-              value={formData.konten}
-              onChange={(e) => setFormData(prev => ({...prev, konten: e.target.value}))}
-              rows="6"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Tulis konten berita lengkap..."
-            />
-          </div>
-          
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={() => {
-                setShowModal(false);
-                resetForm();
-              }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
-            >
-              Batal
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={loading}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              {loading ? 'Menyimpan...' : 'Simpan'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Komponen StatCard juga dipindahkan keluar
-const StatCard = ({ icon: Icon, title, value, color }) => (
-  <div className="bg-white rounded-lg shadow-md p-6 border-l-4" style={{ borderLeftColor: color }}>
-    <div className="flex items-center">
-      <div className="flex-shrink-0">
-        <Icon className="h-8 w-8" style={{ color }} />
-      </div>
-      <div className="ml-4">
-        <p className="text-sm font-medium text-gray-500">{title}</p>
-        <p className="text-2xl font-semibold text-gray-900">{value}</p>
-      </div>
-    </div>
-  </div>
-);
+// TODO: Update with actual admin emails
+const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
 const AdminDashboard = () => {
+  const [user, loading] = useAuthState(auth);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [showUnauthorizedModal, setShowUnauthorizedModal] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [news, setNews] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingNews, setEditingNews] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [filterTitle, setFilterTitle] = useState('');
+  const [filterCategory, setFilterCategory] = useState(''); // Dropdown
+  const [filterAuthor, setFilterAuthor] = useState('');
+  const [filterDate, setFilterDate] = useState('all'); // Options: all, last7days, last30days, custom
+  const [filterCustomDate, setFilterCustomDate] = useState(''); // Single date for custom
+  const [filterSortBy, setFilterSortBy] = useState('none'); // Options: none, views-desc, comments-desc
+  const [categories, setCategories] = useState(['']); // Unique categories
   const [stats, setStats] = useState({
     totalNews: 0,
     totalComments: 0,
-    totalViews: 0
+    totalViews: 0,
+    totalUsers: 0
   });
 
-  // Form state
+  const navigate = useNavigate();
+
   const [formData, setFormData] = useState({
     judul: '',
     konten: '',
     kategori: '',
     author: '',
     gambar: '',
-    ringkasan: ''
+    ringkasan: '',
+    gambarDeskripsi: ''
   });
 
-  // Fetch news from Firebase
-  const fetchNews = async () => {
-    setLoading(true);
-    try {
-      const q = query(collection(db, "news"), orderBy("createdAt", "desc"));
-      const snapshot = await getDocs(q);
-      const newsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setNews(newsData);
-      
-      // Calculate stats
-      const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
-      const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
-      setStats({
-        totalNews: newsData.length,
-        totalComments,
-        totalViews
-      });
-    } catch (error) {
-      console.error("Error fetching news:", error);
+  useEffect(() => {
+    if (!loading && user) {
+      const userEmail = user.email;
+      if (ADMIN_EMAILS.includes(userEmail)) {
+        setIsAuthorized(true);
+      } else {
+        setIsAuthorized(false);
+        setShowUnauthorizedModal(true);
+      }
+    } else if (!loading && !user) {
+      navigate('/');
     }
-    setLoading(false);
+  }, [user, loading, navigate]);
+
+  const handleUnauthorizedClose = async () => {
+    try {
+      await auth.signOut();
+      setShowUnauthorizedModal(false);
+      navigate('/');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      navigate('/');
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    try {
+      await auth.signOut();
+      navigate('/');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      navigate('/');
+    }
+  };
+
+  const fetchNews = async () => {
+    setNewsLoading(true);
+    try {
+      const q = query(collection(db, 'news'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      let newsData = await Promise.all(snapshot.docs.map(async (doc) => {
+        const newsItem = { id: doc.id, ...doc.data() };
+        // Fetch comment count for this news item
+        const commentsQuery = query(collection(db, 'news', doc.id, 'comments'));
+        const commentsSnapshot = await getDocs(commentsQuery);
+        newsItem.komentar = commentsSnapshot.size;
+        return newsItem;
+      }));
+
+      // Populate unique categories
+      const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
+      setCategories(['', ...uniqueCategories]);
+
+      // Apply filters
+      if (filterTitle) {
+        newsData = newsData.filter(item =>
+          item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
+        );
+      }
+      if (filterCategory) {
+        newsData = newsData.filter(item =>
+          item.kategori?.toLowerCase() === filterCategory.toLowerCase()
+        );
+      }
+      if (filterAuthor) {
+        newsData = newsData.filter(item =>
+          item.author?.toLowerCase().includes(filterAuthor.toLowerCase())
+        );
+      }
+      if (filterDate === 'last7days') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        newsData = newsData.filter(item => item.createdAt?.toDate() >= sevenDaysAgo);
+      } else if (filterDate === 'last30days') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        newsData = newsData.filter(item => item.createdAt?.toDate() >= thirtyDaysAgo);
+      } else if (filterDate === 'custom' && filterCustomDate) {
+        const customDate = new Date(filterCustomDate);
+        newsData = newsData.filter(item => {
+          const itemDate = item.createdAt?.toDate();
+          return itemDate && itemDate.toDateString() === customDate.toDateString();
+        });
+      }
+
+      // Apply sorting
+      switch (filterSortBy) {
+        case 'views-desc':
+          newsData.sort((a, b) => (b.views || 0) - (a.views || 0));
+          break;
+        case 'comments-desc':
+          newsData.sort((a, b) => (b.komentar || 0) - (a.komentar || 0));
+          break;
+        default:
+          break;
+      }
+
+      setNews(newsData);
+
+      const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
+      const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
+      setStats(prev => ({
+        ...prev,
+        totalNews: newsData.length,
+        totalViews,
+        totalComments
+      }));
+    } catch (error) {
+      console.error('Error fetching news:', error);
+    }
+    setNewsLoading(false);
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const usersSnapshot = await getDocs(collection(db, 'users'));
+      const totalUsers = usersSnapshot.size;
+      setStats(prev => ({
+        ...prev,
+        totalUsers
+      }));
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    }
+  };
+
+  const fetchComments = async () => {
+    try {
+      const q = query(collectionGroup(db, 'comments'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      setStats(prev => ({
+        ...prev,
+        totalComments: snapshot.size
+      }));
+    } catch (error) {
+      console.error('Error fetching comments:', error.message);
+      if (error.message.includes('index')) {
+        console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+      }
+    }
   };
 
   useEffect(() => {
-    fetchNews();
-  }, []);
+    if (isAuthorized) {
+      fetchNews();
+      fetchUsers();
+      fetchComments();
+    }
+  }, [isAuthorized, filterTitle, filterCategory, filterAuthor, filterDate, filterCustomDate, filterSortBy]);
 
-  // Handle form submit
   const handleSubmit = async () => {
-    setLoading(true);
-    
-    // Basic validation
+    setNewsLoading(true);
+
     if (!formData.judul || !formData.konten || !formData.kategori || !formData.author) {
       alert('Mohon lengkapi semua field yang wajib diisi');
-      setLoading(false);
+      setNewsLoading(false);
       return;
     }
-    
+
     try {
       if (editingNews) {
-        // Update existing news
-        await updateDoc(doc(db, "news", editingNews.id), {
+        await updateDoc(doc(db, 'news', editingNews.id), {
           ...formData,
           updatedAt: serverTimestamp()
         });
       } else {
-        // Add new news
-        await addDoc(collection(db, "news"), {
+        await addDoc(collection(db, 'news'), {
           ...formData,
           createdAt: serverTimestamp(),
           views: 0,
           komentar: 0
         });
       }
-      
+
       resetForm();
       fetchNews();
       setShowModal(false);
     } catch (error) {
-      console.error("Error saving news:", error);
+      console.error('Error saving news:', error);
     }
-    setLoading(false);
+    setNewsLoading(false);
   };
 
-  // Handle delete
-  const handleDelete = async (id) => {
+  const handleDeleteNews = async id => {
     if (window.confirm('Apakah Anda yakin ingin menghapus berita ini?')) {
       try {
-        await deleteDoc(doc(db, "news", id));
+        await deleteDoc(doc(db, 'news', id));
         fetchNews();
       } catch (error) {
-        console.error("Error deleting news:", error);
+        console.error('Error deleting news:', error);
       }
     }
   };
 
-  // Handle edit
-  const handleEdit = (newsItem) => {
+  const handleEdit = newsItem => {
     setEditingNews(newsItem);
     setFormData({
       judul: newsItem.judul || '',
@@ -302,12 +274,12 @@ const AdminDashboard = () => {
       kategori: newsItem.kategori || '',
       author: newsItem.author || '',
       gambar: newsItem.gambar || '',
-      ringkasan: newsItem.ringkasan || ''
+      ringkasan: newsItem.ringkasan || '',
+      gambarDeskripsi: newsItem.gambarDeskripsi || ''
     });
     setShowModal(true);
   };
 
-  // Reset form
   const resetForm = () => {
     setFormData({
       judul: '',
@@ -315,21 +287,41 @@ const AdminDashboard = () => {
       kategori: '',
       author: '',
       gambar: '',
-      ringkasan: ''
+      ringkasan: '',
+      gambarDeskripsi: ''
     });
     setEditingNews(null);
   };
 
-  // Filter news based on search
-  const filteredNews = news.filter(item => 
-    item.judul?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.kategori?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.author?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredNews = news;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Memuat...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized && user) {
+    return (
+      <UnauthorizedModal
+        show={showUnauthorizedModal}
+        onClose={handleUnauthorizedClose}
+        userEmail={user?.email}
+      />
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
@@ -339,10 +331,25 @@ const AdminDashboard = () => {
             </div>
             <div className="flex items-center space-x-4">
               <div className="text-sm text-gray-500">
-                Welcome, Admin
+                Welcome, {user?.displayName || user?.email}
               </div>
+              <button
+                onClick={handleAdminLogout}
+                className="text-sm text-gray-500 hover:text-gray-700 flex items-center"
+              >
+                <LogOut className="h-4 w-4 mr-1" />
+                Logout
+              </button>
               <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                <User className="h-4 w-4 text-white" />
+                {user?.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt="Profile"
+                    className="w-8 h-8 rounded-full"
+                  />
+                ) : (
+                  <User className="h-4 w-4 text-white" />
+                )}
               </div>
             </div>
           </div>
@@ -350,14 +357,14 @@ const AdminDashboard = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Navigation Tabs */}
         <div className="mb-8">
           <nav className="flex space-x-8">
             {[
               { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
               { id: 'news', label: 'Kelola Berita', icon: FileText },
-              { id: 'comments', label: 'Komentar', icon: MessageCircle }
-            ].map((tab) => (
+              { id: 'users', label: 'Kelola Pengguna', icon: Users },
+              { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle }
+            ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -374,10 +381,9 @@ const AdminDashboard = () => {
           </nav>
         </div>
 
-        {/* Dashboard Tab */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <StatCard
                 icon={FileText}
                 title="Total Berita"
@@ -396,16 +402,29 @@ const AdminDashboard = () => {
                 value={stats.totalViews}
                 color="#F59E0B"
               />
+              <StatCard
+                icon={Users}
+                title="Total Pengguna"
+                value={stats.totalUsers}
+                color="#EF4444"
+              />
             </div>
+
+            <TrendsChart isAuthorized={isAuthorized} activeTab={activeTab} />
 
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-lg font-semibold mb-4">Berita Terbaru</h3>
               <div className="space-y-3">
-                {news.slice(0, 5).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                {news.slice(0, 5).map(item => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                  >
                     <div className="flex-1">
-                      <h4 className="font-medium text-gray-900">{item.judul}</h4>
-                      <p className="text-sm text-gray-500">
+                      <h4 className="font-medium text-gray-900 max-w-xs truncate">
+                        {item.judul}
+                      </h4>
+                      <p className="text-sm text-gray-500 max-w-xs truncate">
                         {item.kategori} • {item.author} • {item.views || 0} views
                       </p>
                     </div>
@@ -421,20 +440,61 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* News Management Tab */}
         {activeTab === 'news' && (
           <div className="space-y-6">
-            {/* Header with search and add button */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
-              <div className="relative flex-1 max-w-lg">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
                 <input
                   type="text"
-                  placeholder="Cari berita..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Filter by Berita"
+                  value={filterTitle}
+                  onChange={(e) => setFilterTitle(e.target.value)}
+                  className="px-3 py-2 border rounded-lg"
                 />
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  className="px-3 py-2 border rounded-lg"
+                >
+                  <option value="">Pilih Kategori</option>
+                  {categories.map((cat, index) => (
+                    <option key={index} value={cat}>{cat || 'Tanpa Kategori'}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  placeholder="Filter by Penulis"
+                  value={filterAuthor}
+                  onChange={(e) => setFilterAuthor(e.target.value)}
+                  className="px-3 py-2 border rounded-lg"
+                />
+                <select
+                  value={filterDate}
+                  onChange={(e) => setFilterDate(e.target.value)}
+                  className="px-3 py-2 border rounded-lg"
+                >
+                  <option value="all">Semua Tanggal</option>
+                  <option value="last7days">7 Hari Terakhir</option>
+                  <option value="last30days">30 Hari Terakhir</option>
+                  <option value="custom">Tanggal Kustom</option>
+                </select>
+                {filterDate === 'custom' && (
+                  <input
+                    type="date"
+                    value={filterCustomDate}
+                    onChange={(e) => setFilterCustomDate(e.target.value)}
+                    className="px-3 py-2 border rounded-lg"
+                  />
+                )}
+                <select
+                  value={filterSortBy}
+                  onChange={(e) => setFilterSortBy(e.target.value)}
+                  className="px-3 py-2 border rounded-lg"
+                >
+                  <option value="none">Sort by Stats</option>
+                  <option value="views-desc">Views (Desc)</option>
+                  <option value="comments-desc">Komentar (Desc)</option>
+                </select>
               </div>
               <button
                 onClick={() => setShowModal(true)}
@@ -445,7 +505,6 @@ const AdminDashboard = () => {
               </button>
             </div>
 
-            {/* News Table */}
             <div className="bg-white rounded-lg shadow-md overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -472,7 +531,7 @@ const AdminDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {loading ? (
+                    {newsLoading ? (
                       <tr>
                         <td colSpan="6" className="px-6 py-4 text-center">
                           <div className="flex justify-center">
@@ -487,7 +546,7 @@ const AdminDashboard = () => {
                         </td>
                       </tr>
                     ) : (
-                      filteredNews.map((item) => (
+                      filteredNews.map(item => (
                         <tr key={item.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4">
                             <div className="flex items-center">
@@ -505,6 +564,11 @@ const AdminDashboard = () => {
                                 <div className="text-sm text-gray-500 max-w-xs truncate">
                                   {item.ringkasan}
                                 </div>
+                                {item.gambarDeskripsi && (
+                                  <div className="text-xs text-gray-400 italic">
+                                    {item.gambarDeskripsi}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -513,9 +577,7 @@ const AdminDashboard = () => {
                               {item.kategori}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
-                            {item.author}
-                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-900">{item.author}</td>
                           <td className="px-6 py-4 text-sm text-gray-500">
                             {item.createdAt?.seconds
                               ? new Date(item.createdAt.seconds * 1000).toLocaleDateString()
@@ -538,7 +600,7 @@ const AdminDashboard = () => {
                                 <Edit3 className="h-4 w-4" />
                               </button>
                               <button
-                                onClick={() => handleDelete(item.id)}
+                                onClick={() => handleDeleteNews(item.id)}
                                 className="text-red-600 hover:text-red-900"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -555,30 +617,21 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Comments Tab */}
-        {activeTab === 'comments' && (
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h3 className="text-lg font-semibold mb-4">Manajemen Komentar</h3>
-            <div className="text-center py-8 text-gray-500">
-              <MessageCircle className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>Fitur manajemen komentar akan segera hadir</p>
-              <p className="text-sm">Saat ini fokus pada pengelolaan berita</p>
-            </div>
-          </div>
-        )}
-      </div>
+        {activeTab === 'users' && <UserManagement adminEmails={ADMIN_EMAILS} />}
 
-      {/* Modal */}
-      <NewsModal
-        showModal={showModal}
-        setShowModal={setShowModal}
-        editingNews={editingNews}
-        formData={formData}
-        setFormData={setFormData}
-        handleSubmit={handleSubmit}
-        resetForm={resetForm}
-        loading={loading}
-      />
+        {activeTab === 'comments' && <CommentManagement />}
+
+        <NewsModal
+          showModal={showModal}
+          setShowModal={setShowModal}
+          editingNews={editingNews}
+          formData={formData}
+          setFormData={setFormData}
+          handleSubmit={handleSubmit}
+          resetForm={resetForm}
+          loading={newsLoading}
+        />
+      </div>
     </div>
   );
 };

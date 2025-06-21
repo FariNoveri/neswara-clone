@@ -1,45 +1,45 @@
-import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-
-// Komponen publik
 import Navbar from "./component/navbar";
+import Footer from "./component/footer";
 import NewsSection from "./component/newssection";
 import HeroSection from "./component/herosection";
+import NewsPage from "./component/newspage";
 import LiveNewsSection from "./component/livenewsection";
 import LatestNewsSection from "./component/latestnewsection";
-import Footer from "./component/footer";
-import Article from "./component/newsarticle";
 import Profile from "./component/profile";
-
-// Komponen admin (cuma 1)
 import AdminDashboard from "./component/admin/AdminDashboard";
+import ViewBerita from "./component/view/ViewBerita";
+import NotFound from "./component/NotFound";
+import NewsDetail from "./component/Pages/NewsDetail";
+import { AuthProvider } from "./component/Hooks/useAuth";
+import "react-quill/dist/quill.snow.css";
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        {/* Halaman Utama */}
-        <Route
-          path="/"
-          element={
-            <>
-              <Navbar />
-              <NewsSection />
-              <HeroSection />
-              <LiveNewsSection />
-              <LatestNewsSection />
-              <Footer />
-            </>
-          }
-        />
-
-        {/* Profil Pengguna */}
-        <Route path="/profile" element={<Profile />} />
-
-        {/* Halaman Admin Dashboard */}
-        <Route path="/admin" element={<AdminDashboard />} />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Navbar />
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <>
+                <NewsSection />
+                <HeroSection />
+                <NewsPage />
+                <LiveNewsSection />
+                <LatestNewsSection />
+              </>
+            }
+          />
+          <Route path="/berita/:id" element={<NewsDetail />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+        <Footer />
+      </Router>
+    </AuthProvider>
   );
 }
 

@@ -4,21 +4,23 @@ import "swiper/css";
 import "swiper/css/navigation";
 import { Navigation } from "swiper/modules";
 import { db } from "../firebaseconfig";
-import { 
-  collection, 
-  getDocs, 
-  orderBy, 
+import {
+  collection,
+  getDocs,
+  orderBy,
   query,
   updateDoc,
   doc,
-  increment
+  increment,
 } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 
 const NewsSection = () => {
   const [newsData, setNewsData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate(); // ✅ Pindahkan ke dalam komponen
 
-  // Fetch news from Firebase - menggunakan pola yang sama dengan AdminDashboard
+  // Ambil data berita
   const fetchNews = async () => {
     setLoading(true);
     try {
@@ -39,23 +41,16 @@ const NewsSection = () => {
     fetchNews();
   }, []);
 
-  // Handle news click to increment views - sama seperti AdminDashboard
+  // Handle klik berita
   const handleNewsClick = async (newsId) => {
     try {
       await updateDoc(doc(db, "news", newsId), {
-        views: increment(1)
+        views: increment(1),
       });
-      // Update local state
-      setNewsData(prevData => 
-        prevData.map(item => 
-          item.id === newsId 
-            ? { ...item, views: (item.views || 0) + 1 }
-            : item
-        )
-      );
     } catch (error) {
       console.error("Error updating views:", error);
     }
+    navigate(`/berita/${newsId}`);
   };
 
   if (loading) {
@@ -73,11 +68,11 @@ const NewsSection = () => {
     return <div className="text-center py-10">Tidak ada berita tersedia</div>;
   }
 
-  const categories = [...new Set(newsData.map(item => item.kategori || "Umum"))];
+  const categories = [...new Set(newsData.map((item) => item.kategori || "Umum"))];
 
   return (
     <div className="container mx-auto px-4 sm:px-6 lg:px-16 mt-6">
-      {/* Swiper */}
+      {/* Swiper kategori */}
       <Swiper
         modules={[Navigation]}
         slidesPerView={1.5}
@@ -99,18 +94,22 @@ const NewsSection = () => {
         ))}
       </Swiper>
 
-      {/* Grid Berita */}
+      {/* Grid berita */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 grid-rows-3 lg:grid-rows-1 gap-4 sm:gap-6 mt-6 mx-auto max-w-7xl">
-        {/* Kolom Kiri - 3 Gambar Berita */}
+        {/* Kolom kiri */}
         <div className="flex flex-col space-y-4 lg:col-span-1">
           {newsData.slice(0, 3).map((item, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className="relative h-[100px] sm:h-[130px] lg:h-[160px] cursor-pointer"
               onClick={() => handleNewsClick(item.id)}
             >
               <img
-                src={item.gambar}
+                src={
+                  item.gambar?.trim()
+                    ? item.gambar.trim()
+                    : "https://source.unsplash.com/600x400/?news"
+                }
                 alt={`News ${index + 1}`}
                 className="w-full h-full object-cover rounded-lg"
               />
@@ -121,10 +120,10 @@ const NewsSection = () => {
           ))}
         </div>
 
-        {/* Kolom Tengah - Gambar Besar (Utama) */}
+        {/* Kolom tengah */}
         <div className="lg:col-span-3 flex flex-col items-center">
           {newsData[3] && (
-            <div 
+            <div
               className="relative w-full h-[300px] sm:h-[400px] lg:h-[510px] cursor-pointer"
               onClick={() => handleNewsClick(newsData[3].id)}
             >
@@ -145,11 +144,11 @@ const NewsSection = () => {
           </h2>
         </div>
 
-        {/* Kolom Kanan - 3 Gambar Berita Lainnya */}
+        {/* Kolom kanan */}
         <div className="flex flex-col space-y-4 lg:col-span-1">
           {newsData.slice(1, 4).map((item, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className="relative h-[100px] sm:h-[130px] lg:h-[160px] cursor-pointer"
               onClick={() => handleNewsClick(item.id)}
             >
@@ -166,7 +165,7 @@ const NewsSection = () => {
         </div>
       </div>
 
-      {/* Iklan Persegi Panjang */}
+      {/* Iklan */}
       <div className="mt-4 sm:mt-6 flex justify-center">
         <div className="w-full max-w-7xl bg-gray-200 p-4 sm:p-6 rounded-lg shadow-lg text-center">
           <h3 className="text-base sm:text-xl font-bold">Ingin mengiklankan produk Anda?</h3>

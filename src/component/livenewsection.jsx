@@ -153,7 +153,7 @@ const LiveNewsSection = () => {
                 transition={{ duration: 0.5 }}
                 className="absolute inset-0 flex flex-col justify-end p-6"
                 style={{
-                  backgroundImage: `linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.7)), url(${newsList[activeIndex]?.image})`,
+                  backgroundImage: `linear-gradient(...), url(${newsList[activeIndex]?.image?.trim() || "https://source.unsplash.com/600x400/?news"})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                 }}
@@ -230,15 +230,20 @@ const LiveNewsSection = () => {
                     onClick={() => setActiveIndex(index)}
                   >
                     <div className="w-12 h-12 bg-gray-600 flex items-center justify-center rounded-md mr-4 flex-shrink-0">
-                      {news.image ? (
-                        <img 
-                          src={news.image} 
-                          alt="" 
-                          className="w-full h-full object-cover rounded-md"
-                        />
-                      ) : (
-                        <span className="text-lg">📰</span>
-                      )}
+                      {news.image?.trim() ? (
+  <img 
+    src={news.image.trim()} 
+    alt="" 
+    className="w-full h-full object-cover rounded-md"
+  />
+) : (
+  <img 
+    src="https://source.unsplash.com/600x400/?news" 
+    alt="default" 
+    className="w-full h-full object-cover rounded-md"
+  />
+)}
+
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium leading-tight mb-1 line-clamp-2">
