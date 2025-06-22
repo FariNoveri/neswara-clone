@@ -1,23 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle, FaChevronRight } from "react-icons/fa";
-import { IoClose } from "react-icons/io5";
-import { auth } from "../firebaseconfig";
-import { 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut,
-  sendPasswordResetEmail
-} from "firebase/auth";
-import logo from "../assets/neswara-logo.png";
-import { registerUser, loginUser, loginWithGoogle, loginWithFacebook, logoutUser } from "./auth";
-import { useNavigate } from "react-router-dom";
+import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEye, FaEyeSlash, FaFacebook, FaGoogle, FaChevronDown, FaBell, FaHome, FaNewspaper, FaGlobe } from "react-icons/fa";
+import { Link, useNavigate } from "react-router-dom";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, signOut, onAuthStateChanged } from "firebase/auth";
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [openSubmenu, setOpenSubmenu] = useState(null);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [activeSubMenu, setActiveSubMenu] = useState(null);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false); // State untuk dropdown profil
+  const [isMoreDropdownOpen, setIsMoreDropdownOpen] = useState(false); // State untuk dropdown "LAINNYA"
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formMode, setFormMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -30,109 +19,162 @@ const Navbar = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  const auth = getAuth();
   const navigate = useNavigate();
+  const profileDropdownRef = useRef(null);
+  const moreDropdownRef = useRef(null);
 
-  const timeoutRef = useRef(null);
-  const subMenuTimeoutRef = useRef(null);
-
-  const navbarItems = [
-    {
-      name: "Atomic Design",
-      path: "/atomicdesign",
-      children: [
-        {
-          name: "Atoms",
-          path: "/atomicdesign/atoms",
-          children: ["Button", "Icon", "Logo", "NavLink"].map((item) => ({
-            name: item,
-            path: `/atomicdesign/atoms/${item.toLowerCase()}`,
-          })),
-        },
-        {
-          name: "Molecules",
-          path: "/atomicdesign/molecules",
-          children: ["SearchBar", "UserMenu", "MobileMenuButton"].map((item) => ({
-            name: item,
-            path: `/atomicdesign/molecules/${item.toLowerCase()}`,
-          })),
-        },
-        {
-          name: "Organisms",
-          path: "/atomicdesign/organisms",
-          children: ["NavbarAtomicDesign"].map((item) => ({
-            name: item,
-            path: `/atomicdesign/organisms/${item.toLowerCase()}`,
-          })),
-        },
-      ],
-    },
+  // Menu items
+  const mainMenuItems = [
+    { name: "BERANDA", path: "/", icon: FaHome },
+    { name: "NASIONAL", path: "/nasional", icon: FaNewspaper },
+    { name: "INTERNASIONAL", path: "/internasional", icon: FaGlobe },
+    { name: "OLAHRAGA", path: "/olahraga" },
+    { name: "EKONOMI", path: "/ekonomi" },
+    { name: "TEKNOLOGI", path: "/teknologi" },
+    { name: "LIFESTYLE", path: "/lifestyle" },
+    { name: "DAERAH", path: "/daerah" },
   ];
 
-  const resetTimeout = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    timeoutRef.current = setTimeout(() => {
-      signOut(auth)
-        .then(() => {
-          navigate('/');
-          alert("Session expired. You have been logged out.");
-        })
-        .catch((error) => {
-          console.error("Error signing out:", error);
-          setError("Failed to log out: " + error.message);
-        });
-    }, 5 * 60 * 1000);
-  };
+  const dropdownItems = [
+    { name: "PENDIDIKAN", path: "/pendidikan" },
+    { name: "KESEHATAN", path: "/kesehatan" },
+    { name: "OTOMOTIF", path: "/otomotif" },
+    { name: "WISATA", path: "/wisata" },
+    { name: "KULINER", path: "/kuliner" },
+    { name: "ENTERTAINMENT", path: "/entertainment" },
+  ];
 
-  const handleUserActivity = () => {
-    resetTimeout();
-  };
-
-  const handleMouseEnter = (menuName) => {
-    if (subMenuTimeoutRef.current) clearTimeout(subMenuTimeoutRef.current);
-    setActiveSubMenu(menuName);
-  };
-
-  const handleMouseLeave = () => {
-    subMenuTimeoutRef.current = setTimeout(() => setActiveSubMenu(null), 300);
-  };
-
+  // Check auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-      if (user) {
-        resetTimeout();
-        window.addEventListener('mousemove', handleUserActivity);
-        window.addEventListener('keydown', handleUserActivity);
-        window.addEventListener('click', handleUserActivity);
-      } else {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
-        window.removeEventListener('mousemove', handleUserActivity);
-        window.removeEventListener('keydown', handleUserActivity);
-        window.removeEventListener('click', handleUserActivity);
-      }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
     });
+    return () => unsubscribe();
+  }, [auth]);
 
-    return () => {
-      unsubscribe();
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      if (subMenuTimeoutRef.current) {
-        clearTimeout(subMenuTimeoutRef.current);
-      }
-      window.removeEventListener('mousemove', handleUserActivity);
-      window.removeEventListener('keydown', handleUserActivity);
-      window.removeEventListener('click', handleUserActivity);
+  // Scroll effect
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 10);
     };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target)) {
+        setIsProfileDropdownOpen(false);
+      }
+      if (moreDropdownRef.current && !moreDropdownRef.current.contains(event.target)) {
+        setIsMoreDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Handle login
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      setSuccess("Login berhasil!");
+      handleCloseModal();
+      navigate("/");
+    } catch (err) {
+      setError(err.message || "Login gagal. Periksa email dan password.");
+    }
+    setLoading(false);
+  };
+
+  // Handle register
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    if (password !== confirmPassword) {
+      setError("Password dan konfirmasi password tidak cocok.");
+      setLoading(false);
+      return;
+    }
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      setSuccess("Pendaftaran berhasil! Silakan login.");
+      handleSwitchForm("login");
+    } catch (err) {
+      setError(err.message || "Pendaftaran gagal. Periksa data Anda.");
+    }
+    setLoading(false);
+  };
+
+  // Handle forgot password
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setSuccess("Link reset password telah dikirim ke email Anda.");
+    } catch (err) {
+      setError(err.message || "Gagal mengirim link reset. Periksa email Anda.");
+    }
+    setLoading(false);
+  };
+
+  // Handle Google login
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      setSuccess("Login dengan Google berhasil!");
+      handleCloseModal();
+      navigate("/");
+    } catch (err) {
+      setError(err.message || "Login dengan Google gagal.");
+    }
+    setLoading(false);
+  };
+
+  // Handle Facebook login
+  const handleFacebookLogin = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const provider = new FacebookAuthProvider();
+      await signInWithPopup(auth, provider);
+      setSuccess("Login dengan Facebook berhasil!");
+      handleCloseModal();
+      navigate("/");
+    } catch (err) {
+      setError(err.message || "Login dengan Facebook gagal.");
+    }
+    setLoading(false);
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      navigate("/");
+    } catch (err) {
+      setError(err.message || "Logout gagal.");
+    }
+  };
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
+    setIsProfileDropdownOpen(false);
+    setIsMoreDropdownOpen(false);
   };
 
   const handleOpenModal = (mode = "login") => {
@@ -144,16 +186,16 @@ const Navbar = () => {
     setEmail("");
     setPassword("");
     setConfirmPassword("");
+    setIsProfileDropdownOpen(false);
+    setIsMoreDropdownOpen(false);
   };
 
   const handleCloseModal = () => {
     setIsClosing(true);
     setTimeout(() => {
       setIsModalOpen(false);
+      setIsClosing(false);
       setFormMode("login");
-      setEmail("");
-      setPassword("");
-      setConfirmPassword("");
       setError("");
       setSuccess("");
     }, 300);
@@ -172,490 +214,496 @@ const Navbar = () => {
     }, 300);
   };
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-    setLoading(true);
-
-    if (!email || !password || !confirmPassword) {
-      setError("Semua kolom harus diisi.");
-      setLoading(false);
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Kata sandi tidak cocok.");
-      setLoading(false);
-      return;
-    }
-    if (password.length < 6) {
-      setError("Kata sandi harus minimal 6 karakter.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      await registerUser(email, password);
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      console.error("Register error:", error.code, error.message);
-      switch (error.code) {
-        case "auth/email-already-in-use":
-          setError("Email sudah digunakan.");
-          break;
-        case "auth/invalid-email":
-          setError("Email tidak valid.");
-          break;
-        default:
-          setError("Gagal mendaftar: " + error.message);
-      }
-    }
-    setLoading(false);
-  };
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-    setLoading(true);
-
-    if (!email || !password) {
-      setError("Email dan kata sandi harus diisi.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      await loginUser(email, password);
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      console.error("Login error:", error.code, error.message);
-      switch (error.code) {
-        case "auth/user-not-found":
-          setError("Email tidak ditemukan.");
-          break;
-        case "auth/wrong-password":
-          setError("Kata sandi salah.");
-          break;
-        case "auth/invalid-email":
-          setError("Email tidak valid.");
-          break;
-        default:
-          setError("Gagal login: " + error.message);
-      }
-    }
-    setLoading(false);
-  };
-
-  const handleForgotPassword = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-    setLoading(true);
-
-    if (!email) {
-      setError("Email harus diisi.");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      console.log("Attempting to send password reset email to:", email);
-      await sendPasswordResetEmail(auth, email);
-      setSuccess("Email reset kata sandi telah dikirim. Silakan cek kotak masuk atau folder spam/junk Anda.");
-      setEmail("");
-      console.log("Password reset email sent successfully to:", email);
-    } catch (error) {
-      console.error("Forgot password error:", error.code, error.message);
-      switch (error.code) {
-        case "auth/invalid-email":
-          setError("Email tidak valid.");
-          break;
-        case "auth/user-not-found":
-          setError("Email tidak ditemukan.");
-          break;
-        case "auth/too-many-requests":
-          setError("Terlalu banyak percobaan. Coba lagi nanti.");
-          break;
-        default:
-          setError("Gagal mengirim email reset: " + error.message);
-      }
-    }
-    setLoading(false);
-  };
-
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    try {
-      await loginWithGoogle();
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      console.error("Google login error:", error.code, error.message);
-      setError("Gagal login dengan Google: " + error.message);
-    }
-    setLoading(false);
-  };
-
-  const handleFacebookLogin = async () => {
-    setLoading(true);
-    try {
-      await loginWithFacebook();
-      handleCloseModal();
-      navigate('/profile');
-    } catch (error) {
-      console.error("Facebook login error:", error.code, error.message);
-      setError("Gagal login dengan Facebook: " + error.message);
-    }
-    setLoading(false);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-      navigate('/');
-    } catch (error) {
-      console.error("Logout error:", error.code, error.message);
-      setError("Gagal logout: " + error.message);
-    }
-  };
-
-  useEffect(() => {
-    const handleEsc = (event) => {
-      if (event.key === "Escape") {
-        handleCloseModal();
-      }
-    };
-
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, []);
-
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
   return (
     <>
       <style>
         {`
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+          
+          * {
+            font-family: 'Inter', sans-serif;
+          }
+          
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-20px); }
             to { opacity: 1; transform: translateY(0); }
           }
-          @keyframes slideInFromLeft {
-            from { opacity: 0; transform: translateX(-100%); }
-            to { opacity: 1; transform: translateX(0); }
+          
+          @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
           }
-          @keyframes slideOutToLeft {
-            from { opacity: 1; transform: translateX(0); }
-            to { opacity: 0; transform: translateX(-100%); }
+          
+          .navbar-transition {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           }
+          
+          .menu-item {
+            position: relative;
+            transition: all 0.2s ease;
+          }
+          
+          .menu-item::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 50%;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            transition: all 0.3s ease;
+            transform: translateX(-50%);
+          }
+          
+          .menu-item:hover::after {
+            width: 100%;
+          }
+          
+          .dropdown-menu {
+            animation: slideDown 0.2s ease-out;
+          }
+          
           .mobile-menu {
-            position: fixed;
-            top: 0;
-            left: 0;
-            height: 100vh;
-            width: 70%;
-            max-width: 280px;
-            background: white;
-            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
-            padding: 20px;
-            z-index: 50;
-            transform: translateX(-100%);
-            transition: transform 0.3s ease-out;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
           }
-          .mobile-menu.open {
-            transform: translateX(0);
+          
+          .glass-effect {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
           }
-          @keyframes fadeOut {
-            from { opacity: 1; transform: translateY(0); }
-            to { opacity: 0; transform: translateY(-20px); }
-          }
+          
           .modal-content {
             animation: fadeIn 0.3s ease-out;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
           }
+          
           .modal-content.closing {
             animation: fadeOut 0.3s ease-in;
           }
-          .modal-content.switching {
-            animation: fadeOut 0.3s ease-out;
+          
+          @keyframes fadeOut {
+            from { opacity: 1; transform: scale(1); }
+            to { opacity: 0; transform: scale(0.95); }
           }
-          .modal-content.switching.active {
-            animation: fadeIn 0.3s ease-in;
+          
+          .breaking-news {
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: white;
+            padding: 8px 0;
+            font-size: 13px;
+            font-weight: 500;
           }
-          .text-black { color: black; }
-          .text-green-500 { color: #10B981; }
-          .text-green-500:hover {
-            text-decoration: underline;
-            cursor: pointer;
+          
+          .breaking-news-text {
+            white-space: nowrap;
+            animation: marquee 30s linear infinite;
+          }
+          
+          @keyframes marquee {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
           }
         `}
       </style>
 
-      <nav className="w-full bg-white shadow-md px-4 py-4">
-        <div className="container mx-auto flex justify-between items-center px-4 md:px-20">
-          <div className="flex items-center space-x-4">
-            <button 
-              className="md:hidden text-black text-2xl focus:outline-none"
-              onClick={toggleMobileMenu}
-            >
-              <FaBars />
-            </button>
-            <img src={logo} alt="Neswara Logo" className="h-12 mr-1" />
+      {/* Breaking News Bar */}
+      <div className="breaking-news">
+        <div className="container mx-auto px-4 flex items-center">
+          <span className="bg-white text-blue-600 px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0">
+            BREAKING
+          </span>
+          <div className="overflow-hidden flex-1">
+            <div className="breaking-news-text">
+              🔴 LIVE: Pemilu 2024 - Hasil Quick Count Terbaru | Ekonomi Indonesia Tumbuh 5.2% | Gempa 6.2 SR Guncang Sumatra
+            </div>
           </div>
+        </div>
+      </div>
 
-          <ul className="hidden md:flex space-x-6 font-semibold text-black">
-            <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
-            <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
-            <li className="hover:text-yellow-500 cursor-pointer">REGION</li>
-            <li className="hover:text-yellow-500 cursor-pointer">SPORT</li>
-            <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
-            <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
-            <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
-            <li className="relative">
-              <FaEllipsisH
-                className="text-black text-lg cursor-pointer hover:text-yellow-500"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              />
-              {isDropdownOpen && (
-                <ul className="absolute right-0 mt-2 w-48 bg-white shadow-md rounded-md py-2 z-50">
-                  {navbarItems.map((item, index) => (
-                    <li
-                      key={index}
-                      className="relative group px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                      onMouseEnter={() => handleMouseEnter(item.name)}
-                      onMouseLeave={handleMouseLeave}
-                    >
-                      <span className="flex justify-between items-center">
-                        {item.name}
-                        {item.children && <FaChevronRight className="text-gray-500" />}
-                      </span>
-                      {activeSubMenu === item.name && item.children && (
-                        <ul
-                          className="absolute left-full top-0 w-48 bg-white shadow-md rounded-md py-2"
-                          onMouseEnter={() => handleMouseEnter(item.name)}
-                          onMouseLeave={handleMouseLeave}
+      {/* Main Navbar */}
+      <nav className={`w-full sticky top-0 z-40 navbar-transition ${
+        isScrolled ? 'glass-effect shadow-lg' : 'bg-white shadow-md'
+      }`}>
+        <div className="container mx-auto px-4">
+          {/* Top Bar */}
+          <div className="flex justify-between items-center py-3 border-b border-gray-100">
+            <div className="flex items-center space-x-6">
+              <div className="flex items-center space-x-3">
+                <button
+                  className="md:hidden text-gray-700 text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={toggleMobileMenu}
+                  aria-label="Toggle mobile menu"
+                >
+                  <FaBars />
+                </button>
+                {/* Logo */}
+                <Link to="/" className="flex items-center space-x-2">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+                    <FaNewspaper className="text-white text-lg" />
+                  </div>
+                  <div>
+                    <h1 className="text-xl font-bold text-gray-900">NewsWara</h1>
+                    <p className="text-xs text-gray-500 -mt-1">Berita Terpercaya</p>
+                  </div>
+                </Link>
+              </div>
+              
+              {/* Date & Time */}
+              <div className="hidden lg:block text-sm text-gray-600">
+                <div className="flex items-center space-x-2">
+                  <span>{new Date().toLocaleDateString('id-ID', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Actions */}
+            <div className="flex items-center space-x-4">
+              {/* Search */}
+              <div className="relative hidden sm:block">
+                <input
+                  type="text"
+                  placeholder="Cari berita..."
+                  className="w-64 pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  aria-label="Cari berita"
+                />
+                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              </div>
+              
+              <FaSearch className="sm:hidden text-gray-600 text-lg cursor-pointer hover:text-blue-500 transition-colors" aria-label="Cari" />
+              
+              {/* Notifications */}
+              <div className="relative">
+                <FaBell className="text-gray-600 text-lg cursor-pointer hover:text-blue-500 transition-colors" aria-label="Notifikasi" />
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full text-xs"></span>
+              </div>
+
+              {/* User Menu */}
+              {user ? (
+                <div className="relative" ref={profileDropdownRef}>
+                  <button
+                    onClick={() => {
+                      setIsProfileDropdownOpen(!isProfileDropdownOpen);
+                      setIsMoreDropdownOpen(false); // Tutup dropdown "LAINNYA"
+                    }}
+                    className="flex items-center space-x-2 text-gray-700 hover:text-blue-500 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-label="Menu pengguna"
+                  >
+                    <FaUserCircle className="text-lg" />
+                    <span className="text-sm font-medium">{user.displayName || user.email}</span>
+                  </button>
+                  {isProfileDropdownOpen && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white shadow-lg rounded-lg border border-gray-100 dropdown-menu z-50">
+                      <Link
+                        to="/profile"
+                        className="block px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-500 transition-colors"
+                        onClick={() => setIsProfileDropdownOpen(false)}
+                      >
+                        Profil
+                      </Link>
+                      <button
+                        onClick={() => {
+                          handleLogout();
+                          setIsProfileDropdownOpen(false);
+                        }}
+                        className="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-500 transition-colors"
                         >
-                          {item.children.map((subItem, subIndex) => (
-                            <li
-                              key={subIndex}
-                              className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                              onClick={() => navigate(subItem.path)}
-                            >
-                              {subItem.name}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleOpenModal("login")}
+                  className="bg-blue-500 text-white rounded-full px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-label="Masuk"
+                >
+                  Masuk
+                </button>
               )}
-            </li>
-          </ul>
-
-          <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 transition-all duration-300 ${isMobileMenuOpen ? "block" : "hidden"}`}>
-            <div className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg p-5 transform transition-transform duration-300 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
-              <button className="absolute top-4 right-4 text-2xl text-gray-600" onClick={toggleMobileMenu}>
-                <FaTimes />
-              </button>
-              <ul className="mt-10 space-y-6 font-semibold text-black">
-                <li className="hover:text-yellow-500 cursor-pointer">LIFESTYLE</li>
-                <li className="hover:text-yellow-500 cursor-pointer">EDUCATION</li>
-                <li className="hover:text-yellow-500 cursor-pointer">REGION</li>
-                <li className="hover:text-yellow-500 cursor-pointer">SPORT</li>
-                <li className="hover:text-yellow-500 cursor-pointer">TOUR & TRAVEL</li>
-                <li className="hover:text-yellow-500 cursor-pointer">NATIONAL</li>
-                <li className="hover:text-yellow-500 cursor-pointer">BUSINESS</li>
-              </ul>
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <FaSearch aria-label="Search" className="text-black text-lg cursor-pointer hover:text-yellow-500" />
-            {user ? (
-              <div className="flex items-center space-x-3">
+          {/* Main Menu */}
+          <div className="py-2">
+            <ul className="hidden md:flex items-center space-x-6 text-sm font-medium">
+              {mainMenuItems.map((item, index) => (
+                <li key={index} className="menu-item">
+                  <Link
+                    to={item.path}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-500 transition-colors py-2"
+                  >
+                    {item.icon && <item.icon className="text-sm" />}
+                    <span>{item.name}</span>
+                  </Link>
+                </li>
+              ))}
+              
+              {/* More Menu */}
+              <li className="relative" ref={moreDropdownRef}>
                 <button
-                  className="text-black text-sm font-semibold cursor-pointer hover:text-yellow-500"
-                  onClick={() => navigate('/profile')}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-500 transition-colors py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => {
+                    setIsMoreDropdownOpen(!isMoreDropdownOpen);
+                    setIsProfileDropdownOpen(false); // Tutup dropdown profil
+                  }}
+                  aria-label="Menu lainnya"
                 >
-                  Profile
+                  <span>LAINNYA</span>
+                  <FaChevronDown className="text-xs" />
                 </button>
-                <button
-                  className="text-black text-sm font-semibold cursor-pointer hover:text-yellow-500"
-                  onClick={handleLogout}
-                >
-                  Logout
-                </button>
-              </div>
-            ) : (
-              <FaUserCircle
-                aria-label="User"
-                className="text-black text-2xl cursor-pointer hover:text-yellow-500"
-                onClick={() => handleOpenModal("login")}
-              />
-            )}
+                
+                {isMoreDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-white shadow-lg rounded-lg border border-gray-100 dropdown-menu z-50">
+                    {dropdownItems.map((item, index) => (
+                      <Link
+                        key={index}
+                        to={item.path}
+                        className="block px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-500 transition-colors"
+                        onClick={() => setIsMoreDropdownOpen(false)}
+                      >
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </li>
+            </ul>
           </div>
         </div>
       </nav>
 
+      {/* Mobile Menu */}
+      <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 transition-all duration-300 ${
+        isMobileMenuOpen ? "block" : "hidden"
+      }`}>
+        <div className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl transform transition-transform duration-300 ${
+          isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        }`}>
+          <div className="p-6">
+            <button
+              className="absolute top-4 right-4 text-2xl text-gray-600 hover:text-blue-500 focus:ring-2 focus:ring-blue-500"
+              onClick={toggleMobileMenu}
+              aria-label="Tutup menu mobile"
+            >
+              <FaTimes />
+            </button>
+            
+            <div className="flex items-center space-x-3 mb-8">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+                <FaNewspaper className="text-white text-sm" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">NewsWara</h2>
+                <p className="text-xs text-gray-500">Menu Navigasi</p>
+              </div>
+            </div>
+
+            <ul className="space-y-2">
+              {[...mainMenuItems, ...dropdownItems].map((item, index) => (
+                <li key={index}>
+                  <Link
+                    to={item.path}
+                    className="flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-500 rounded-lg transition-colors"
+                    onClick={toggleMobileMenu}
+                  >
+                    {item.icon && <item.icon className="text-sm" />}
+                    <span className="font-medium">{item.name}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* Login/Register Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50" onClick={handleCloseModal}>
           <div
-            className={`bg-white w-full max-w-md p-6 rounded-lg shadow-lg modal-content ${
+            className={`bg-white w-full max-w-md mx-4 p-8 rounded-2xl shadow-2xl modal-content ${
               isClosing ? "closing" : isSwitching ? "switching" : ""
             }`}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-center text-black text-2xl font-bold mb-4">
-              {formMode === "login" ? "LOG IN" : formMode === "register" ? "SIGN UP" : "LUPA KATA SANDI"}
-            </h2>
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FaUserCircle className="text-white text-2xl" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900">
+                {formMode === "login" ? "Masuk Akun" : formMode === "register" ? "Daftar Akun" : "Reset Password"}
+              </h2>
+              <p className="text-gray-600 mt-2">
+                {formMode === "login" ? "Masuk untuk mengakses fitur lengkap" : 
+                 formMode === "register" ? "Buat akun baru untuk bergabung" : 
+                 "Kami akan mengirim link reset ke email Anda"}
+              </p>
+            </div>
 
-            {error && <p className="text-red-500 text-center bg-red-100 p-2 rounded-md text-sm mb-4">{error}</p>}
-            {success && <p className="text-green-500 text-center bg-green-100 p-2 rounded-md text-sm mb-4">{success}</p>}
-
-            {formMode === "forgot" ? (
-              <form onSubmit={handleForgotPassword} className="space-y-4">
-                <input
-                  type="email"
-                  placeholder="Masukkan email Anda"
-                  className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 text-sm font-medium ${
-                    loading ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {loading ? (
-                    <div className="flex justify-center">
-                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white"></div>
-                    </div>
-                  ) : (
-                    "Kirim Email Reset"
-                  )}
-                </button>
-                <p className="text-center mt-4 text-black text-sm">
-                  Kembali ke{" "}
-                  <span
-                    className="text-green-500 hover:underline cursor-pointer"
-                    onClick={() => handleSwitchForm("login")}
-                  >
-                    Log in
-                  </span>
-                </p>
-              </form>
-            ) : (
-              <form onSubmit={formMode === "login" ? handleLogin : handleRegister} className="space-y-4">
-                <input
-                  type="email"
-                  placeholder="Masukkan email Anda"
-                  className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Kata sandi"
-                    className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <FaEyeSlash /> : <FaEye />}
-                  </button>
-                </div>
-                {formMode === "register" && (
-                  <input
-                    type="password"
-                    placeholder="Konfirmasi kata sandi"
-                    className="w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                )}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 text-sm font-medium ${
-                    loading ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {loading ? (
-                    <div className="flex justify-center">
-                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white"></div>
-                    </div>
-                  ) : (
-                    formMode === "login" ? "LOG IN" : "SIGN UP"
-                  )}
-                </button>
-              </form>
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg mb-4 text-sm">
+                {error}
+              </div>
             )}
-
-            {formMode !== "forgot" && (
-              <div className="flex justify-center space-x-4 mt-4">
-                <button
-                  onClick={handleFacebookLogin}
-                  disabled={loading}
-                  className={`flex items-center justify-center bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 text-sm ${
-                    loading ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                >
-                  <FaFacebook className="mr-2" />
-                  Facebook
-                </button>
-                <button
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                  className={`flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 text-sm ${
-                    loading ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                >
-                  <FaGoogle className="mr-2" />
-                  Google
-                </button>
+            
+            {success && (
+              <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg mb-4 text-sm">
+                {success}
               </div>
             )}
 
-            {formMode === "login" ? (
-              <p className="text-center mt-4 text-black text-sm">
-                Belum punya akun?{" "}
-                <span
-                  className="text-green-500 hover:underline cursor-pointer"
-                  onClick={() => handleSwitchForm("register")}
+            <form onSubmit={formMode === "login" ? handleLogin : formMode === "register" ? handleRegister : handleForgotPassword}>
+              <div className="space-y-4">
+                <div>
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    aria-label="Email"
+                  />
+                </div>
+                
+                {formMode !== "forgot" && (
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      aria-label="Password"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                    >
+                      {showPassword ? <FaEyeSlash /> : <FaEye />}
+                    </button>
+                  </div>
+                )}
+                
+                {formMode === "register" && (
+                  <div>
+                    <input
+                      type="password"
+                      placeholder="Konfirmasi Password"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      aria-label="Konfirmasi Password"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 transition-all duration-200 disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  aria-label={formMode === "login" ? "Masuk" : formMode === "register" ? "Daftar" : "Kirim Link Reset"}
                 >
-                  Sign up
-                </span>{" "}
-                |{" "}
-                <span
-                  className="text-green-500 hover:underline cursor-pointer"
-                  onClick={() => handleSwitchForm("forgot")}
-                >
-                  Lupa kata sandi?
-                </span>
-              </p>
-            ) : formMode === "register" ? (
-              <p className="text-center mt-4 text-black text-sm">
-                Sudah punya akun?{" "}
-                <span
-                  className="text-green-500 hover:underline cursor-pointer"
-                  onClick={() => handleSwitchForm("login")}
-                >
-                  Log in
-                </span>
-              </p>
-            ) : null}
+                  {loading ? (
+                    <div className="flex justify-center">
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-white"></div>
+                    </div>
+                  ) : (
+                    formMode === "login" ? "Masuk" : formMode === "register" ? "Daftar" : "Kirim Link Reset"
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {formMode !== "forgot" && (
+              <>
+                <div className="flex items-center my-6">
+                  <div className="flex-1 border-t border-gray-300"></div>
+                  <span className="px-4 text-gray-500 text-sm">atau</span>
+                  <div className="flex-1 border-t border-gray-300"></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleGoogleLogin}
+                    className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    aria-label="Masuk dengan Google"
+                  >
+                    <FaGoogle className="text-red-500 mr-2" />
+                    <span className="text-sm font-medium">Google</span>
+                  </button>
+                  <button
+                    onClick={handleFacebookLogin}
+                    className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    aria-label="Masuk dengan Facebook"
+                  >
+                    <FaFacebook className="text-blue-600 mr-2" />
+                    <span className="text-sm font-medium">Facebook</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="text-center mt-6 text-sm">
+              {formMode === "login" ? (
+                <p className="text-gray-600">
+                  Belum punya akun?{" "}
+                  <button
+                    type="button"
+                    className="text-blue-500 font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onClick={() => handleSwitchForm("register")}
+                    aria-label="Daftar sekarang"
+                  >
+                    Daftar sekarang
+                  </button>
+                  <br />
+                  <button
+                    type="button"
+                    className="text-blue-500 font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 mt-2"
+                    onClick={() => handleSwitchForm("forgot")}
+                    aria-label="Lupa password"
+                  >
+                    Lupa password?
+                  </button>
+                </p>
+              ) : formMode === "register" ? (
+                <p className="text-gray-600">
+                  Sudah punya akun?{" "}
+                  <button
+                    type="button"
+                    className="text-blue-500 font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onClick={() => handleSwitchForm("login")}
+                    aria-label="Masuk di sini"
+                  >
+                    Masuk di sini
+                  </button>
+                </p>
+              ) : (
+                <p className="text-gray-600">
+                  Kembali ke{" "}
+                  <button
+                    type="button"
+                    className="text-blue-500 font-medium hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onClick={() => handleSwitchForm("login")}
+                    aria-label="Halaman masuk"
+                  >
+                    halaman masuk
+                  </button>
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

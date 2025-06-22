@@ -1,75 +1,70 @@
 import React, { useState, useEffect } from "react";
 import { FaComment, FaFacebook, FaInstagram, FaYoutube, FaEye, FaCalendar } from "react-icons/fa";
 import { db } from "../firebaseconfig";
-import { collection, getDocs, orderBy, query, limit, where } from "firebase/firestore";
+import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
+import { Link, useNavigate } from "react-router-dom";
 
 const NewsArticle = () => {
   const [latestNews, setLatestNews] = useState([]);
   const [popularNews, setPopularNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchNews = async () => {
       try {
         // Fetch latest news
-        const latestQuery = query(
-          collection(db, "news"), 
-          orderBy("createdAt", "desc"), 
-          limit(4)
-        );
+        const latestQuery = query(collection(db, "news"), orderBy("createdAt", "desc"), limit(4));
         const latestSnapshot = await getDocs(latestQuery);
-        const latestData = latestSnapshot.docs.map(doc => ({
+        const latestData = latestSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
 
-        // Fetch popular news (berdasarkan views atau komentar)
-        const popularQuery = query(
-          collection(db, "news"), 
-          orderBy("views", "desc"), 
-          limit(4)
-        );
+        // Fetch popular news
+        const popularQuery = query(collection(db, "news"), orderBy("views", "desc"), limit(4));
         const popularSnapshot = await getDocs(popularQuery);
-        const popularData = popularSnapshot.docs.map(doc => ({
+        const popularData = popularSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
 
         // Format latest news
-        const formattedLatest = latestData.map(item => ({
+        const formattedLatest = latestData.map((item) => ({
           id: item.id,
           title: item.judul || "Judul tidak tersedia",
           description: item.ringkasan || item.konten?.substring(0, 150) + "..." || "Deskripsi tidak tersedia",
-          image: item.gambar || `https://source.unsplash.com/600x400/?${item.kategori || 'news'}`,
-          date: item.createdAt?.seconds 
-            ? new Date(item.createdAt.seconds * 1000).toLocaleDateString('id-ID', {
-                day: 'numeric',
-                month: 'short', 
-                year: 'numeric'
+          image: item.gambar || "https://source.unsplash.com/600x400/?news",
+          date: item.createdAt?.seconds
+            ? new Date(item.createdAt.seconds * 1000).toLocaleDateString("id-ID", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
               })
             : "Baru",
           author: item.author || "Admin",
           comments: item.komentar || 0,
           views: item.views || 0,
           category: item.kategori || "Umum",
-          link: `/news/${item.id}`
+          link: `/news/${item.id}`,
         }));
 
         // Format popular news
-        const formattedPopular = popularData.map(item => ({
+        const formattedPopular = popularData.map((item) => ({
           id: item.id,
           title: item.judul || "Judul tidak tersedia",
-          date: item.createdAt?.seconds 
-            ? new Date(item.createdAt.seconds * 1000).toLocaleDateString('id-ID', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric'
+          date: item.createdAt?.seconds
+            ? new Date(item.createdAt.seconds * 1000).toLocaleDateString("id-ID", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
               })
             : "Baru",
           comments: item.komentar || 0,
           views: item.views || 0,
-          link: `/news/${item.id}`
+          link: `/news/${item.id}`,
         }));
 
         setLatestNews(formattedLatest);
@@ -84,27 +79,37 @@ const NewsArticle = () => {
     fetchNews();
   }, []);
 
+  const validateEmail = (email) => {
+    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return regex.test(email);
+  };
+
   const handleSubscribe = () => {
-    if (email) {
-      // Di sini Anda bisa menambahkan logika untuk menyimpan email ke database
-      alert(`Terima kasih! Email ${email} telah berlangganan newsletter.`);
-      setEmail("");
-    } else {
-      alert("Mohon masukkan email yang valid");
+    if (!email) {
+      setEmailError("Email harus diisi.");
+      return;
     }
+    if (!validateEmail(email)) {
+      setEmailError("Masukkan email yang valid.");
+      return;
+    }
+    // Logika untuk menyimpan email ke database
+    alert(`Terima kasih! Email ${email} telah berlangganan newsletter.`);
+    setEmail("");
+    setEmailError("");
   };
 
   const LoadingCard = () => (
-    <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-md animate-pulse">
-      <div className="flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6">
-        <div className="w-full md:w-48 h-48 bg-gray-300 dark:bg-gray-700 rounded-lg"></div>
-        <div className="flex-grow space-y-3">
-          <div className="h-6 bg-gray-300 dark:bg-gray-700 rounded w-3/4"></div>
-          <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-full"></div>
-          <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-2/3"></div>
+    <div className="bg-white p-4 rounded-lg shadow animate-pulse">
+      <div className="flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-4">
+        <div className="w-full md:w-40 h-40 bg-gray-200 rounded-lg"></div>
+        <div className="flex-grow space-y-2">
+          <div className="h-5 bg-gray-200 rounded w-3/4"></div>
+          <div className="h-4 bg-gray-200 rounded w-full"></div>
+          <div className="h-4 bg-gray-200 rounded w-2/3"></div>
           <div className="flex justify-between">
-            <div className="h-3 bg-gray-300 dark:bg-gray-700 rounded w-20"></div>
-            <div className="h-3 bg-gray-300 dark:bg-gray-700 rounded w-16"></div>
+            <div className="h-3 bg-gray-200 rounded w-16"></div>
+            <div className="h-3 bg-gray-200 rounded w-12"></div>
           </div>
         </div>
       </div>
@@ -112,116 +117,88 @@ const NewsArticle = () => {
   );
 
   return (
-    <section className="max-w-6xl mx-auto my-8 px-4 relative">
-      {/* Background Box */}
-      <div className="absolute inset-0 bg-white dark:bg-gray-800 shadow-lg rounded-lg -z-10 p-6"></div>
-
-      {/* Header */}
-      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-green-600 text-white px-6 py-2 rounded-lg shadow-md">
-        <h2 className="text-lg font-semibold">Saran Berita</h2>
-      </div>
-
-      {/* Loading State */}
-      {loading && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8">
-          <div className="col-span-1 md:col-span-2 space-y-4">
-            <div className="h-8 bg-gray-300 dark:bg-gray-700 rounded w-48 mb-4"></div>
+    <section className="max-w-7xl mx-auto py-12 px-4">
+      {/* Main Content */}
+      {loading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="col-span-1 lg:col-span-2 space-y-6">
+            <div className="h-6 bg-gray-200 rounded w-48 mb-4"></div>
             {[1, 2, 3, 4].map((i) => (
               <LoadingCard key={i} />
             ))}
           </div>
-          <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg shadow-md">
-            <div className="h-6 bg-gray-300 dark:bg-gray-700 rounded w-32 mb-4"></div>
-            <div className="space-y-4">
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="h-6 bg-gray-200 rounded w-32 mb-4"></div>
               {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md animate-pulse">
-                  <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-full mb-2"></div>
-                  <div className="h-3 bg-gray-300 dark:bg-gray-700 rounded w-20"></div>
+                <div key={i} className="bg-gray-50 p-4 rounded-lg animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
+                  <div className="h-3 bg-gray-200 rounded w-20"></div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      )}
-
-      {/* Content */}
-      {!loading && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8">
-          {/* Latest News Column */}
-          <div className="col-span-1 md:col-span-2">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                Berita Terbaru
-              </h2>
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {latestNews.length} berita
-              </span>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Latest News */}
+          <div className="col-span-1 lg:col-span-2">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-800">Berita Terbaru</h2>
+              <button
+                className="text-blue-600 hover:underline text-sm font-medium"
+                onClick={() => navigate("/news")}
+              >
+                Lihat Semua
+              </button>
             </div>
-            
             {latestNews.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">📰</div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                  Belum ada berita terbaru
-                </h3>
-                <p className="text-gray-500 dark:text-gray-400">
-                  Admin belum menambahkan berita. Silakan cek kembali nanti.
-                </p>
+              <div className="text-center py-12 bg-white rounded-lg shadow">
+                <div className="text-5xl mb-4">📰</div>
+                <h3 className="text-lg font-medium text-gray-800 mb-2">Belum Ada Berita</h3>
+                <p className="text-gray-500">Cek kembali nanti untuk pembaruan terbaru.</p>
               </div>
             ) : (
               <div className="space-y-6">
-                {latestNews.map((news, index) => (
+                {latestNews.map((news) => (
                   <article
                     key={news.id}
-                    className="bg-white dark:bg-gray-900 p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6"
+                    className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-all duration-300 flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-4"
                   >
-                    {/* Image */}
-                    <div className="w-full md:w-56 h-48 flex-shrink-0 relative group">
+                    <div className="w-full md:w-40 h-40 flex-shrink-0 relative overflow-hidden rounded-lg group">
                       <img
-                        src={news.image?.trim() ? news.image.trim() : "https://source.unsplash.com/600x400/?news"}
+                        src={news.image}
                         alt={news.title}
-                        className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-300"
-                        onError={(e) => {
-                          e.target.src = "https://source.unsplash.com/600x400/?news";
-                        }}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        loading="lazy"
+                        onError={(e) => (e.target.src = "https://source.unsplash.com/600x400/?news")}
                       />
-                      {/* Category Badge */}
-                      <span className="absolute top-2 left-2 bg-green-600 text-white text-xs px-2 py-1 rounded-full font-semibold">
+                      <span className="absolute top-2 left-2 border border-blue-600 text-blue-600 text-xs px-2 py-1 rounded font-medium">
                         {news.category}
                       </span>
-                      {/* Date Badge */}
-                      <span className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center">
-                        <FaCalendar className="mr-1" />
-                        {news.date}
-                      </span>
                     </div>
-
-                    {/* Content */}
                     <div className="flex flex-col justify-between flex-grow">
                       <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 hover:text-green-600 transition-colors">
-                          <a href={news.link}>
+                        <Link to={news.link}>
+                          <h3 className="text-xl font-bold text-gray-800 hover:text-blue-600 transition-colors mb-2">
                             {news.title}
-                          </a>
-                        </h3>
-                        <p className="text-sm text-gray-700 dark:text-gray-300 mb-4 leading-relaxed">
-                          {news.description}
-                        </p>
+                          </h3>
+                        </Link>
+                        <p className="text-base text-gray-600 mb-4 line-clamp-3">{news.description}</p>
                       </div>
-                      
-                      {/* Meta Info */}
-                      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex items-center justify-between text-sm text-gray-500">
                         <div className="flex items-center space-x-4">
-                          <span className="font-medium">By {news.author}</span>
+                          <span>By {news.author}</span>
                           <span className="flex items-center">
-                            <FaEye className="mr-1" />
-                            {news.views}
+                            <FaEye className="mr-1" /> {news.views}
+                          </span>
+                          <span className="flex items-center">
+                            <FaCalendar className="mr-1" /> {news.date}
                           </span>
                         </div>
-                        <div className="flex items-center space-x-1 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">
-                          <FaComment className="text-green-600" />
-                          <span className="font-medium">{news.comments}</span>
-                        </div>
+                        <span className="flex items-center text-blue-600">
+                          <FaComment className="mr-1" /> {news.comments}
+                        </span>
                       </div>
                     </div>
                   </article>
@@ -233,51 +210,38 @@ const NewsArticle = () => {
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Popular News */}
-            <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-lg shadow-md">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center">
-                🔥 Popular Now
-                <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({popularNews.length})
-                </span>
-              </h2>
-              
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Berita Populer</h2>
+                <span className="text-sm text-gray-500">({popularNews.length})</span>
+              </div>
               {popularNews.length === 0 ? (
-                <div className="text-center py-8">
+                <div className="text-center py-6">
                   <div className="text-4xl mb-2">📊</div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Belum ada berita populer
-                  </p>
+                  <p className="text-sm text-gray-500">Belum ada berita populer</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {popularNews.map((news, index) => (
-                    <div 
-                      key={news.id} 
-                      className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 hover:translate-y-[-2px]"
+                    <div
+                      key={news.id}
+                      className="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition-all duration-200"
                     >
-                      <div className="flex items-start justify-between mb-2">
-                        <span className="text-sm font-bold text-green-600 bg-green-100 dark:bg-green-900 px-2 py-1 rounded-full">
-                          #{index + 1}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-bold text-blue-600">#{index + 1}</span>
+                        <span className="text-xs text-gray-500 flex items-center">
+                          <FaEye className="mr-1" /> {news.views}
                         </span>
-                        <div className="flex items-center text-xs text-gray-500 space-x-2">
-                          <span className="flex items-center">
-                            <FaEye className="mr-1" />
-                            {news.views}
-                          </span>
-                        </div>
                       </div>
-                      
-                      <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-2 leading-tight hover:text-green-600 transition-colors">
-                        <a href={news.link}>
+                      <Link to={news.link}>
+                        <h3 className="text-base font-bold text-gray-800 hover:text-blue-600 transition-colors line-clamp-2">
                           {news.title}
-                        </a>
-                      </h3>
-                      
-                      <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
+                        </h3>
+                      </Link>
+                      <div className="flex justify-between items-center text-xs text-gray-500 mt-2">
                         <span>{news.date}</span>
                         <span className="flex items-center">
-                          <FaComment className="mr-1" />
-                          {news.comments}
+                          <FaComment className="mr-1" /> {news.comments}
                         </span>
                       </div>
                     </div>
@@ -287,56 +251,37 @@ const NewsArticle = () => {
             </div>
 
             {/* Newsletter Subscription */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
-                📧 Follow @farinoveri
-              </h3>
-              
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Dapatkan berita terbaru langsung di email Anda
-              </p>
-              
-              {/* Email Input */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">Langganan Newsletter</h3>
+              <p className="text-sm text-gray-600 mb-4">Dapatkan berita terbaru langsung di inbox Anda.</p>
               <div className="mb-4">
                 <input
                   type="email"
                   placeholder="Masukkan email Anda"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full border border-gray-300 bg-white dark:bg-gray-700 dark:border-gray-600 px-4 py-3 rounded-md text-black dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setEmailError("");
+                  }}
+                  className="w-full border border-gray-200 px-4 py-2 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {emailError && <p className="text-red-500 text-xs mt-1">{emailError}</p>}
               </div>
-              
-              {/* Subscribe Button */}
-              <button 
+              <button
                 onClick={handleSubscribe}
-                className="w-full bg-green-500 text-white py-3 rounded-md text-sm font-semibold hover:bg-green-600 transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                className="w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-all duration-200"
               >
-                Subscribe Now
+                Subscribe Sekarang
               </button>
-              
-              {/* Social Media Icons */}
-              <div className="flex justify-center space-x-6 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <a 
-                  href="#" 
-                  className="text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-colors transform hover:scale-110"
-                  title="Facebook"
-                >
-                  <FaFacebook className="text-2xl" />
+              <div className="flex justify-center space-x-6 mt-6">
+                <a href="#" className="text-gray-600 hover:text-blue-600 transition-colors" aria-label="Facebook">
+                  <FaFacebook className="text-xl" />
                 </a>
-                <a 
-                  href="#" 
-                  className="text-gray-600 dark:text-gray-400 hover:text-pink-600 transition-colors transform hover:scale-110"
-                  title="Instagram"
-                >
-                  <FaInstagram className="text-2xl" />
+                <a href="#" className="text-gray-600 hover:text-pink-600 transition-colors" aria-label="Instagram">
+                  <FaInstagram className="text-xl" />
                 </a>
-                <a 
-                  href="#" 
-                  className="text-gray-600 dark:text-gray-400 hover:text-red-600 transition-colors transform hover:scale-110"
-                  title="YouTube"
-                >
-                  <FaYoutube className="text-2xl" />
+                <a href="#" className="text-gray-600 hover:text-red-600 transition-colors" aria-label="YouTube">
+                  <FaYoutube className="text-xl" />
                 </a>
               </div>
             </div>

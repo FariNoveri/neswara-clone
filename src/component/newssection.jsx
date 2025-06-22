@@ -18,7 +18,8 @@ import { useNavigate } from "react-router-dom";
 const NewsSection = () => {
   const [newsData, setNewsData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate(); // ✅ Pindahkan ke dalam komponen
+  const [selectedCategory, setSelectedCategory] = useState("Semua");
+  const navigate = useNavigate();
 
   // Ambil data berita
   const fetchNews = async () => {
@@ -30,7 +31,7 @@ const NewsSection = () => {
         id: doc.id,
         ...doc.data(),
       }));
-      setNewsData(data.slice(0, 5)); // Ambil 5 berita terbaru
+      setNewsData(data.slice(0, 8)); // Ambil 8 berita untuk layout yang lebih baik
     } catch (error) {
       console.error("Error fetching news:", error);
     }
@@ -53,129 +54,230 @@ const NewsSection = () => {
     navigate(`/berita/${newsId}`);
   };
 
-  if (loading) {
-    return (
-      <div className="text-center py-10">
-        <div className="flex justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+  // Loading skeleton
+  const LoadingSkeleton = () => (
+    <div className="container mx-auto px-4 sm:px-6 lg:px-16 mt-8">
+      {/* Category skeleton */}
+      <div className="flex space-x-4 mb-8">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="h-10 bg-gray-200 rounded-full w-24 animate-pulse"></div>
+        ))}
+      </div>
+      
+      {/* Grid skeleton */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Featured article skeleton */}
+        <div className="lg:col-span-2 lg:row-span-2">
+          <div className="h-96 bg-gray-200 rounded-2xl animate-pulse"></div>
+          <div className="mt-4 space-y-3">
+            <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-4 bg-gray-200 rounded w-3/4 animate-pulse"></div>
+          </div>
         </div>
-        <p className="mt-2 text-gray-600">Memuat berita...</p>
+        
+        {/* Side articles skeleton */}
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="space-y-3">
+            <div className="h-48 bg-gray-200 rounded-xl animate-pulse"></div>
+            <div className="h-3 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-3 bg-gray-200 rounded w-2/3 animate-pulse"></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
+  }
+
+  if (newsData.length === 0) {
+    return (
+      <div className="container mx-auto px-4 sm:px-6 lg:px-16 mt-8">
+        <div className="text-center py-20">
+          <div className="w-24 h-24 mx-auto mb-6 bg-gray-100 rounded-full flex items-center justify-center">
+            <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Belum ada berita</h3>
+          <p className="text-gray-500">Berita terbaru akan muncul di sini</p>
+        </div>
       </div>
     );
   }
 
-  if (newsData.length === 0) {
-    return <div className="text-center py-10">Tidak ada berita tersedia</div>;
-  }
+  const categories = ["Semua", ...new Set(newsData.map((item) => item.kategori || "Umum"))];
+  const featuredNews = newsData[0];
+  const sideNews = newsData.slice(1, 7);
 
-  const categories = [...new Set(newsData.map((item) => item.kategori || "Umum"))];
+  // Format tanggal
+  const formatDate = (timestamp) => {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return new Intl.DateTimeFormat('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }).format(date);
+  };
+
+  // Format views
+  const formatViews = (views) => {
+    if (!views) return '0';
+    if (views >= 1000000) return Math.floor(views / 1000000) + 'M';
+    if (views >= 1000) return Math.floor(views / 1000) + 'K';
+    return views.toString();
+  };
 
   return (
-    <div className="container mx-auto px-4 sm:px-6 lg:px-16 mt-6">
-      {/* Swiper kategori */}
-      <Swiper
-        modules={[Navigation]}
-        slidesPerView={1.5}
-        spaceBetween={8}
-        navigation
-        breakpoints={{
-          640: { slidesPerView: 2, spaceBetween: 12 },
-          768: { slidesPerView: 3, spaceBetween: 16 },
-          1024: { slidesPerView: 5, spaceBetween: 20 },
-        }}
-        className="py-2"
-      >
-        {categories.map((item, index) => (
-          <SwiperSlide key={index}>
-            <div className="p-2 text-center bg-white rounded-lg shadow-md dark:bg-gray-800 dark:text-white">
-              <span className="text-sm sm:text-lg font-bold uppercase">{item}</span>
-            </div>
-          </SwiperSlide>
-        ))}
-      </Swiper>
-
-      {/* Grid berita */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 grid-rows-3 lg:grid-rows-1 gap-4 sm:gap-6 mt-6 mx-auto max-w-7xl">
-        {/* Kolom kiri */}
-        <div className="flex flex-col space-y-4 lg:col-span-1">
-          {newsData.slice(0, 3).map((item, index) => (
-            <div
-              key={index}
-              className="relative h-[100px] sm:h-[130px] lg:h-[160px] cursor-pointer"
-              onClick={() => handleNewsClick(item.id)}
-            >
-              <img
-                src={
-                  item.gambar?.trim()
-                    ? item.gambar.trim()
-                    : "https://source.unsplash.com/600x400/?news"
-                }
-                alt={`News ${index + 1}`}
-                className="w-full h-full object-cover rounded-lg"
-              />
-              <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-transparent to-transparent p-1">
-                <p className="text-white text-xs sm:text-sm text-left">Berita Hari Ini</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Kolom tengah */}
-        <div className="lg:col-span-3 flex flex-col items-center">
-          {newsData[3] && (
-            <div
-              className="relative w-full h-[300px] sm:h-[400px] lg:h-[510px] cursor-pointer"
-              onClick={() => handleNewsClick(newsData[3].id)}
-            >
-              <img
-                src={newsData[3].gambar}
-                alt="Main News"
-                className="w-full h-full object-cover rounded-lg"
-              />
-              <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-transparent to-transparent p-2">
-                <p className="text-white text-sm sm:text-lg font-bold text-left">
-                  {newsData[3].judul}
-                </p>
-              </div>
-            </div>
-          )}
-          <h2 className="text-base sm:text-lg font-bold mt-2 text-center">
-            {newsData[3]?.judul || "Judul Berita Utama"}
-          </h2>
-        </div>
-
-        {/* Kolom kanan */}
-        <div className="flex flex-col space-y-4 lg:col-span-1">
-          {newsData.slice(1, 4).map((item, index) => (
-            <div
-              key={index}
-              className="relative h-[100px] sm:h-[130px] lg:h-[160px] cursor-pointer"
-              onClick={() => handleNewsClick(item.id)}
-            >
-              <img
-                src={item.gambar}
-                alt={`News ${index + 1}`}
-                className="w-full h-full object-cover rounded-lg"
-              />
-              <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-transparent to-transparent p-1">
-                <p className="text-white text-xs sm:text-sm text-left">Berita Hari Ini</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Iklan */}
-      <div className="mt-4 sm:mt-6 flex justify-center">
-        <div className="w-full max-w-7xl bg-gray-200 p-4 sm:p-6 rounded-lg shadow-lg text-center">
-          <h3 className="text-base sm:text-xl font-bold">Ingin mengiklankan produk Anda?</h3>
-          <p className="text-gray-600 mt-2 text-sm sm:text-base">
-            Hubungi kami untuk menampilkan di sini!
+    <div className="bg-gradient-to-b from-gray-50 to-white">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-16 py-8">
+        {/* Header Section */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-blue-800 bg-clip-text text-transparent mb-4">
+            Berita Terkini
+          </h1>
+          <p className="text-gray-600 text-lg max-w-2xl mx-auto">
+            Dapatkan informasi terbaru dan terpercaya dari berbagai kategori
           </p>
         </div>
+
+        {/* Category Filter */}
+        <div className="mb-10">
+          <div className="flex items-center justify-center">
+            <div className="flex overflow-x-auto pb-2 scrollbar-hide">
+              <div className="flex space-x-2 mx-auto">
+                {categories.map((category, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`px-6 py-3 rounded-full font-medium transition-all duration-300 whitespace-nowrap ${
+                      selectedCategory === category
+                        ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg transform scale-105"
+                        : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 hover:border-gray-300 hover:shadow-md"
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* News Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mb-12">
+          {/* Featured Article */}
+          {featuredNews && (
+            <article 
+              className="lg:col-span-2 lg:row-span-2 group cursor-pointer"
+              onClick={() => handleNewsClick(featuredNews.id)}
+            >
+              <div className="relative overflow-hidden rounded-2xl shadow-xl group-hover:shadow-2xl transition-all duration-500">
+                <img
+                  src={featuredNews.gambar || "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&h=600&fit=crop"}
+                  alt={featuredNews.judul}
+                  className="w-full h-96 object-cover group-hover:scale-110 transition-transform duration-700"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                
+                {/* Category Badge */}
+                <div className="absolute top-4 left-4">
+                  <span className="px-3 py-1 bg-blue-500 text-white text-sm font-medium rounded-full">
+                    {featuredNews.kategori || 'Berita'}
+                  </span>
+                </div>
+
+                {/* Content */}
+                <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
+                  <h2 className="text-2xl font-bold mb-3 line-clamp-3 group-hover:text-blue-200 transition-colors">
+                    {featuredNews.judul}
+                  </h2>
+                  <p className="text-gray-300 mb-4 line-clamp-2">
+                    {featuredNews.ringkasan || featuredNews.konten?.substring(0, 150) + '...'}
+                  </p>
+                  <div className="flex items-center justify-between text-sm text-gray-300">
+                    <span>{formatDate(featuredNews.createdAt)}</span>
+                    <div className="flex items-center space-x-4">
+                      <span className="flex items-center">
+                        <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                          <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                        </svg>
+                        {formatViews(featuredNews.views)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          )}
+
+          {/* Side Articles */}
+          {sideNews.map((item, index) => (
+            <article 
+              key={item.id || index}
+              className="group cursor-pointer"
+              onClick={() => handleNewsClick(item.id)}
+            >
+              <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group-hover:-translate-y-1">
+                <div className="relative overflow-hidden">
+                  <img
+                    src={item.gambar || "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=250&fit=crop"}
+                    alt={item.judul}
+                    className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute top-3 left-3">
+                    <span className="px-2 py-1 bg-white/90 text-gray-800 text-xs font-medium rounded-full">
+                      {item.kategori || 'Berita'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="p-4">
+                  <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                    {item.judul}
+                  </h3>
+                  <p className="text-gray-600 text-sm mb-3 line-clamp-2">
+                    {item.ringkasan || item.konten?.substring(0, 100) + '...'}
+                  </p>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>{formatDate(item.createdAt)}</span>
+                    <span className="flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                        <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd"/>
+                      </svg>
+                      {formatViews(item.views)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        {/* CTA Section */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 p-8 md:p-12 text-center">
+          <div className="absolute inset-0 bg-black/20"></div>
+          <div className="relative z-10">
+            <h3 className="text-2xl md:text-3xl font-bold text-white mb-4">
+              Ingin mengiklankan produk Anda?
+            </h3>
+            <p className="text-blue-100 mb-6 max-w-xl mx-auto">
+              Jangkau lebih banyak pelanggan dengan memasang iklan di platform berita terpercaya kami
+            </p>
+            <button className="px-8 py-3 bg-white text-blue-600 font-semibold rounded-full hover:bg-gray-100 transition-colors duration-300 shadow-lg hover:shadow-xl">
+              Hubungi Kami
+            </button>
+          </div>
+          
+          {/* Decorative elements */}
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
+          <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12"></div>
+        </div>
       </div>
-      <br />
-      <br />
     </div>
   );
 };
