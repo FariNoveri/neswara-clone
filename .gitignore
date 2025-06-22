@@ -41,6 +41,3 @@ coverage/
 .vercel/
 .netlify/
 
-# Jika kamu pernah meng-*install* `firebase` CLI di folder
-.firebase/
-src/firebaseconfig.js
