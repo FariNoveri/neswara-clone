@@ -1,6 +1,6 @@
 import { useEffect, useState, createContext, useContext } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { app, db } from "@/firebaseconfig.js";
+import { app, db } from "../../firebaseconfig.js";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 const auth = getAuth(app);
