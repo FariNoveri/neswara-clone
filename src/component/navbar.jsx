@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaSearch, FaUserCircle, FaBars, FaTimes, FaEllipsisH, FaEye, FaEyeSlash, FaFacebook, FaGoogle, FaChevronRight } from "react-icons/fa";
 import { IoClose } from "react-icons/io5";
-import { auth } from "../firebaseconfig";
+import { auth } from "../firebaseconfig.js";
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
