@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../Hooks/useAuth';
 
 const UserManagement = ({ adminEmails }) => {
@@ -12,7 +12,30 @@ const UserManagement = ({ adminEmails }) => {
   const [filterDate, setFilterDate] = useState('all');
   const [filterCustomDate, setFilterCustomDate] = useState('');
   const { currentUser } = useAuth();
-  const [currentUserEmail] = useState(currentUser?.email || '');
+  const [currentUserEmail, setCurrentUserEmail] = useState(currentUser?.email || '');
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    setCurrentUserEmail(currentUser?.email || '');
+    if (currentUser?.uid) {
+      const userRef = doc(db, 'users', currentUser.uid);
+      const unsubscribe = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const userData = docSnap.data();
+          setIsAdmin(userData.isAdmin === true);
+          console.log('Real-time Admin status:', userData.isAdmin, 'for email:', currentUser.email, 'UID:', currentUser.uid);
+        } else {
+          console.log('User document not found for UID:', currentUser.uid);
+          setIsAdmin(false);
+        }
+      }, (error) => {
+        console.error('Error fetching admin status:', error);
+        setIsAdmin(false);
+      });
+      return () => unsubscribe();
+    }
+  }, [currentUser]);
+
   const [editUserId, setEditUserId] = useState(null);
   const [editForm, setEditForm] = useState({ email: '', displayName: '' });
 
@@ -34,19 +57,14 @@ const UserManagement = ({ adminEmails }) => {
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (filterEmail) {
-        usersData.filter(user => user.email?.toLowerCase().includes(filterEmail.toLowerCase()));
-      }
-      if (filterName) {
-        usersData.filter(user => user.displayName?.toLowerCase().includes(filterName.toLowerCase()));
-      }
-      if (filterRole !== 'all') {
-        usersData.filter(user =>
-          (filterRole === 'admin' && adminEmails.includes(user.email)) ||
-          (filterRole === 'user' && !adminEmails.includes(user.email))
-        );
-      }
+      let usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      usersData = usersData.filter(user => 
+        (!filterEmail || user.email?.toLowerCase().includes(filterEmail.toLowerCase())) &&
+        (!filterName || user.displayName?.toLowerCase().includes(filterName.toLowerCase())) &&
+        (filterRole === 'all' || 
+         (filterRole === 'admin' && user.isAdmin === true) ||
+         (filterRole === 'user' && user.isAdmin !== true))
+      );
       usersData.sort((a, b) => a.email.localeCompare(b.email));
       setUsers(usersData);
       setLoading(false);
@@ -56,7 +74,7 @@ const UserManagement = ({ adminEmails }) => {
     });
 
     return () => unsubscribe();
-  }, [filterEmail, filterName, filterRole, filterDate, filterCustomDate, adminEmails]);
+  }, [filterEmail, filterName, filterRole, filterDate, filterCustomDate]);
 
   const handleFilterChange = (type, value) => {
     switch (type) {
@@ -69,11 +87,11 @@ const UserManagement = ({ adminEmails }) => {
   };
 
   const handleDelete = async (userId) => {
-    if (!window.confirm('Yakin ingin menghapus pengguna ini?')) return;
-    if (!adminEmails.includes(currentUserEmail)) {
+    if (!isAdmin) {
       alert('Hanya admin yang bisa menghapus pengguna.');
       return;
     }
+    if (!window.confirm('Yakin ingin menghapus pengguna ini?')) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
       setUsers(users.filter(user => user.id !== userId));
@@ -85,12 +103,17 @@ const UserManagement = ({ adminEmails }) => {
   };
 
   const handleEditClick = (user) => {
+    if (!isAdmin && user.email !== currentUserEmail) {
+      alert('Hanya admin atau pemilik akun yang bisa mengedit.');
+      return;
+    }
+    console.log('Edit clicked for user:', user.email, 'Current User:', currentUserEmail, 'Is Admin:', isAdmin);
     setEditUserId(user.id);
     setEditForm({ email: user.email || '', displayName: user.displayName || '' });
   };
 
   const handleEditSave = async () => {
-    if (!adminEmails.includes(currentUserEmail) && !users.find(u => u.id === editUserId)?.email === currentUserEmail) {
+    if (!isAdmin && users.find(u => u.id === editUserId)?.email !== currentUserEmail) {
       alert('Hanya admin atau pemilik akun yang bisa mengedit.');
       return;
     }
@@ -113,17 +136,23 @@ const UserManagement = ({ adminEmails }) => {
     }
   };
 
-  const handleEditCancel = () => {
-    setEditUserId(null);
-    setEditForm({ email: '', displayName: '' });
-  };
-
   const handleEditRole = async (userId, isAdmin) => {
-    if (!adminEmails.includes(currentUserEmail)) {
+    console.log('handleEditRole triggered for userId:', userId, 'to isAdmin:', isAdmin);
+    
+    // Pastikan status admin diperbarui sebelum aksi
+    const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+    const currentIsAdmin = userDoc.exists() ? userDoc.data().isAdmin : false;
+    console.log('Verified Admin status before action:', currentIsAdmin, 'for UID:', currentUser.uid);
+    
+    if (!currentIsAdmin) {
       alert('Hanya admin yang bisa mengedit role.');
       return;
     }
+    
+    console.log('Proceeding with role change for userId:', userId, 'to isAdmin:', isAdmin);
+    
     if (!window.confirm(`Yakin ingin mengubah role pengguna ini menjadi ${isAdmin ? 'Admin' : 'User'}?`)) return;
+    
     try {
       const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
@@ -138,6 +167,11 @@ const UserManagement = ({ adminEmails }) => {
       console.error('Error updating role:', error);
       alert('Gagal memperbarui role: ' + error.message);
     }
+  };
+
+  const handleEditCancel = () => {
+    setEditUserId(null);
+    setEditForm({ email: '', displayName: '' });
   };
 
   return (
@@ -243,9 +277,12 @@ const UserManagement = ({ adminEmails }) => {
                     <td className="px-6 py-4 text-sm text-purple-800">
                       <select
                         value={user.isAdmin ? 'admin' : 'user'}
-                        onChange={(e) => handleEditRole(user.id, e.target.value === 'admin')}
+                        onChange={(e) => {
+                          console.log('Select changed for userId:', user.id, 'to value:', e.target.value);
+                          handleEditRole(user.id, e.target.value === 'admin');
+                        }}
                         className="px-2 py-1 border border-gray-300 rounded bg-gray-100 text-purple-800"
-                        disabled={!adminEmails.includes(currentUserEmail)}
+                        disabled={!isAdmin}
                       >
                         <option value="user">User</option>
                         <option value="admin">Admin</option>
@@ -260,6 +297,7 @@ const UserManagement = ({ adminEmails }) => {
                           <button
                             onClick={handleEditSave}
                             className="text-green-500 hover:text-green-700 mr-2"
+                            disabled={!isAdmin && user.email !== currentUserEmail}
                           >
                             Simpan
                           </button>
@@ -275,14 +313,14 @@ const UserManagement = ({ adminEmails }) => {
                           <button
                             onClick={() => handleEditClick(user)}
                             className="text-blue-500 hover:text-blue-700 mr-2"
-                            disabled={!adminEmails.includes(currentUserEmail) && user.email !== currentUserEmail}
+                            disabled={!isAdmin && user.email !== currentUserEmail}
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => handleDelete(user.id)}
                             className="text-red-500 hover:text-red-700"
-                            disabled={!adminEmails.includes(currentUserEmail)}
+                            disabled={!isAdmin}
                           >
                             Hapus
                           </button>

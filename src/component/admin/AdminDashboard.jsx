@@ -13,7 +13,8 @@ import {
   query,
   serverTimestamp,
   collectionGroup,
-  where
+  where,
+  getDoc
 } from 'firebase/firestore';
 import {
   PlusCircle,
@@ -34,7 +35,7 @@ import UserManagement from './UserManagement';
 import CommentManagement from './CommentManagement';
 import TrendsChart from './TrendsChart';
 
-// TODO: Update with actual admin emails
+// Daftar email admin (sesuaikan jika perlu)
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
 const AdminDashboard = () => {
@@ -74,13 +75,34 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     if (!loading && user) {
-      const userEmail = user.email;
-      if (ADMIN_EMAILS.includes(userEmail)) {
-        setIsAuthorized(true);
-      } else {
-        setIsAuthorized(false);
-        setShowUnauthorizedModal(true);
-      }
+      const checkAuthorization = async () => {
+        try {
+          console.log('Checking authorization for user:', user.email); // Debugging
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            console.log('User data from Firestore:', userData); // Debugging
+            const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
+            if (isAdmin) {
+              setIsAuthorized(true);
+              console.log('User authorized as admin');
+            } else {
+              setIsAuthorized(false);
+              setShowUnauthorizedModal(true);
+              console.log('User not authorized');
+            }
+          } else {
+            setIsAuthorized(false);
+            setShowUnauthorizedModal(true);
+            console.log('User document not found');
+          }
+        } catch (error) {
+          console.error('Error checking user role:', error);
+          setShowUnauthorizedModal(true);
+          console.log('Error during authorization check');
+        }
+      };
+      checkAuthorization();
     } else if (!loading && !user) {
       navigate('/');
     }
@@ -114,18 +136,15 @@ const AdminDashboard = () => {
       const snapshot = await getDocs(q);
       let newsData = await Promise.all(snapshot.docs.map(async (doc) => {
         const newsItem = { id: doc.id, ...doc.data() };
-        // Fetch comment count for this news item
         const commentsQuery = query(collection(db, 'news', doc.id, 'comments'));
         const commentsSnapshot = await getDocs(commentsQuery);
         newsItem.komentar = commentsSnapshot.size;
         return newsItem;
       }));
 
-      // Populate unique categories
       const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
       setCategories(['', ...uniqueCategories]);
 
-      // Apply filters
       if (filterTitle) {
         newsData = newsData.filter(item =>
           item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
@@ -157,7 +176,6 @@ const AdminDashboard = () => {
         });
       }
 
-      // Apply sorting
       switch (filterSortBy) {
         case 'views-desc':
           newsData.sort((a, b) => (b.views || 0) - (a.views || 0));
