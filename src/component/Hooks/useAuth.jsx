@@ -1,23 +1,9 @@
 import { useEffect, useState, createContext, useContext } from "react";
-import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { app, db } from "@/firebaseconfig.js";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
-// Firebase configuration inline
-const firebaseConfig = {
-  apiKey: "AIzaSyB8wGcp5AKISq9aS5jXxSjCZj-47dFEBgw",
-  authDomain: "neswaraclone.firebaseapp.com",
-  projectId: "neswaraclone",
-  storageBucket: "neswaraclone.appspot.com",
-  messagingSenderId: "797701469068",
-  appId: "1:797701469068:web:7a42713f4d16361011dca9",
-  measurementId: "G-WQDH156QV5",
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
 
 const AuthContext = createContext();
 
