@@ -17,6 +17,7 @@ const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [activeSubMenu, setActiveSubMenu] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formMode, setFormMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -194,7 +195,7 @@ const Navbar = () => {
     }
 
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      await registerUser(email, password);
       handleCloseModal();
       navigate('/profile');
     } catch (error) {
@@ -226,7 +227,7 @@ const Navbar = () => {
     }
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await loginUser(email, password);
       handleCloseModal();
       navigate('/profile');
     } catch (error) {
@@ -313,7 +314,7 @@ const Navbar = () => {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await logoutUser();
       navigate('/');
     } catch (error) {
       console.error("Logout error:", error.code, error.message);
