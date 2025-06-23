@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server.js\" \"vite\"",
+    "dev": "node dev.js",
     "build": "vite build",
     "preview": "vite preview",
     "start:server": "node server.js"
@@ -14,13 +14,18 @@
     "@supabase/supabase-js": "^2.50.0",
     "@tanstack/react-query": "^5.81.2",
     "axios": "^1.10.0",
+    "chalk": "^5.4.1",
+    "chalk-animation": "^2.0.3",
     "chart.js": "^4.5.0",
+    "chokidar": "^4.0.3",
     "cors": "^2.8.5",
     "dompurify": "^3.2.6",
     "express": "^4.21.2",
+    "figlet": "^1.8.1",
     "firebase": "^11.9.1",
     "framer-motion": "^12.5.0",
     "lucide-react": "^0.518.0",
+    "ora": "^8.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-firebase-hooks": "^5.1.1",
@@ -45,10 +50,5 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "vite": "^6.2.2"
-  },
-  "description": "s",
-  "main": "eslint.config.js",
-  "author": "",
-  "license": "ISC",
-  "keywords": []
+  }
 }

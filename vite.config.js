@@ -8,9 +8,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        // Remove the rewrite function to keep the /api path
       }
-    },
+    }
   },
   resolve: {
     alias: {

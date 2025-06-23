@@ -1,14 +1,19 @@
 import express from 'express';
 import cors from 'cors';
-import axios from 'axios'; // Tambah dependensi axios untuk HTTP request
+import axios from 'axios';
+import chalk from 'chalk';
+
+console.clear();
+console.log(chalk.greenBright('[Backend] Menjalankan server...'));
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-const SECRET_KEY = '6LdUQGorAAAAABPbq4UtcCQt_VsIgC2yoVVRX6zy'; // Secret key baru
+const SECRET_KEY = '6LdUQGorAAAAABPbq4UtcCQt_VsIgC2yoVVRX6zy';
 
 async function verifyRecaptcha(token) {
+  console.log('[Backend] Verifying reCAPTCHA with token:', token);
   try {
     const response = await axios.post(
       'https://www.google.com/recaptcha/api/siteverify',
@@ -20,33 +25,35 @@ async function verifyRecaptcha(token) {
         },
       }
     );
-
+    console.log('[Backend] Google reCAPTCHA response:', response.data);
     const data = response.data;
     if (data.success) {
-      console.log('reCAPTCHA verified, score not applicable for v2');
-      return { success: true };
+      return { success: true, message: 'reCAPTCHA verified' };
     } else {
-      console.log('reCAPTCHA verification failed:', data['error-codes']);
-      return { success: false, message: data['error-codes'].join(', ') };
+      return { success: false, message: data['error-codes']?.join(', ') || 'Verification failed' };
     }
   } catch (error) {
-    console.error('Error verifying reCAPTCHA:', error);
-    return { success: false, message: 'Server error' };
+    console.error('[Backend] reCAPTCHA error:', error.response?.data || error.message);
+    return { success: false, message: 'Server error during reCAPTCHA verification' };
   }
 }
 
-app.post('/api/verify-recaptcha', async (req, res) => {
-  const { token, action } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ success: false, message: 'No token provided' });
-  }
+app.post('/verify-recaptcha', async (req, res) => {
+  console.log('[Backend] Request body:', req.body);
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ success: false, message: 'No token provided' });
 
   const result = await verifyRecaptcha(token);
-  res.json(result);
+  res.status(result.success ? 200 : 400).json(result);
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(chalk.greenBright(`[Backend] Server aktif di http://localhost:${PORT}`));
+});
+
+process.on('SIGINT', () => {
+  console.clear();
+  console.log(chalk.redBright('🛑 Backend dihentikan.\n'));
+  process.exit();
 });
