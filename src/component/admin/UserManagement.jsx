@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
 import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
-import { useAuth } from '../Hooks/useAuth';
+import { useAuth } from '../auth/useAuth';
 
 // Popup Component
 const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { FaComment, FaFacebook, FaInstagram, FaYoutube, FaEye, FaCalendar } from "react-icons/fa";
-import { db } from "../firebaseconfig";
+import { db } from "../../firebaseconfig";
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 

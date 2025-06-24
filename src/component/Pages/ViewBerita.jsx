@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebaseconfig';
-import Navbar from '../navbar';
-import Footer from '../footer';
+import Navbar from '../common/navbar';
+import Footer from '../common/footer';
 import { Share2, Edit3, Trash2, Calendar, Clock, User, Eye } from 'lucide-react';
 
 const ShareButton = ({ icon, label, onClick, color = "bg-gradient-to-r from-gray-100 to-gray-200" }) => {
@@ -145,18 +145,20 @@ const ViewBerita = () => {
 
       <Navbar />
       
-      <article className="max-w-4xl mx-auto px-4 py-8">
+      <article className="max-w-4xl mx-auto px-4 py-10">
         {/* Hero Image */}
-        <div className="relative mb-8 group">
+        <div className="relative mb-8">
           <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-2xl z-10" />
-          <img
-            src={berita.gambar?.trim() ? berita.gambar : 'https://via.placeholder.com/800x400'}   
-            alt={berita.judul}
-            className={`w-full h-[400px] object-cover rounded-2xl shadow-2xl transition-all duration-700 ${
-              isImageLoaded ? 'scale-100 opacity-100' : 'scale-105 opacity-0'
-            }`}
-            onLoad={() => setIsImageLoaded(true)}
-          />
+          <div className="flex justify-center">
+            <img
+              src={berita.gambar?.trim() ? berita.gambar : 'https://via.placeholder.com/1280x720'}
+              alt={berita.judul}
+              className={`w-[512px] h-72 md:w-[768px] md:h-96 object-cover rounded-2xl shadow-2xl transition-all duration-700 ${
+                isImageLoaded ? 'scale-100 opacity-100' : 'scale-105 opacity-0'
+              }`}
+              onLoad={() => setIsImageLoaded(true)}
+            />
+          </div>
           
           {/* Floating metadata */}
           <div className="absolute bottom-6 left-6 right-6 z-20">

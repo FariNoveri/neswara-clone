@@ -4,7 +4,7 @@ import './index.css';
 import './app.css';
 
 import App from './App.jsx';
-import { AuthProvider } from './component/Hooks/useAuth'; // ✅ BENAR
+import { AuthProvider } from './component/auth/useAuth'; // ✅ BENAR
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -1,4 +1,4 @@
-import { auth } from "../firebaseconfig";
+import { auth } from "../../firebaseconfig";
 import {
   GoogleAuthProvider,
   FacebookAuthProvider,
@@ -8,7 +8,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebaseconfig"; // Pastikan db diexport
+import { db } from "../../firebaseconfig"; // Pastikan db diexport
 
 // Fungsi register dengan email & password
 export const registerUser = async (email, password) => {

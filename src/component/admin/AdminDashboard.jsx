@@ -26,7 +26,8 @@ import {
   LogOut,
   BarChart3,
   FileText,
-  Users
+  Users,
+  RadioTower // Replaced BroadcastTower with RadioTower
 } from 'lucide-react';
 import UnauthorizedModal from './UnauthorizedModal';
 import NewsModal from './NewsModal';
@@ -34,8 +35,8 @@ import StatCard from './StatCard';
 import UserManagement from './UserManagement';
 import CommentManagement from './CommentManagement';
 import TrendsChart from './TrendsChart';
+import BreakingNewsAdmin from './BreakingNewsAdmin';
 
-// Daftar email admin (sesuaikan jika perlu)
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
 const AdminDashboard = () => {
@@ -48,12 +49,12 @@ const AdminDashboard = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingNews, setEditingNews] = useState(null);
   const [filterTitle, setFilterTitle] = useState('');
-  const [filterCategory, setFilterCategory] = useState(''); // Dropdown
+  const [filterCategory, setFilterCategory] = useState('');
   const [filterAuthor, setFilterAuthor] = useState('');
-  const [filterDate, setFilterDate] = useState('all'); // Options: all, last7days, last30days, custom
-  const [filterCustomDate, setFilterCustomDate] = useState(''); // Single date for custom
-  const [filterSortBy, setFilterSortBy] = useState('none'); // Options: none, views-desc, comments-desc
-  const [categories, setCategories] = useState(['']); // Unique categories
+  const [filterDate, setFilterDate] = useState('all');
+  const [filterCustomDate, setFilterCustomDate] = useState('');
+  const [filterSortBy, setFilterSortBy] = useState('none');
+  const [categories, setCategories] = useState(['']);
   const [stats, setStats] = useState({
     totalNews: 0,
     totalComments: 0,
@@ -77,29 +78,23 @@ const AdminDashboard = () => {
     if (!loading && user) {
       const checkAuthorization = async () => {
         try {
-          console.log('Checking authorization for user:', user.email); // Debugging
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            console.log('User data from Firestore:', userData); // Debugging
             const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
             if (isAdmin) {
               setIsAuthorized(true);
-              console.log('User authorized as admin');
             } else {
               setIsAuthorized(false);
               setShowUnauthorizedModal(true);
-              console.log('User not authorized');
             }
           } else {
             setIsAuthorized(false);
             setShowUnauthorizedModal(true);
-            console.log('User document not found');
           }
         } catch (error) {
           console.error('Error checking user role:', error);
           setShowUnauthorizedModal(true);
-          console.log('Error during authorization check');
         }
       };
       checkAuthorization();
@@ -381,7 +376,8 @@ const AdminDashboard = () => {
               { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
               { id: 'news', label: 'Kelola Berita', icon: FileText },
               { id: 'users', label: 'Kelola Pengguna', icon: Users },
-              { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle }
+              { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle },
+              { id: 'breaking-news', label: 'Kelola Breaking News', icon: RadioTower } // Updated to RadioTower
             ].map(tab => (
               <button
                 key={tab.id}
@@ -638,6 +634,8 @@ const AdminDashboard = () => {
         {activeTab === 'users' && <UserManagement adminEmails={ADMIN_EMAILS} />}
 
         {activeTab === 'comments' && <CommentManagement />}
+
+        {activeTab === 'breaking-news' && <BreakingNewsAdmin />}
 
         <NewsModal
           showModal={showModal}

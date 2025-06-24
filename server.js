@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import chalk from 'chalk';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 console.clear();
 console.log(chalk.greenBright('[Backend] Menjalankan server...'));
@@ -10,7 +13,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const SECRET_KEY = '6LdUQGorAAAAABPbq4UtcCQt_VsIgC2yoVVRX6zy';
+const SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
 
 async function verifyRecaptcha(token) {
   console.log('[Backend] Verifying reCAPTCHA with token:', token);

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { db } from "../firebaseconfig";
+import { db } from "../../firebaseconfig";
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
 
 const LiveNewsSection = () => {

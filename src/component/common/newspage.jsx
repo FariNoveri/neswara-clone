@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Clock, User, MessageCircle, Eye } from "lucide-react";
-import { db } from "../firebaseconfig";
+import { db } from "../../firebaseconfig";
 import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 
