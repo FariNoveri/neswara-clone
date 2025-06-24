@@ -266,7 +266,7 @@ Mau bantu? Keren! Caranya:
 3. **Perbaikan reCAPTCHA**:
    - Tambah timeout 5 detik di `verifyRecaptcha` pake `AbortController`.
    - Tambah log buat debug endpoint `http://localhost:3001/verify-recaptcha`.
-   - Pastiin site key reCAPTCHA (`6LdUQGorAAAAAOuQQwPAYnGtJrDmewRwGJbh1gJK`) bener.
+   - Pastiin site key reCAPTCHA yang bener.
 
 4. **File dan Skrip Baru**:
    - **dev.js**: Jalanin `watcher.js`, `server.js`, dan `vite` sekaligus dengan banner ASCII keren pake `chalk` dan `chalk-animation`.
