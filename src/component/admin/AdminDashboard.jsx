@@ -27,7 +27,8 @@ import {
   BarChart3,
   FileText,
   Users,
-  RadioTower // Replaced BroadcastTower with RadioTower
+  RadioTower,
+  Bell
 } from 'lucide-react';
 import UnauthorizedModal from './UnauthorizedModal';
 import NewsModal from './NewsModal';
@@ -36,6 +37,7 @@ import UserManagement from './UserManagement';
 import CommentManagement from './CommentManagement';
 import TrendsChart from './TrendsChart';
 import BreakingNewsAdmin from './BreakingNewsAdmin';
+import NotificationManagement from './NotificationManagement';
 
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
@@ -377,7 +379,8 @@ const AdminDashboard = () => {
               { id: 'news', label: 'Kelola Berita', icon: FileText },
               { id: 'users', label: 'Kelola Pengguna', icon: Users },
               { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle },
-              { id: 'breaking-news', label: 'Kelola Breaking News', icon: RadioTower } // Updated to RadioTower
+              { id: 'breaking-news', label: 'Kelola Breaking News', icon: RadioTower },
+              { id: 'notifications', label: 'Kelola Notifikasi', icon: Bell }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -636,6 +639,8 @@ const AdminDashboard = () => {
         {activeTab === 'comments' && <CommentManagement />}
 
         {activeTab === 'breaking-news' && <BreakingNewsAdmin />}
+
+        {activeTab === 'notifications' && <NotificationManagement />}
 
         <NewsModal
           showModal={showModal}
