@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../auth/useAuth';
 
 // Popup Component
@@ -76,39 +76,109 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
 
 const UserManagement = ({ adminEmails }) => {
   const [users, setUsers] = useState([]);
+  const [authUsers, setAuthUsers] = useState([]);
+  const [combinedUsers, setCombinedUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterEmail, setFilterEmail] = useState('');
   const [filterName, setFilterName] = useState('');
   const [filterRole, setFilterRole] = useState('all');
   const [filterDate, setFilterDate] = useState('all');
   const [filterCustomDate, setFilterCustomDate] = useState('');
-  const [filterEmailVerified, setFilterEmailVerified] = useState('all'); // New filter
+  const [filterEmailVerified, setFilterEmailVerified] = useState('all');
+  const [filterSource, setFilterSource] = useState('all');
   const { currentUser } = useAuth();
   const [currentUserEmail, setCurrentUserEmail] = useState(currentUser?.email || '');
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
-
-  // Popup states
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [popup, setPopup] = useState({
     isOpen: false,
     title: '',
     message: '',
     type: 'info',
-    onConfirm: null
+    onConfirm: null,
   });
 
   const showPopup = (title, message, type = 'info', onConfirm = null) => {
-    setPopup({
-      isOpen: true,
-      title,
-      message,
-      type,
-      onConfirm
-    });
+    setPopup({ isOpen: true, title, message, type, onConfirm });
   };
 
   const closePopup = () => {
     setPopup(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // Fetch users from Authentication
+  const fetchAuthUsers = async () => {
+    if (!currentUser) return;
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch('http://localhost:3001/list-users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!response.ok) throw new Error('Network response was not ok');
+      const data = await response.json();
+      console.log('Auth Users:', data.users); // Log for debugging
+      setAuthUsers(data.users || []);
+    } catch (error) {
+      console.error('Error fetching auth users:', error);
+    }
+  };
+
+  // Combine Firestore and Auth users
+  const combineUsers = () => {
+    const firestoreUserMap = new Map();
+    const authUserMap = new Map();
+
+    // Map Firestore users by uid
+    users.forEach(user => {
+      if (user.id) {
+        firestoreUserMap.set(user.id, user);
+      } else {
+        console.warn('Firestore user with missing ID:', user);
+      }
+    });
+
+    // Map Auth users by uid
+    authUsers.forEach(user => {
+      if (user.uid) {
+        authUserMap.set(user.uid, user);
+      } else {
+        console.warn('Auth user with missing UID:', user);
+      }
+    });
+
+    // Get all unique UIDs
+    const allUids = new Set([...firestoreUserMap.keys(), ...authUserMap.keys()]);
+    console.log('Unique UIDs:', allUids.size, 'Firestore users:', firestoreUserMap.size, 'Auth users:', authUserMap.size);
+
+    const combined = Array.from(allUids).map(uid => {
+      if (!uid) {
+        console.warn('Invalid UID encountered:', uid);
+        return null;
+      }
+      const firestoreUser = firestoreUserMap.get(uid);
+      const authUser = authUserMap.get(uid);
+
+      return {
+        id: uid,
+        email: firestoreUser?.email || authUser?.email || 'N/A',
+        displayName: firestoreUser?.displayName || authUser?.displayName || 'N/A',
+        isAdmin: firestoreUser?.isAdmin || false,
+        emailVerified: firestoreUser?.emailVerified !== undefined ? firestoreUser.emailVerified : authUser?.emailVerified,
+        updatedAt: firestoreUser?.updatedAt || (authUser?.metadata?.creationTime ? new Date(authUser.metadata.creationTime).toISOString().split('T')[0] : null),
+        createdAt: authUser?.metadata?.creationTime || null,
+        lastSignInTime: authUser?.metadata?.lastSignInTime || null,
+        source: {
+          inFirestore: !!firestoreUser,
+          inAuth: !!authUser,
+        },
+        disabled: authUser?.disabled || false,
+        customClaims: authUser?.customClaims || {},
+      };
+    }).filter(user => user !== null);
+
+    setCombinedUsers(combined);
   };
 
   useEffect(() => {
@@ -118,29 +188,26 @@ const UserManagement = ({ adminEmails }) => {
       const unsubscribe = onSnapshot(userRef, (docSnap) => {
         if (docSnap.exists()) {
           const userData = docSnap.data();
-          
-          // Prevent auto-change to user role on initial load for admin users
           if (isInitialLoad && adminEmails && adminEmails.includes(currentUser.email)) {
-            // If this is an admin email and it's the initial load, ensure isAdmin is true
             if (userData.isAdmin !== true) {
-              // Update the document to set isAdmin to true
               updateDoc(userRef, {
                 isAdmin: true,
                 updatedAt: new Date().toISOString().split('T')[0],
-              }).then(() => {
-                console.log('Admin status corrected for:', currentUser.email);
-                setIsAdmin(true);
-              }).catch(error => {
-                console.error('Error correcting admin status:', error);
-                setIsAdmin(userData.isAdmin === true);
-              });
+              })
+                .then(() => {
+                  console.log('Admin status corrected for:', currentUser.email);
+                  setIsAdmin(true);
+                })
+                .catch(error => {
+                  console.error('Error correcting admin status:', error);
+                  setIsAdmin(userData.isAdmin === true);
+                });
             } else {
               setIsAdmin(true);
             }
           } else {
             setIsAdmin(userData.isAdmin === true);
           }
-          
           console.log('Real-time Admin status:', userData.isAdmin, 'for email:', currentUser.email, 'UID:', currentUser.uid);
           setIsInitialLoad(false);
         } else {
@@ -160,6 +227,7 @@ const UserManagement = ({ adminEmails }) => {
   const [editUserId, setEditUserId] = useState(null);
   const [editForm, setEditForm] = useState({ email: '', displayName: '' });
 
+  // Fetch Firestore users
   useEffect(() => {
     setLoading(true);
     let q = query(collection(db, 'users'));
@@ -178,18 +246,8 @@ const UserManagement = ({ adminEmails }) => {
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      let usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      usersData = usersData.filter(user => 
-        (!filterEmail || user.email?.toLowerCase().includes(filterEmail.toLowerCase())) &&
-        (!filterName || user.displayName?.toLowerCase().includes(filterName.toLowerCase())) &&
-        (filterRole === 'all' || 
-         (filterRole === 'admin' && user.isAdmin === true) ||
-         (filterRole === 'user' && user.isAdmin !== true)) &&
-        (filterEmailVerified === 'all' ||
-         (filterEmailVerified === 'verified' && user.emailVerified === true) ||
-         (filterEmailVerified === 'unverified' && user.emailVerified !== true))
-      );
-      usersData.sort((a, b) => a.email.localeCompare(b.email));
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('Firestore Users:', usersData); // Log for debugging
       setUsers(usersData);
       setLoading(false);
     }, (error) => {
@@ -198,7 +256,40 @@ const UserManagement = ({ adminEmails }) => {
     });
 
     return () => unsubscribe();
-  }, [filterEmail, filterName, filterRole, filterDate, filterCustomDate, filterEmailVerified]);
+  }, [filterDate, filterCustomDate]);
+
+  // Fetch auth users when component mounts and when users change
+  useEffect(() => {
+    if (currentUser && isAdmin) {
+      fetchAuthUsers();
+    }
+  }, [currentUser, isAdmin]);
+
+  // Combine users when either source changes
+  useEffect(() => {
+    if (users.length > 0 || authUsers.length > 0) {
+      combineUsers();
+    }
+  }, [users, authUsers]);
+
+  // Filter combined users
+  const filteredUsers = combinedUsers.filter(user => {
+    const matchesEmail = !filterEmail || user.email?.toLowerCase().includes(filterEmail.toLowerCase());
+    const matchesName = !filterName || user.displayName?.toLowerCase().includes(filterName.toLowerCase());
+    const matchesRole = filterRole === 'all' || 
+                       (filterRole === 'admin' && user.isAdmin === true) ||
+                       (filterRole === 'user' && user.isAdmin !== true);
+    const matchesEmailVerified = filterEmailVerified === 'all' ||
+                               (filterEmailVerified === 'verified' && user.emailVerified === true) ||
+                               (filterEmailVerified === 'unverified' && user.emailVerified !== true);
+    const matchesSource = filterSource === 'all' ||
+                         (filterSource === 'both' && user.source.inFirestore && user.source.inAuth) ||
+                         (filterSource === 'firestore' && user.source.inFirestore) ||
+                         (filterSource === 'auth' && user.source.inAuth) ||
+                         (filterSource === 'missing' && (!user.source.inFirestore || !user.source.inAuth));
+
+    return matchesEmail && matchesName && matchesRole && matchesEmailVerified && matchesSource;
+  }).sort((a, b) => a.email.localeCompare(b.email));
 
   const handleFilterChange = (type, value) => {
     switch (type) {
@@ -208,7 +299,39 @@ const UserManagement = ({ adminEmails }) => {
       case 'date': setFilterDate(value); break;
       case 'customDate': setFilterCustomDate(value); break;
       case 'emailVerified': setFilterEmailVerified(value); break;
+      case 'source': setFilterSource(value); break;
     }
+  };
+
+  const handleSyncToFirestore = async (user) => {
+    if (!isAdmin) {
+      showPopup('Akses Ditolak', 'Hanya admin yang bisa sinkronisasi pengguna.', 'error');
+      return;
+    }
+
+    showPopup(
+      'Konfirmasi Sinkronisasi',
+      'Yakin ingin menambahkan pengguna ini ke Firestore?',
+      'confirm',
+      async () => {
+        try {
+          const userRef = doc(db, 'users', user.id);
+          await setDoc(userRef, {
+            email: user.email,
+            displayName: user.displayName || '',
+            isAdmin: false,
+            emailVerified: user.emailVerified || false,
+            updatedAt: new Date().toISOString().split('T')[0],
+            createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          });
+          
+          showPopup('Berhasil', 'Pengguna berhasil ditambahkan ke Firestore.', 'success');
+        } catch (error) {
+          console.error('Error syncing user to Firestore:', error);
+          showPopup('Error', 'Gagal menambahkan pengguna ke Firestore: ' + error.message, 'error');
+        }
+      }
+    );
   };
 
   const handleDelete = async (userId) => {
@@ -216,19 +339,52 @@ const UserManagement = ({ adminEmails }) => {
       showPopup('Akses Ditolak', 'Hanya admin yang bisa menghapus pengguna.', 'error');
       return;
     }
+
+    if (userId === currentUser.uid) {
+      showPopup('Error', 'Anda tidak dapat menghapus akun Anda sendiri.', 'error');
+      return;
+    }
+
+    const user = combinedUsers.find(u => u.id === userId);
+    const deleteOptions = [];
     
+    if (user.source.inFirestore) deleteOptions.push('Firestore');
+    if (user.source.inAuth) deleteOptions.push('Authentication');
+
     showPopup(
       'Konfirmasi Hapus',
-      'Yakin ingin menghapus pengguna ini?',
+      `Yakin ingin menghapus pengguna ini dari ${deleteOptions.join(' dan ')}?`,
       'confirm',
       async () => {
         try {
-          await deleteDoc(doc(db, 'users', userId));
-          setUsers(users.filter(user => user.id !== userId));
-          showPopup('Berhasil', 'Pengguna berhasil dihapus.', 'success');
+          if (user.source.inFirestore) {
+            const userRef = doc(db, 'users', userId);
+            await deleteDoc(userRef);
+            console.log('User deleted from Firestore:', userId);
+          }
+
+          if (user.source.inAuth) {
+            const idToken = await currentUser.getIdToken();
+            const response = await fetch('http://localhost:3001/delete-user', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ uid: userId, idToken }),
+            });
+
+            const responseData = await response.json();
+            if (!response.ok) {
+              throw new Error(responseData.message || 'Gagal menghapus pengguna dari Firebase Authentication.');
+            }
+            console.log('User deleted from Authentication:', responseData);
+          }
+
+          showPopup('Berhasil', `Pengguna berhasil dihapus dari ${deleteOptions.join(' dan ')}.`, 'success');
+          await fetchAuthUsers();
         } catch (error) {
           console.error('Error deleting user:', error);
-          showPopup('Error', 'Gagal menghapus pengguna: ' + error.message, 'error');
+          showPopup('Error', `Gagal menghapus pengguna: ${error.message}`, 'error');
         }
       }
     );
@@ -239,26 +395,37 @@ const UserManagement = ({ adminEmails }) => {
       showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
       return;
     }
-    console.log('Edit clicked for user:', user.email, 'Current User:', currentUserEmail, 'Is Admin:', isAdmin);
     setEditUserId(user.id);
     setEditForm({ email: user.email || '', displayName: user.displayName || '' });
   };
 
   const handleEditSave = async () => {
-    if (!isAdmin && users.find(u => u.id === editUserId)?.email !== currentUserEmail) {
+    const user = combinedUsers.find(u => u.id === editUserId);
+    if (!isAdmin && user?.email !== currentUserEmail) {
       showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
       return;
     }
+    
     try {
-      const userRef = doc(db, 'users', editUserId);
-      await updateDoc(userRef, {
-        email: editForm.email,
-        displayName: editForm.displayName,
-        updatedAt: new Date().toISOString().split('T')[0],
-      });
-      setUsers(users.map(user =>
-        user.id === editUserId ? { ...user, ...editForm } : user
-      ));
+      if (user.source.inFirestore) {
+        const userRef = doc(db, 'users', editUserId);
+        await updateDoc(userRef, {
+          email: editForm.email,
+          displayName: editForm.displayName,
+          updatedAt: new Date().toISOString().split('T')[0],
+        });
+      } else {
+        const userRef = doc(db, 'users', editUserId);
+        await setDoc(userRef, {
+          email: editForm.email,
+          displayName: editForm.displayName,
+          isAdmin: false,
+          emailVerified: user.emailVerified || false,
+          updatedAt: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString().split('T')[0],
+        });
+      }
+      
       setEditUserId(null);
       setEditForm({ email: '', displayName: '' });
       showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
@@ -269,19 +436,13 @@ const UserManagement = ({ adminEmails }) => {
   };
 
   const handleEditRole = async (userId, isAdminRole) => {
-    console.log('handleEditRole triggered for userId:', userId, 'to isAdmin:', isAdminRole);
-    
-    // Pastikan status admin diperbarui sebelum aksi
     const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
     const currentIsAdmin = userDoc.exists() ? userDoc.data().isAdmin : false;
-    console.log('Verified Admin status before action:', currentIsAdmin, 'for UID:', currentUser.uid);
     
     if (!currentIsAdmin) {
       showPopup('Akses Ditolak', 'Hanya admin yang bisa mengedit role.', 'error');
       return;
     }
-    
-    console.log('Proceeding with role change for userId:', userId, 'to isAdmin:', isAdminRole);
     
     showPopup(
       'Konfirmasi Ubah Role',
@@ -289,14 +450,25 @@ const UserManagement = ({ adminEmails }) => {
       'confirm',
       async () => {
         try {
+          const user = combinedUsers.find(u => u.id === userId);
           const userRef = doc(db, 'users', userId);
-          await updateDoc(userRef, {
-            isAdmin: isAdminRole,
-            updatedAt: new Date().toISOString().split('T')[0],
-          });
-          setUsers(users.map(user =>
-            user.id === userId ? { ...user, isAdmin: isAdminRole } : user
-          ));
+          
+          if (user.source.inFirestore) {
+            await updateDoc(userRef, {
+              isAdmin: isAdminRole,
+              updatedAt: new Date().toISOString().split('T')[0],
+            });
+          } else {
+            await setDoc(userRef, {
+              email: user.email,
+              displayName: user.displayName || '',
+              isAdmin: isAdminRole,
+              emailVerified: user.emailVerified || false,
+              updatedAt: new Date().toISOString().split('T')[0],
+              createdAt: new Date().toISOString().split('T')[0],
+            });
+          }
+          
           showPopup('Berhasil', 'Role berhasil diperbarui.', 'success');
         } catch (error) {
           console.error('Error updating role:', error);
@@ -321,28 +493,62 @@ const UserManagement = ({ adminEmails }) => {
     }
   };
 
+  const getSourceStatus = (user) => {
+    if (user.source.inFirestore && user.source.inAuth) {
+      return { text: 'Both', color: 'text-green-600 bg-green-100' };
+    } else if (user.source.inFirestore) {
+      return { text: 'Firestore Only', color: 'text-blue-600 bg-blue-100' };
+    } else if (user.source.inAuth) {
+      return { text: 'Auth Only', color: 'text-orange-600 bg-orange-100' };
+    } else {
+      return { text: 'Unknown', color: 'text-gray-600 bg-gray-100' };
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-blue-800 mb-2">Status Sinkronisasi</h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">{combinedUsers.filter(u => u.source.inFirestore && u.source.inAuth).length}</div>
+            <div className="text-gray-600">Tersinkronisasi</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">{combinedUsers.filter(u => u.source.inFirestore && !u.source.inAuth).length}</div>
+            <div className="text-gray-600">Firestore Saja</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-orange-600">{combinedUsers.filter(u => !u.source.inFirestore && u.source.inAuth).length}</div>
+            <div className="text-gray-600">Auth Saja</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-gray-600">{combinedUsers.length}</div>
+            <div className="text-gray-600">Total Users</div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
           <input
             type="text"
             placeholder="Filter by Email"
             value={filterEmail}
             onChange={(e) => handleFilterChange('email', e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 border border-gray-300 rounded-lg"
           />
           <input
             type="text"
             placeholder="Filter by Nama"
             value={filterName}
             onChange={(e) => handleFilterChange('name', e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 border border-gray-300 rounded-lg"
           />
           <select
             value={filterRole}
             onChange={(e) => handleFilterChange('role', e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 border border-gray-300 rounded-lg"
           >
             <option value="all">Semua Role</option>
             <option value="admin">Admin</option>
@@ -351,16 +557,27 @@ const UserManagement = ({ adminEmails }) => {
           <select
             value={filterEmailVerified}
             onChange={(e) => handleFilterChange('emailVerified', e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 border border-gray-300 rounded-lg"
           >
             <option value="all">Semua Status</option>
             <option value="verified">Email Verified</option>
             <option value="unverified">Email Unverified</option>
           </select>
           <select
+            value={filterSource}
+            onChange={(e) => handleFilterChange('source', e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          >
+            <option value="all">Semua Sumber</option>
+            <option value="both">Tersinkronisasi</option>
+            <option value="firestore">Firestore Saja</option>
+            <option value="auth">Auth Saja</option>
+            <option value="missing">Belum Sinkron</option>
+          </select>
+          <select
             value={filterDate}
             onChange={(e) => handleFilterChange('date', e.target.value)}
-            className="px-3 py-2 border rounded-lg"
+            className="px-3 py-2 border border-gray-300 rounded-lg"
           >
             <option value="all">Semua Tanggal</option>
             <option value="last7days">7 Hari Terakhir</option>
@@ -372,7 +589,7 @@ const UserManagement = ({ adminEmails }) => {
               type="date"
               value={filterCustomDate}
               onChange={(e) => handleFilterChange('customDate', e.target.value)}
-              className="px-3 py-2 border rounded-lg"
+              className="px-3 py-2 border border-gray-300 rounded-lg"
             />
           )}
         </div>
@@ -387,26 +604,32 @@ const UserManagement = ({ adminEmails }) => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Nama</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Role</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Email Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Tanggal Register</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Sumber Data</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Tanggal</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Aksi</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="px-6 py-4 text-center">
+                  <td colSpan="7" className="px-6 py-4 text-center">
                     <div className="flex justify-center">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
                     </div>
                   </td>
                 </tr>
-              ) : users.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="px-6 py-4 text-center text-gray-500">Tidak ada pengguna ditemukan</td>
+                  <td colSpan="7" className="px-6 py-4 text-center text-gray-500">Tidak ada pengguna ditemukan</td>
                 </tr>
               ) : (
-                users.map(user => {
+                filteredUsers.map((user, index) => {
+                  if (!user.id) {
+                    console.warn('User with missing ID:', user);
+                    return null;
+                  }
                   const verificationStatus = getVerificationStatus(user);
+                  const sourceStatus = getSourceStatus(user);
                   return (
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 text-sm text-blue-800">
@@ -436,10 +659,7 @@ const UserManagement = ({ adminEmails }) => {
                       <td className="px-6 py-4 text-sm text-purple-800">
                         <select
                           value={user.isAdmin ? 'admin' : 'user'}
-                          onChange={(e) => {
-                            console.log('Select changed for userId:', user.id, 'to value:', e.target.value);
-                            handleEditRole(user.id, e.target.value === 'admin');
-                          }}
+                          onChange={(e) => handleEditRole(user.id, e.target.value === 'admin')}
                           className="px-2 py-1 border border-gray-300 rounded bg-gray-100 text-purple-800"
                           disabled={!isAdmin}
                         >
@@ -452,48 +672,63 @@ const UserManagement = ({ adminEmails }) => {
                           {verificationStatus.text}
                         </span>
                       </td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${sourceStatus.color}`}>
+                          {sourceStatus.text}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-800">
                         {user.updatedAt ? new Date(user.updatedAt).toLocaleDateString() : 'N/A'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-800">
-                        {editUserId === user.id ? (
-                          <>
-                            <button
-                              onClick={handleEditSave}
-                              className="text-green-500 hover:text-green-700 mr-2"
-                              disabled={!isAdmin && user.email !== currentUserEmail}
-                            >
-                              Simpan
-                            </button>
-                            <button
-                              onClick={handleEditCancel}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              Batal
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleEditClick(user)}
-                              className="text-blue-500 hover:text-blue-700 mr-2"
-                              disabled={!isAdmin && user.email !== currentUserEmail}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(user.id)}
-                              className="text-red-500 hover:text-red-700"
-                              disabled={!isAdmin}
-                            >
-                              Hapus
-                            </button>
-                          </>
-                        )}
+                        <div className="flex flex-wrap gap-1">
+                          {editUserId === user.id ? (
+                            <>
+                              <button
+                                onClick={handleEditSave}
+                                className="text-green-500 hover:text-green-700 px-2 py-1 text-xs"
+                                disabled={!isAdmin && user.email !== currentUserEmail}
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                onClick={handleEditCancel}
+                                className="text-red-500 hover:text-red-700 px-2 py-1 text-xs"
+                              >
+                                Batal
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleEditClick(user)}
+                                className="text-blue-500 hover:text-blue-700 px-2 py-1 text-xs"
+                                disabled={!isAdmin && user.email !== currentUserEmail}
+                              >
+                                Edit
+                              </button>
+                              {!user.source.inFirestore && user.source.inAuth && isAdmin && (
+                                <button
+                                  onClick={() => handleSyncToFirestore(user)}
+                                  className="text-purple-500 hover:text-purple-700 px-2 py-1 text-xs"
+                                >
+                                  Sync
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDelete(user.id)}
+                                className="text-red-500 hover:text-red-700 px-2 py-1 text-xs"
+                                disabled={!isAdmin}
+                              >
+                                Hapus
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
-                })
+                }).filter(row => row !== null)
               )}
             </tbody>
           </table>

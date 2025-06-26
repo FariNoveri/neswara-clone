@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { FaEye, FaEyeSlash, FaGoogle, FaFacebook } from "react-icons/fa";
 import { getAuth, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, GoogleAuthProvider, FacebookAuthProvider, signOut } from "firebase/auth";
 import ReCAPTCHA from "react-google-recaptcha";
@@ -13,10 +13,41 @@ const Login = ({ onSwitchForm, onClose }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState(null);
   const [isUnverifiedPopupOpen, setIsUnverifiedPopupOpen] = useState(false);
+  const [isRateLimited, setIsRateLimited] = useState(false);
+  const [remainingTime, setRemainingTime] = useState(0);
 
   const auth = getAuth();
   const navigate = useNavigate();
   const recaptchaRef = useRef(null);
+
+  const MAX_ATTEMPTS = 5;
+  const COOLDOWN_PERIODS = [60, 300, 600]; // 1 min, 5 min, 10 min
+
+  // Initialize rate limiter state from localStorage
+  useEffect(() => {
+    const checkRateLimit = () => {
+      const loginAttempts = JSON.parse(localStorage.getItem('loginAttempts')) || { count: 0, timestamp: null, blockCount: 0 };
+      const now = Date.now();
+      
+      if (loginAttempts.timestamp) {
+        const cooldownPeriod = COOLDOWN_PERIODS[Math.min(loginAttempts.blockCount, COOLDOWN_PERIODS.length - 1)] * 1000;
+        const timeElapsed = now - loginAttempts.timestamp;
+        
+        if (timeElapsed < cooldownPeriod) {
+          setIsRateLimited(true);
+          setRemainingTime(Math.ceil((cooldownPeriod - timeElapsed) / 1000));
+        } else {
+          localStorage.setItem('loginAttempts', JSON.stringify({ count: 0, timestamp: null, blockCount: loginAttempts.blockCount }));
+          setIsRateLimited(false);
+          setRemainingTime(0);
+        }
+      }
+    };
+
+    checkRateLimit();
+    const interval = setInterval(checkRateLimit, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const verifyRecaptcha = async (token, action) => {
     try {
@@ -35,19 +66,20 @@ const Login = ({ onSwitchForm, onClose }) => {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       if (!data.success) {
-        setError(data.message || 'reCAPTCHA verification failed');
+        setError(data.message || 'Verifikasi reCAPTCHA gagal.');
         return false;
       }
       return true;
     } catch (error) {
       console.error('reCAPTCHA verification failed:', error);
       if (error.name === 'AbortError') {
-        setError('reCAPTCHA verification timed out. Please try again.');
+        setError('Verifikasi reCAPTCHA timeout. Silakan coba lagi.');
       } else {
         setError(error.message || 'Gagal memverifikasi reCAPTCHA.');
       }
@@ -55,48 +87,115 @@ const Login = ({ onSwitchForm, onClose }) => {
     }
   };
 
+  const updateRateLimit = () => {
+    const loginAttempts = JSON.parse(localStorage.getItem('loginAttempts')) || { count: 0, timestamp: null, blockCount: 0 };
+    console.log('Current login attempts:', loginAttempts); // Debug log
+    
+    loginAttempts.count += 1;
+    
+    if (loginAttempts.count >= MAX_ATTEMPTS) {
+      loginAttempts.count = 0;
+      loginAttempts.timestamp = Date.now();
+      loginAttempts.blockCount = Math.min(loginAttempts.blockCount + 1, COOLDOWN_PERIODS.length - 1);
+      setIsRateLimited(true);
+      setRemainingTime(COOLDOWN_PERIODS[loginAttempts.blockCount]);
+    }
+    
+    localStorage.setItem('loginAttempts', JSON.stringify(loginAttempts));
+  };
+
+  const validateEmail = (email) => {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    
+    if (isRateLimited) {
+      setError(`Terlalu banyak percobaan login. Silakan tunggu ${remainingTime} detik.`);
+      return;
+    }
+
     setLoading(true);
     setError("");
+
+    // Input validation
+    if (!email || !password) {
+      setError("Email dan password harus diisi.");
+      setLoading(false);
+      updateRateLimit();
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      setError("Format email tidak valid.");
+      setLoading(false);
+      updateRateLimit();
+      return;
+    }
 
     if (!recaptchaToken) {
       setError("Harap selesaikan reCAPTCHA.");
       setLoading(false);
+      updateRateLimit();
       return;
     }
 
     const isRecaptchaValid = await verifyRecaptcha(recaptchaToken, "login");
     if (!isRecaptchaValid) {
       setLoading(false);
+      updateRateLimit();
       return;
     }
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
       const user = userCredential.user;
       if (!user.emailVerified) {
         setIsUnverifiedPopupOpen(true);
         await signOut(auth);
         setLoading(false);
+        updateRateLimit();
         return;
       }
       setSuccess("Login berhasil!");
+      localStorage.removeItem('loginAttempts'); // Reset on successful login
       navigate("/");
-      if (typeof onClose === 'function') onClose(); // Safe call to onClose
+      if (typeof onClose === 'function') onClose();
     } catch (err) {
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
-        setError("Email atau password salah.");
-      } else if (err.code === "auth/invalid-email") {
-        setError("Format email tidak valid.");
-      } else {
-        setError(err.message || "Login gagal. Periksa email dan password.");
+      console.error('Firebase error:', err.code, err.message); // Debug log
+      updateRateLimit();
+      switch (err.code) {
+        case "auth/user-not-found":
+        case "auth/wrong-password":
+          setError("Email atau password salah.");
+          break;
+        case "auth/invalid-email":
+          setError("Format email tidak valid.");
+          break;
+        case "auth/too-many-requests":
+          setError("Terlalu banyak percobaan login. Coba lagi nanti.");
+          break;
+        case "auth/invalid-credential":
+          setError("Kredensial tidak valid. Periksa email dan password.");
+          break;
+        case "auth/network-request-failed":
+          setError("Gagal terhubung ke server. Periksa koneksi internet Anda.");
+          break;
+        default:
+          setError(err.message || "Login gagal. Periksa email dan password.");
       }
       setLoading(false);
     }
   };
 
   const handleSocialLogin = async (providerType) => {
+    if (isRateLimited) {
+      setError(`Terlalu banyak percobaan login. Silakan tunggu ${remainingTime} detik.`);
+      return;
+    }
+
     setLoading(true);
     setError("");
     
@@ -126,17 +225,20 @@ const Login = ({ onSwitchForm, onClose }) => {
           setIsUnverifiedPopupOpen(true);
           await signOut(auth);
           setLoading(false);
+          updateRateLimit();
           return;
         }
         
         setSuccess(`Login dengan ${providerType === 'google' ? 'Google' : 'Facebook'} berhasil!`);
+        localStorage.removeItem('loginAttempts'); // Reset on successful login
         navigate("/");
-        if (typeof onClose === 'function') onClose(); // Safe call to onClose
+        if (typeof onClose === 'function') onClose();
         return;
         
       } catch (err) {
         attempts++;
         console.error(`${providerType} login attempt ${attempts} failed:`, err);
+        updateRateLimit();
         
         if (err.code === 'auth/popup-blocked') {
           setError("Popup diblokir browser. Silakan aktifkan popup atau coba lagi.");
@@ -158,11 +260,10 @@ const Login = ({ onSwitchForm, onClose }) => {
             await new Promise(resolve => setTimeout(resolve, 500));
             continue;
           } else {
-            // Fallback to signInWithRedirect
             setError("Popup login gagal karena pengaturan keamanan browser. Mengalihkan...");
             try {
               await signInWithRedirect(auth, provider);
-              return; // Redirect handles navigation and modal closing
+              return;
             } catch (redirectErr) {
               setError("Gagal mengalihkan login. Coba gunakan login email atau browser lain.");
             }
@@ -189,7 +290,7 @@ const Login = ({ onSwitchForm, onClose }) => {
         </div>
       )}
       {success && (
-        <div className="bg-green-500 border-b border-green-600 text-green-600 px-4 py-2 rounded-lg mb-2 text-sm">
+        <div className="bg-green-50 border-b border-green-600 text-green-600 px-4 py-2 rounded-lg mb-2 text-sm">
           {success}
         </div>
       )}
@@ -203,21 +304,24 @@ const Login = ({ onSwitchForm, onClose }) => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              disabled={isRateLimited}
             />
           </div>
           <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
               placeholder="Password"
-              className="w-full px-2 py-2 text-sm border border-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={isRateLimited}
             />
             <button
               type="button"
               className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-600 focus:outline-none"
               onClick={() => setShowPassword(!showPassword)}
+              disabled={isRateLimited}
             >
               {showPassword ? <FaEyeSlash /> : <FaEye />}
             </button>
@@ -226,30 +330,30 @@ const Login = ({ onSwitchForm, onClose }) => {
             ref={recaptchaRef}
             sitekey="6LdUQGorAAAAAOuQQwPAYnGtJrDmewRwGJbh1gJK"
             onChange={(token) => setRecaptchaToken(token)}
-            onErrored={() => setError("Failed to load reCAPTCHA. Please check your connection.")}
+            onErrored={() => setError("Gagal memuat reCAPTCHA. Periksa koneksi internet Anda.")}
             onExpired={() => {
               setRecaptchaToken(null);
-              setError("reCAPTCHA expired. Please try again.");
+              setError("reCAPTCHA kadaluarsa. Silakan coba lagi.");
             }}
           />
           <button
             type="submit"
-            disabled={loading || !recaptchaToken}
+            disabled={loading || !recaptchaToken || isRateLimited}
             className="w-full bg-blue-500 text-white rounded-md py-2 text-sm font-medium hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400"
           >
-            {loading ? "Processing..." : "Login"}
+            {loading ? "Memproses..." : "Login"}
           </button>
         </div>
       </form>
       <div className="flex items-center justify-between my-4">
         <div className="flex-grow border-t border-gray-300"></div>
-        <span className="px-2 text-sm text-gray-500">OR</span>
+        <span className="px-2 text-sm text-gray-500">ATAU</span>
         <div className="flex-grow border-t border-gray-300"></div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={handleGoogleLogin}
-          disabled={loading}
+          disabled={loading || isRateLimited}
           className="flex items-center justify-center px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300"
         >
           <FaGoogle className="mr-2 text-red-500" />
@@ -257,7 +361,7 @@ const Login = ({ onSwitchForm, onClose }) => {
         </button>
         <button
           onClick={handleFacebookLogin}
-          disabled={loading}
+          disabled={loading || isRateLimited}
           className="flex items-center justify-center px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-300"
         >
           <FaFacebook className="mr-2 text-blue-600" />
@@ -266,42 +370,71 @@ const Login = ({ onSwitchForm, onClose }) => {
       </div>
       <div className="text-center mt-4 text-sm">
         <p className="text-gray-600">
-          Don't have an account?{" "}
+          Belum punya akun?{" "}
           <button
             type="button"
             className="text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
             onClick={() => onSwitchForm("register")}
+            disabled={isRateLimited}
           >
-            Sign up now
+            Daftar sekarang
           </button>
         </p>
         <p className="text-gray-600 mt-2">
-          Forgot password?{" "}
+          Lupa password?{" "}
           <button
             type="button"
             className="text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
             onClick={() => onSwitchForm("forgot")}
+            disabled={isRateLimited}
           >
-            Reset here
+            Reset di sini
           </button>
         </p>
       </div>
       {isUnverifiedPopupOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-          <div className="bg-white w-full max-w-md mx-4 p-6 rounded-lg shadow-lg">
-            <h2 className="text-lg font-bold">Account Not Verified</h2>
+          <div className="bg-white w-full max-w-md mx-4 p-6 rounded-lg shadow-lg animate-bounce-in">
+            <h2 className="text-lg font-bold text-red-600">Akun Belum Terverifikasi</h2>
             <p className="text-gray-600 mt-2">
-              Please verify your email to proceed. Check your inbox for the verification link.
+              Silakan verifikasi email Anda untuk melanjutkan. Periksa kotak masuk Anda untuk tautan verifikasi.
             </p>
             <button
               onClick={() => setIsUnverifiedPopupOpen(false)}
               className="w-full bg-blue-500 text-white py-2 rounded-md mt-4 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              Close
+              Tutup
             </button>
           </div>
         </div>
       )}
+      {isRateLimited && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white w-full max-w-md mx-4 p-6 rounded-lg shadow-lg animate-bounce-in">
+            <h2 className="text-lg font-bold text-red-600">Login Dibatasi</h2>
+            <p className="text-gray-600 mt-2">
+              Anda telah mencapai batas percobaan login. Silakan tunggu {remainingTime} detik sebelum mencoba lagi.
+            </p>
+            <button
+              onClick={() => setIsRateLimited(false)}
+              className="w-full bg-blue-500 text-white py-2 rounded-md mt-4 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+      <style jsx>{`
+        @keyframes bounce-in {
+          0% { transform: scale(0.3); opacity: 0; }
+          50% { transform: scale(1.05); opacity: 1; }
+          70% { transform: scale(0.95); }
+          100% { transform: scale(1); }
+        }
+        .animate-bounce-in {
+          animation: bounce-in 0.5s ease;
+        }
+      `}</style>
     </>
   );
 };

@@ -164,7 +164,7 @@ const Register = ({ onSwitchForm }) => {
                     </div>
                     <ReCAPTCHA
                       ref={recaptchaRef}
-                      sitekey="6LdUQGorAAAAAOuQQwPAYnGtJhDmEwJbhGlobe"
+                      sitekey="6LdUQGorAAAAAOuQQwPAYnGtJrDmewRwGJbh1gJK"
                       onChange={(token) => setRecaptchaToken(token)}
                       onErrored={() => setError("Failed to load reCAPTCHA. Please check your connection.")}
                       onExpired={() => {
