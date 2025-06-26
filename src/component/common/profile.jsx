@@ -36,6 +36,56 @@ import {
 import { useNavigate } from "react-router-dom";
 import { deleteDoc } from "firebase/firestore";
 
+// Simple input sanitization function
+const sanitizeInput = (input) => {
+  if (!input) return input;
+  // Remove HTML tags, script tags, and potentially dangerous characters
+  return input
+    .replace(/[<>{}]/g, '') // Remove <, >, {, }
+    .replace(/script/gi, '') // Remove "script" (case-insensitive)
+    .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+    .trim();
+};
+
+// Validate file type and content
+const validateImageFile = (file, callback) => {
+  const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  const maxSize = 5 * 1024 * 1024; // 5MB
+
+  // Check file extension
+  const fileExtension = file.name.split('.').pop().toLowerCase();
+  if (!allowedExtensions.includes(fileExtension)) {
+    callback(new Error(`Invalid file extension. Allowed: ${allowedExtensions.join(', ')}`));
+    return;
+  }
+
+  // Check MIME type
+  if (!allowedMimeTypes.includes(file.type)) {
+    callback(new Error(`Invalid file type. Allowed: ${allowedMimeTypes.join(', ')}`));
+    return;
+  }
+
+  // Check file size
+  if (file.size > maxSize) {
+    callback(new Error('File size exceeds 5MB limit.'));
+    return;
+  }
+
+  // Verify file is a valid image by attempting to load it
+  const img = new Image();
+  const objectUrl = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(objectUrl);
+    callback(null); // Valid image
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    callback(new Error('File is not a valid image.'));
+  };
+  img.src = objectUrl;
+};
+
 const Profile = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +103,7 @@ const Profile = () => {
   const [profileImageURL, setProfileImageURL] = useState("");
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [lastUploadTime, setLastUploadTime] = useState(null);
 
   // Show/hide password states
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -90,15 +141,15 @@ const Profile = () => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user);
-        setDisplayName(user.displayName || "");
-        setEmail(user.email || "");
+        setDisplayName(sanitizeInput(user.displayName || ""));
+        setEmail(sanitizeInput(user.email || ""));
         setProfileImageURL(user.photoURL || "");
 
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            setDisplayName(userData.displayName || user.displayName || "");
+            setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
             setProfileImageURL(userData.photoURL || user.photoURL || "");
           }
         } catch (error) {
@@ -136,74 +187,83 @@ const Profile = () => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
-      setError("Please select a valid image file.");
+    // Rate limiting: Prevent uploads within 30 seconds of the last upload
+    const now = Date.now();
+    if (lastUploadTime && now - lastUploadTime < 30 * 1000) {
+      setError("Please wait 30 seconds before uploading another image.");
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setError("Image size should be less than 5MB.");
-      return;
-    }
+    // Validate file
+    validateImageFile(file, async (error) => {
+      if (error) {
+        setError(error.message);
+        return;
+      }
 
-    setUploading(true);
-    clearMessages();
+      setUploading(true);
+      clearMessages();
 
-    try {
-      const formData = new FormData();
-      formData.append("image", file);
+      try {
+        const formData = new FormData();
+        formData.append("image", file);
 
-      const response = await fetch(
-        `https://api.imgbb.com/1/upload?key=${import.meta.env.VITE_IMGBB_API_KEY}`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+        const response = await fetch(
+          `https://api.imgbb.com/1/upload?key=${import.meta.env.VITE_IMGBB_API_KEY}`,
+          {
+            method: "POST",
+            body: formData,
+          }
+        );
 
-      const data = await response.json();
-      if (!data.success) throw new Error("Upload failed");
+        const data = await response.json();
+        if (!data.success) throw new Error("Upload failed: " + (data.error?.message || "Unknown error"));
 
-      const publicUrl = data.data.display_url;
+        const publicUrl = data.data.display_url;
 
-      await updateProfile(user, { photoURL: publicUrl });
+        await updateProfile(user, { photoURL: publicUrl });
 
-      await setDoc(
-        doc(db, "users", user.uid),
-        {
-          displayName: displayName || user.displayName || "",
-          email: user.email,
-          photoURL: publicUrl,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+        await setDoc(
+          doc(db, "users", user.uid),
+          {
+            displayName: sanitizeInput(displayName || user.displayName || ""),
+            email: sanitizeInput(user.email),
+            photoURL: publicUrl,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
 
-      setProfileImageURL(publicUrl);
-      setSuccess("Profile image updated successfully!");
-    } catch (error) {
-      console.error("Error uploading image:", error);
-      setError("Error uploading image: " + error.message);
-    } finally {
-      setUploading(false);
-    }
+        setProfileImageURL(publicUrl);
+        setSuccess("Profile image updated successfully!");
+        setLastUploadTime(now);
+      } catch (error) {
+        console.error("Error uploading image:", error);
+        setError("Error uploading image: " + error.message);
+      } finally {
+        setUploading(false);
+      }
+    });
   };
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
     clearMessages();
 
-    if (!displayName.trim()) {
+    const sanitizedDisplayName = sanitizeInput(displayName);
+    const sanitizedEmail = sanitizeInput(email);
+
+    if (!sanitizedDisplayName.trim()) {
       setError("Display name is required.");
       return;
     }
 
     try {
       await updateProfile(user, {
-        displayName: displayName.trim()
+        displayName: sanitizedDisplayName
       });
 
-      if (email !== user.email) {
+      if (sanitizedEmail !== user.email) {
         if (!currentPassword) {
           setError("Current password is required to change email.");
           return;
@@ -212,7 +272,7 @@ const Profile = () => {
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
         
-        await updateEmail(user, email);
+        await updateEmail(user, sanitizedEmail);
       }
 
       if (newPassword) {
@@ -238,8 +298,8 @@ const Profile = () => {
       }
 
       await setDoc(doc(db, "users", user.uid), {
-        displayName: displayName.trim(),
-        email: email,
+        displayName: sanitizedDisplayName,
+        email: sanitizedEmail,
         photoURL: profileImageURL,
         updatedAt: new Date().toISOString()
       }, { merge: true });
@@ -264,8 +324,8 @@ const Profile = () => {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
-    setDisplayName(user.displayName || "");
-    setEmail(user.email || "");
+    setDisplayName(sanitizeInput(user?.displayName || ""));
+    setEmail(sanitizeInput(user?.email || ""));
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
@@ -390,7 +450,7 @@ const Profile = () => {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
                     onChange={handleImageUpload}
                     className="hidden"
                   />
@@ -453,7 +513,7 @@ const Profile = () => {
                   <input
                     type="text"
                     value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
+                    onChange={(e) => setDisplayName(sanitizeInput(e.target.value))}
                     disabled={!isEditing}
                     className={`w-full px-6 py-4 bg-white/5 backdrop-blur-sm border rounded-2xl text-white placeholder-white/40 transition-all duration-300 ${
                       isEditing 
@@ -473,7 +533,7 @@ const Profile = () => {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => setEmail(sanitizeInput(e.target.value))}
                     disabled={!isEditing}
                     className={`w-full px-6 py-4 bg-white/5 backdrop-blur-sm border rounded-2xl text-white placeholder-white/40 transition-all duration-300 ${
                       isEditing 

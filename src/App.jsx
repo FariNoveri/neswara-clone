@@ -11,7 +11,8 @@ import AdminDashboard from "./component/admin/AdminDashboard";
 import NotFound from "./component/common/NotFound";
 import NewsDetail from "./component/Pages/NewsDetail";
 import SavedNews from "./component/Pages/SavedNews";
-import SearchResult from "./component/Pages/SearchResult"; // Added import for SearchResult
+import SearchResult from "./component/Pages/SearchResult";
+import SecurityMonitor from "./component/auth/SecurityMonitor"; // Added import for SecurityMonitor
 import { AuthProvider } from "./component/auth/useAuth";
 import DarkModeToggle from "./component/common/DarkModeToggle";
 import { ToastContainer } from "react-toastify";
@@ -51,6 +52,7 @@ function App() {
           <Navbar />
           <DarkModeToggle />
           <ToastContainer position="top-right" autoClose={3000} hideProgressBar closeOnClick />
+          <SecurityMonitor /> {/* Added SecurityMonitor component */}
           <Routes>
             <Route
               path="/"
