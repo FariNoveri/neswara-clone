@@ -1,4 +1,3 @@
-// dev.js
 import { spawn } from 'child_process';
 import chalk from 'chalk';
 import chalkAnimation from 'chalk-animation';
@@ -8,10 +7,10 @@ const asciiArt = `
    / | / / ____/ ___/ |     / /   |  / __ \\/   |
   /  |/ / __/  \\__ \\| | /| / / /| | / /_/ / /| |
  / /|  / /___ ___/ /| |/ |/ / ___ |/ _, _/ ___ |
-/_/ |_/_____//____/ |__/|__/_/  |_/_/ |_/_/  |_|
-`;
+/_/ |_/_____//____/ |__/|__/_/  |_/_/ |_/_/  |_|`;
 
 const procs = [];
+
 function run(label, command, color) {
   const proc = spawn(command, { shell: true });
   procs.push(proc);
@@ -21,19 +20,37 @@ function run(label, command, color) {
   });
 
   proc.stderr.on('data', data => {
-    process.stderr.write(chalk.red(`[${label} ERROR] `) + data.toString());
+    const lines = data.toString().split('\n');
+
+    const importantLines = lines.filter(line =>
+      !line.includes('node_modules') &&
+      !line.includes('vite/dist') &&
+      !line.includes('internal') &&
+      !line.includes('rollup-plugin') &&
+      !line.trim().startsWith('at ')
+    );
+
+    if (importantLines.length > 0) {
+      console.log(chalk.red(`\n[${label} ERROR]`));
+      importantLines.forEach(line => {
+        if (line.trim() === '^') {
+          console.log('  ' + chalk.redBright.bgYellow.bold('^ 🔥 [ERROR DISINI]'));
+        } else {
+          console.log(chalk.redBright('→ ' + line.trim()));
+        }
+      });
+      console.log(); // spacing
+    }
   });
 
   proc.on('close', code => {
     console.log(chalk.gray(`[${label}] exited with code ${code}`));
-    console.clear();
   });
 }
 
 (async () => {
   console.clear();
 
-  // ASCII animasi gerak
   const radar = chalkAnimation.radar(asciiArt);
   await new Promise(r => setTimeout(r, 2500));
   radar.stop();
@@ -63,9 +80,13 @@ process.on('SIGINT', async () => {
     } catch {}
   }
 
+  process.stdout.write('\x1Bc');
   console.clear();
+  await new Promise(r => setTimeout(r, 300));
+
   console.log(chalk.redBright.bold(asciiArt));
   console.log(chalk.redBright('\n✨ Semua proses telah dihentikan. Sampai jumpa!\n'));
   console.log(chalk.redBright('\nSilahkan klik enter lalu ketik huruf y dan enter di keyboard\n'));
+  await new Promise(r => setTimeout(r, 2000));
   process.exit(0);
 });

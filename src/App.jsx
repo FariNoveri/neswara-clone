@@ -11,6 +11,7 @@ import AdminDashboard from "./component/admin/AdminDashboard";
 import NotFound from "./component/common/NotFound";
 import NewsDetail from "./component/Pages/NewsDetail";
 import SavedNews from "./component/Pages/SavedNews";
+import SearchResult from "./component/Pages/SearchResult"; // Added import for SearchResult
 import { AuthProvider } from "./component/auth/useAuth";
 import DarkModeToggle from "./component/common/DarkModeToggle";
 import { ToastContainer } from "react-toastify";
@@ -92,6 +93,14 @@ function App() {
               element={
                 <ErrorBoundary>
                   <SavedNews />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="/search"
+              element={
+                <ErrorBoundary>
+                  <SearchResult />
                 </ErrorBoundary>
               }
             />

@@ -17,9 +17,7 @@ function highlightDiff(oldLine, newLine) {
   if (!oldLine || !newLine) return [oldLine || '', chalk.green(newLine || '')];
 
   let i = 0;
-  while (i < oldLine.length && i < newLine.length && oldLine[i] === newLine[i]) {
-    i++;
-  }
+  while (i < oldLine.length && i < newLine.length && oldLine[i] === newLine[i]) i++;
 
   const commonPrefix = oldLine.slice(0, i);
   const oldDiff = oldLine.slice(i);
@@ -50,15 +48,17 @@ function compareFile(filepath) {
   }
 
   console.log(chalk.cyan(`\n✏️ edited: ${path.relative(process.cwd(), filepath)}`));
-
   if (changes.length === 1) {
     const { old, new: newer } = changes[0];
     const [oldColored, newColored] = highlightDiff((old || '').trim(), (newer || '').trim());
     console.log(`   → "${oldColored}" → "${newColored}"`);
   } else {
-    console.log(chalk.yellow(`   → Perubahan baris ${changes[0].line} sampai ${changes[changes.length - 1].line}`));
+    console.log(
+      chalk.yellow(
+        `   → Perubahan baris ${changes[0].line} sampai ${changes[changes.length - 1].line}`
+      )
+    );
   }
-
   console.log();
 
   if (++changeCounter >= 5) {
@@ -77,47 +77,54 @@ function printDeleted(filepath) {
   }
 }
 
+function printAdded(filepath) {
+  console.log(chalk.greenBright(`\n🆕 added file: ${path.relative(process.cwd(), filepath)}\n`));
+}
+
 const watcher = chokidar.watch('.', {
   ignored: /(^|[\/\\])\..|node_modules|dist|.git/,
   persistent: true,
-  ignoreInitial: false,
+  ignoreInitial: true,
   awaitWriteFinish: {
     stabilityThreshold: 200,
-    pollInterval: 100
-  }
+    pollInterval: 100,
+  },
 });
 
 watcher
   .on('add', (filepath) => {
     if (!fs.existsSync(filepath) || fs.lstatSync(filepath).isDirectory()) return;
+
     const content = fs.readFileSync(filepath, 'utf-8');
-    fileHashes.set(filepath, getHash(content));
+    const hash = getHash(content);
+    const relativePath = path.relative(process.cwd(), filepath);
+
+    let foundCopy = false;
+    for (const [oldPath, oldHash] of fileHashes.entries()) {
+      if (oldHash === hash && oldPath !== filepath) {
+        const oldName = path.basename(oldPath);
+        const newName = path.basename(filepath);
+        const newFolder = path.dirname(relativePath);
+
+        console.log(
+          chalk.magenta(`\n🔁 renamed or copied: ${chalk.strikethrough(oldName)} → ${chalk.bold(newName)}`)
+        );
+        console.log(chalk.gray(`   📂 new location: ${newFolder}/\n`));
+        foundCopy = true;
+        break;
+      }
+    }
+
+    fileHashes.set(filepath, hash);
     lastContents.set(filepath, content.split('\n'));
     trackedFiles.add(filepath);
+
+    if (!foundCopy) printAdded(filepath);
   })
   .on('change', compareFile)
   .on('unlink', (filepath) => {
     trackedFiles.delete(filepath);
     printDeleted(filepath);
-  })
-  .on('raw', (event, filepath) => {
-    if (event === 'rename') {
-      const filename = path.basename(filepath || '');
-      if (fs.existsSync(filepath)) {
-        for (const oldPath of trackedFiles) {
-          try {
-            const oldContent = fs.readFileSync(oldPath, 'utf-8');
-            const newContent = fs.readFileSync(filepath, 'utf-8');
-            if (oldContent === newContent && oldPath !== filepath) {
-              console.log(
-                chalk.magenta(`\n🔁 renamed: ${path.basename(oldPath)} → ${filename}\n`)
-              );
-              break;
-            }
-          } catch {}
-        }
-      }
-    }
   });
 
 process.on('SIGINT', () => {
