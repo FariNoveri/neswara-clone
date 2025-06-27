@@ -38,6 +38,7 @@ import CommentManagement from './CommentManagement';
 import TrendsChart from './TrendsChart';
 import BreakingNewsAdmin from './BreakingNewsAdmin';
 import NotificationManagement from './NotificationManagement';
+import ManageViews from './ManageViews';
 
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
@@ -139,9 +140,23 @@ const AdminDashboard = () => {
         return newsItem;
       }));
 
+      // PERBAIKAN: Hitung total stats dari semua data SEBELUM filtering
+      const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
+      const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
+      const totalNews = newsData.length;
+
+      // Update stats dengan data yang belum difilter
+      setStats(prev => ({
+        ...prev,
+        totalNews,
+        totalViews,
+        totalComments
+      }));
+
       const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
       setCategories(['', ...uniqueCategories]);
 
+      // Sekarang baru lakukan filtering untuk tampilan tabel
       if (filterTitle) {
         newsData = newsData.filter(item =>
           item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
@@ -184,16 +199,9 @@ const AdminDashboard = () => {
           break;
       }
 
+      // Set news data yang sudah difilter untuk tampilan tabel
       setNews(newsData);
 
-      const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
-      const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
-      setStats(prev => ({
-        ...prev,
-        totalNews: newsData.length,
-        totalViews,
-        totalComments
-      }));
     } catch (error) {
       console.error('Error fetching news:', error);
     }
@@ -227,6 +235,15 @@ const AdminDashboard = () => {
         console.log('Missing index for comments collection group. Please create it in Firebase Console.');
       }
     }
+  };
+
+  // PERBAIKAN: Fungsi untuk refresh data ketika views diupdate
+  const handleViewsUpdated = async () => {
+    console.log('Views updated, refreshing data...');
+    // Refresh semua data ketika views direset dari ManageViews
+    await fetchNews();
+    await fetchUsers();
+    await fetchComments();
   };
 
   useEffect(() => {
@@ -380,7 +397,8 @@ const AdminDashboard = () => {
               { id: 'users', label: 'Kelola Pengguna', icon: Users },
               { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle },
               { id: 'breaking-news', label: 'Kelola Breaking News', icon: RadioTower },
-              { id: 'notifications', label: 'Kelola Notifikasi', icon: Bell }
+              { id: 'notifications', label: 'Kelola Notifikasi', icon: Bell },
+              { id: 'views', label: 'Kelola Views', icon: Eye }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -641,6 +659,11 @@ const AdminDashboard = () => {
         {activeTab === 'breaking-news' && <BreakingNewsAdmin />}
 
         {activeTab === 'notifications' && <NotificationManagement />}
+
+        {/* Menambahkan prop onViewsUpdated */}
+        {activeTab === 'views' && (
+          <ManageViews onViewsUpdated={handleViewsUpdated} />
+        )}
 
         <NewsModal
           showModal={showModal}

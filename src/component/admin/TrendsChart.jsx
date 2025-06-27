@@ -35,13 +35,21 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
       sevenDaysAgo.setDate(today.getDate() - 7);
 
       try {
-        // Fetch news trends
+        // Fetch news trends - also store for views calculation
         const newsQuery = query(collection(db, 'news'), where('createdAt', '>=', sevenDaysAgo));
         const newsSnapshot = await getDocs(newsQuery);
         const newsTrends = {};
+        const viewsTrends = {};
+        
         newsSnapshot.docs.forEach(doc => {
           const date = doc.data().createdAt.toDate().toLocaleDateString();
+          const views = doc.data().views || 0;
+          
+          // Count news per date
           newsTrends[date] = (newsTrends[date] || 0) + 1;
+          
+          // Sum views per date (only from news created in last 7 days)
+          viewsTrends[date] = (viewsTrends[date] || 0) + views;
         });
 
         // Fetch comments trends
@@ -53,15 +61,7 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
           commentsTrends[date] = (commentsTrends[date] || 0) + 1;
         });
 
-        // Fetch views trends (aggregate from news)
-        const newsWithViews = await getDocs(query(collection(db, 'news')));
-        const viewsTrends = {};
-        newsWithViews.docs.forEach(doc => {
-          const date = doc.data().createdAt.toDate().toLocaleDateString();
-          viewsTrends[date] = (viewsTrends[date] || 0) + (doc.data().views || 0);
-        });
-
-        // Fetch users trends (simplified, assuming users have createdAt)
+        // Fetch users trends
         const usersSnapshot = await getDocs(query(collection(db, 'users'), where('createdAt', '>=', sevenDaysAgo)));
         const usersTrends = {};
         usersSnapshot.docs.forEach(doc => {
@@ -72,7 +72,7 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
         setTrends({
           news: newsTrends,
           comments: commentsTrends,
-          views: viewsTrends,
+          views: viewsTrends, // Now properly filtered by date
           users: usersTrends
         });
       } catch (error) {
@@ -96,6 +96,7 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
       d.setDate(d.getDate() - (6 - i));
       return d.toLocaleDateString();
     });
+    
     const newsData = labels.map(date => trends.news[date] || 0);
     const commentsData = labels.map(date => trends.comments[date] || 0);
     const viewsData = labels.map(date => trends.views[date] || 0);
@@ -117,35 +118,65 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
             data: newsData,
             borderColor: '#10B981',
             backgroundColor: 'rgba(16, 185, 129, 0.2)',
-            fill: true
+            fill: true,
+            tension: 0.4
           },
           {
             label: 'Comments',
             data: commentsData,
             borderColor: '#3B82F6',
             backgroundColor: 'rgba(59, 130, 246, 0.2)',
-            fill: true
+            fill: true,
+            tension: 0.4
           },
           {
             label: 'Views',
             data: viewsData,
             borderColor: '#F59E0B',
             backgroundColor: 'rgba(245, 158, 11, 0.2)',
-            fill: true
+            fill: true,
+            tension: 0.4
           },
           {
             label: 'Users',
             data: usersData,
             borderColor: '#EF4444',
             backgroundColor: 'rgba(239, 68, 68, 0.2)',
-            fill: true
+            fill: true,
+            tension: 0.4
           }
         ]
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'index',
+          intersect: false,
+        },
+        plugins: {
+          legend: {
+            position: 'top',
+          },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+          }
+        },
         scales: {
+          x: {
+            display: true,
+            title: {
+              display: true,
+              text: 'Tanggal'
+            }
+          },
           y: {
+            display: true,
+            title: {
+              display: true,
+              text: 'Jumlah'
+            },
             beginAtZero: true
           }
         }
@@ -165,7 +196,9 @@ const TrendsChart = ({ isAuthorized, activeTab }) => {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h3 className="text-lg font-semibold mb-4">Perkembangan 7 Hari Terakhir</h3>
-      <canvas ref={chartRef} className="w-full h-64"></canvas>
+      <div className="relative h-64">
+        <canvas ref={chartRef} className="w-full h-full"></canvas>
+      </div>
     </div>
   );
 };
