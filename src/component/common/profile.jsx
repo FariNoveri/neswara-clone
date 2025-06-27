@@ -27,6 +27,7 @@ import {
   updateEmail,
   reauthenticateWithCredential,
   EmailAuthProvider,
+  sendEmailVerification,
   signOut
 } from "firebase/auth";
 import { 
@@ -89,6 +90,8 @@ const Profile = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [emailVerificationSent, setEmailVerificationSent] = useState(false);
   
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -144,6 +147,8 @@ const Profile = () => {
             const userData = userDoc.data();
             setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
             setProfileImageURL(userData.photoURL || user.photoURL || "");
+            setPendingEmail(userData.pendingEmail || "");
+            setEmailVerificationSent(!!userData.pendingEmail);
           }
         } catch (error) {
           console.log("Error fetching user data:", error);
@@ -250,22 +255,50 @@ const Profile = () => {
     }
 
     try {
+      // Update display name
       await updateProfile(user, {
         displayName: sanitizedDisplayName
       });
 
+      // Handle email update with verification
       if (sanitizedEmail !== user.email) {
         if (!currentPassword) {
           setError("Current password is required to change email.");
           return;
         }
 
+        // Reauthenticate user
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
-        
+
+        // Temporarily update email to trigger verification
         await updateEmail(user, sanitizedEmail);
+
+        // Send verification email to the new email
+        await sendEmailVerification(user);
+
+        // Store pending email in Firestore
+        await setDoc(doc(db, "users", user.uid), {
+          displayName: sanitizedDisplayName,
+          email: user.email, // Keep original email until verified
+          pendingEmail: sanitizedEmail,
+          photoURL: profileImageURL,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        setEmailVerificationSent(true);
+        setSuccess("A verification email has been sent to your new email address. Please verify it to complete the email change.");
+      } else {
+        // Update Firestore if email is unchanged
+        await setDoc(doc(db, "users", user.uid), {
+          displayName: sanitizedDisplayName,
+          email: sanitizedEmail,
+          photoURL: profileImageURL,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
       }
 
+      // Handle password update
       if (newPassword) {
         if (!currentPassword) {
           setError("Current password is required to change password.");
@@ -288,14 +321,9 @@ const Profile = () => {
         await updatePassword(user, newPassword);
       }
 
-      await setDoc(doc(db, "users", user.uid), {
-        displayName: sanitizedDisplayName,
-        email: sanitizedEmail,
-        photoURL: profileImageURL,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
-      setSuccess("Profile updated successfully!");
+      if (!sanitizedEmail !== user.email) {
+        setSuccess("Profile updated successfully!");
+      }
       setIsEditing(false);
       setCurrentPassword("");
       setNewPassword("");
@@ -320,6 +348,7 @@ const Profile = () => {
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
+    setEmailVerificationSent(false);
     clearMessages();
   };
 
@@ -401,6 +430,14 @@ const Profile = () => {
             </div>
           </div>
         )}
+        {emailVerificationSent && (
+          <div className="bg-yellow-500/20 backdrop-blur-sm border border-yellow-500/30 text-yellow-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
+            <div className="flex items-center">
+              <div className="w-2 h-2 bg-yellow-400 rounded-full mr-3"></div>
+              Verification email sent to {pendingEmail}. Please verify to complete the email change.
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
@@ -474,12 +511,12 @@ const Profile = () => {
                   </button>
                   <br />
                   <button
-                  onClick={() => navigate('/saved')}
-                  className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100"
-                >
-                  <span className="font-medium">Go to Saved News</span>
-                  <FaBookmark className="text-lg group-hover:animate-bounce" />
-                </button>
+                    onClick={() => navigate('/saved')}
+                    className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100"
+                  >
+                    <span className="font-medium">Go to Saved News</span>
+                    <FaBookmark className="text-lg group-hover:animate-bounce" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -540,6 +577,11 @@ const Profile = () => {
                     }`}
                     placeholder="Enter your email"
                   />
+                  {pendingEmail && (
+                    <p className="text-yellow-200 text-xs mt-2">
+                      Pending email: {pendingEmail} (awaiting verification)
+                    </p>
+                  )}
                 </div>
 
                 {isEditing && (
