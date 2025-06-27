@@ -14,6 +14,7 @@ import HeroSection from "./component/common/herosection";
 import NewsPage from "./component/common/newspage";
 import LiveNewsSection from "./component/common/livenewsection";
 import LatestNewsSection from "./component/common/latestnewsection";
+import AllNews from "./component/AllNews/AllNews";
 import SecurityMonitor from "./component/auth/SecurityMonitor";
 import Nasional from "./component/Navigation/Nasional";
 import Internasional from "./component/Navigation/Internasional";
@@ -46,6 +47,14 @@ const App = () => {
                 <LiveNewsSection />
                 <LatestNewsSection />
               </div>
+            }
+          />
+          <Route
+            path="/allnews"
+            element={
+              <ErrorBoundary>
+                <AllNews />
+              </ErrorBoundary>
             }
           />
           <Route

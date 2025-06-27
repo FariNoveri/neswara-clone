@@ -194,7 +194,7 @@ const NewsPage = () => {
                 ))}
                 <button
                   className="w-full mt-6 bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-                  onClick={() => navigate("/news/more")} // Placeholder untuk pagination
+                  onClick={() => navigate("/allnews")} // Placeholder untuk pagination
                 >
                   Muat Lebih Banyak
                 </button>
