@@ -29,6 +29,7 @@ import Otomotif from "./component/Navigation/Otomotif";
 import Wisata from "./component/Navigation/Wisata";
 import Kuliner from "./component/Navigation/Kuliner";
 import Entertainment from "./component/Navigation/Entertainment";
+import Liked from "./component/Pages/Liked";
 
 const App = () => {
   return (
@@ -198,6 +199,14 @@ const App = () => {
             element={
               <ErrorBoundary>
                 <Entertainment />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/liked"
+            element={
+              <ErrorBoundary>
+                <Liked />
               </ErrorBoundary>
             }
           />

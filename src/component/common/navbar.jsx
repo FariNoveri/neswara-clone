@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { FaBars, FaUserCircle, FaChevronDown, FaBookmark, FaHome, FaNewspaper, FaGlobe, FaTimes } from "react-icons/fa";
+import { FaBars, FaUserCircle, FaChevronDown, FaBookmark, FaHome, FaNewspaper, FaGlobe, FaTimes, FaHeart } from "react-icons/fa";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import AuthModal from "../auth/AuthModal";
@@ -78,7 +78,6 @@ const Navbar = () => {
     { name: "TEKNOLOGI", path: "/teknologi" },
     { name: "LIFESTYLE", path: "/lifestyle" },
     { name: "DAERAH", path: "/daerah" },
-    { name: "YANG ANDA SIMPAN", path: "/saved", icon: FaBookmark },
   ];
 
   const dropdownItems = [

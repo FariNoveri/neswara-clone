@@ -328,7 +328,7 @@ const Login = ({ onSwitchForm, onClose }) => {
           </div>
           <ReCAPTCHA
             ref={recaptchaRef}
-            sitekey="6LdUQGorAAAAAOuQQwPAYnGtJrDmewRwGJbh1gJK"
+            sitekey={import.meta.env.VITE_RECAPTCHA_SITEKEY}
             onChange={(token) => setRecaptchaToken(token)}
             onErrored={() => setError("Gagal memuat reCAPTCHA. Periksa koneksi internet Anda.")}
             onExpired={() => {

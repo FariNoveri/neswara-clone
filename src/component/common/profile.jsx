@@ -12,7 +12,9 @@ import {
   FaKey,
   FaExclamationTriangle,
   FaSignOutAlt,
-  FaTrash
+  FaTrash,
+  FaHeart,
+  FaBookmark
 } from "react-icons/fa";
 import { 
   auth, 
@@ -39,7 +41,6 @@ import { deleteDoc } from "firebase/firestore";
 // Simple input sanitization function
 const sanitizeInput = (input) => {
   if (!input) return input;
-  // Remove HTML tags, script tags, and potentially dangerous characters
   return input
     .replace(/[<>{}]/g, '') // Remove <, >, {, }
     .replace(/script/gi, '') // Remove "script" (case-insensitive)
@@ -53,31 +54,27 @@ const validateImageFile = (file, callback) => {
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const maxSize = 5 * 1024 * 1024; // 5MB
 
-  // Check file extension
   const fileExtension = file.name.split('.').pop().toLowerCase();
   if (!allowedExtensions.includes(fileExtension)) {
     callback(new Error(`Invalid file extension. Allowed: ${allowedExtensions.join(', ')}`));
     return;
   }
 
-  // Check MIME type
   if (!allowedMimeTypes.includes(file.type)) {
     callback(new Error(`Invalid file type. Allowed: ${allowedMimeTypes.join(', ')}`));
     return;
   }
 
-  // Check file size
   if (file.size > maxSize) {
     callback(new Error('File size exceeds 5MB limit.'));
     return;
   }
 
-  // Verify file is a valid image by attempting to load it
   const img = new Image();
   const objectUrl = URL.createObjectURL(file);
   img.onload = () => {
     URL.revokeObjectURL(objectUrl);
-    callback(null); // Valid image
+    callback(null);
   };
   img.onerror = () => {
     URL.revokeObjectURL(objectUrl);
@@ -93,7 +90,6 @@ const Profile = () => {
   const [success, setSuccess] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   
-  // Form states
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -105,7 +101,6 @@ const Profile = () => {
   const [deleting, setDeleting] = useState(false);
   const [lastUploadTime, setLastUploadTime] = useState(null);
 
-  // Show/hide password states
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -114,7 +109,6 @@ const Profile = () => {
   const navigate = useNavigate();
   const timeoutRef = useRef(null);
 
-  // Function to reset the logout timer
   const resetTimeout = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -132,7 +126,6 @@ const Profile = () => {
     }, 5 * 60 * 1000);
   };
 
-  // Handle user activity to reset timer
   const handleUserActivity = () => {
     resetTimeout();
   };
@@ -187,14 +180,12 @@ const Profile = () => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Rate limiting: Prevent uploads within 30 seconds of the last upload
     const now = Date.now();
     if (lastUploadTime && now - lastUploadTime < 30 * 1000) {
       setError("Please wait 30 seconds before uploading another image.");
       return;
     }
 
-    // Validate file
     validateImageFile(file, async (error) => {
       if (error) {
         setError(error.message);
@@ -371,7 +362,6 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
-      {/* Animated background elements */}
       <div className="absolute inset-0">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
@@ -379,7 +369,6 @@ const Profile = () => {
       </div>
 
       <div className="relative z-10 container mx-auto px-4 max-w-4xl py-8">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <button
             onClick={() => navigate('/')}
@@ -396,7 +385,6 @@ const Profile = () => {
           </div>
         </div>
 
-        {/* Success/Error Messages */}
         {error && (
           <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-center">
@@ -415,10 +403,8 @@ const Profile = () => {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Profile Image & Quick Info */}
           <div className="lg:col-span-1">
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
-              {/* Profile Image */}
               <div className="flex flex-col items-center mb-8">
                 <div className="relative group">
                   <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/20 group-hover:border-white/40 transition-all duration-300 shadow-2xl">
@@ -459,7 +445,6 @@ const Profile = () => {
                 <p className="text-white/60 text-sm mt-1">{email}</p>
               </div>
 
-              {/* Quick Stats */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/60">Member since</span>
@@ -479,13 +464,28 @@ const Profile = () => {
                     {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString() : 'N/A'}
                   </span>
                 </div>
+                <div className="pt-4 border-t border-white/10">
+                  <button
+                    onClick={() => navigate('/liked')}
+                    className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700"
+                  >
+                    <span className="font-medium">Go to Liked News</span>
+                    <FaHeart className="text-lg group-hover:animate-bounce" />
+                  </button>
+                  <br />
+                  <button
+                  onClick={() => navigate('/saved')}
+                  className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100"
+                >
+                  <span className="font-medium">Go to Saved News</span>
+                  <FaBookmark className="text-lg group-hover:animate-bounce" />
+                </button>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Profile Form */}
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
               <div className="flex items-center justify-between mb-8">
                 <div>
@@ -504,7 +504,6 @@ const Profile = () => {
               </div>
 
               <form onSubmit={handleSaveProfile} className="space-y-6">
-                {/* Display Name */}
                 <div className="group">
                   <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
                     <FaUser className="mr-2 text-purple-400" />
@@ -524,7 +523,6 @@ const Profile = () => {
                   />
                 </div>
 
-                {/* Email */}
                 <div className="group">
                   <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
                     <FaEnvelope className="mr-2 text-purple-400" />
@@ -544,7 +542,6 @@ const Profile = () => {
                   />
                 </div>
 
-                {/* Password Fields (only show when editing) */}
                 {isEditing && (
                   <div className="space-y-6 border-t border-white/10 pt-6">
                     <h4 className="text-lg font-semibold text-white flex items-center">
@@ -552,7 +549,6 @@ const Profile = () => {
                       Security Settings
                     </h4>
                     
-                    {/* Current Password */}
                     <div className="group">
                       <label className="block text-white/80 text-sm font-medium mb-3">
                         Current Password
@@ -576,7 +572,6 @@ const Profile = () => {
                       <p className="text-white/40 text-xs mt-2">Required to change email or password</p>
                     </div>
 
-                    {/* New Password */}
                     <div className="group">
                       <label className="block text-white/80 text-sm font-medium mb-3">
                         New Password (Optional)
@@ -599,7 +594,6 @@ const Profile = () => {
                       </div>
                     </div>
 
-                    {/* Confirm New Password */}
                     {newPassword && (
                       <div className="group">
                         <label className="block text-white/80 text-sm font-medium mb-3">
@@ -626,7 +620,6 @@ const Profile = () => {
                   </div>
                 )}
 
-                {/* Action Buttons */}
                 {isEditing && (
                   <div className="flex justify-end space-x-4 pt-6 border-t border-white/10">
                     <button
@@ -649,7 +642,6 @@ const Profile = () => {
               </form>
             </div>
 
-            {/* Danger Zone */}
             <div className="bg-red-500/10 backdrop-blur-md rounded-3xl p-8 border border-red-500/20 hover:border-red-500/30 transition-all duration-500">
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-red-300 flex items-center">
@@ -692,7 +684,6 @@ const Profile = () => {
         </div>
       </div>
 
-      {/* Loading Overlays */}
       {uploading && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/20">
