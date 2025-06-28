@@ -18,7 +18,6 @@ export default defineConfig({
     },
   },
   // Hide HMR update messages - cuma show warning & error
-  logLevel: 'warn',
   
   // Atau kalau mau lebih spesifik, bisa pakai custom logger
   // customLogger: {

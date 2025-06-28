@@ -9,7 +9,7 @@ import {
   query,
   where
 } from 'firebase/firestore';
-import { Eye, RefreshCw, User, UserX, Trash2 } from 'lucide-react';
+import { Eye, RefreshCw, User, UserX, Trash2, Shield } from 'lucide-react';
 
 const ManageViews = ({ onViewsUpdated }) => {
   const [newsItems, setNewsItems] = useState([]);
@@ -362,8 +362,10 @@ const ManageViews = ({ onViewsUpdated }) => {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-500">
-                    <Eye className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                    <p>Belum ada yang melihat berita ini</p>
+                    <Shield className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-lg font-medium">Data Privasi Terlindungi</p>
+                    <p className="text-sm">Tidak ada riwayat viewing yang tersimpan untuk berita ini</p>
+                    <p className="text-xs mt-2 text-gray-400">Informasi pengunjung dijaga kerahasiaannya</p>
                   </div>
                 )}
               </div>

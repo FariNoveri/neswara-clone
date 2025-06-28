@@ -58,7 +58,8 @@ const BreakingNewsAdmin = () => {
   const handleSaveNews = async () => {
     if (!formData.text.trim()) return;
 
-    if (formData.speed < 5 || formData.speed > 30) {
+    const speedValue = parseInt(formData.speed) || 15;
+    if (speedValue < 5 || speedValue > 30) {
       setIsSpeedWarningOpen(true);
       return;
     }
@@ -68,18 +69,19 @@ const BreakingNewsAdmin = () => {
       if (editingNews) {
         await updateDoc(doc(db, 'breakingNews', editingNews.id), {
           ...formData,
+          speed: speedValue,
           updatedAt: serverTimestamp()
         });
       } else {
         await addDoc(collection(db, 'breakingNews'), {
           ...formData,
+          speed: speedValue,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
       }
       fetchBreakingNews();
       setIsModalOpen(false);
-      setEditingNews(null);
       setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
     } catch (error) {
       console.error('Error saving breaking news:', error);
@@ -115,50 +117,100 @@ const BreakingNewsAdmin = () => {
   };
 
   const handleUpdateAllSpeeds = async () => {
-    if (breakingNews.length === 0) return;
+    if (breakingNews.length === 0) {
+      setIsSpeedModalOpen(false);
+      return;
+    }
 
-    if (globalSpeed < 5 || globalSpeed > 30) {
+    const speedValue = parseInt(globalSpeed) || 15;
+    if (speedValue < 5 || speedValue > 30) {
       setIsSpeedWarningOpen(true);
       return;
     }
 
-    if (window.confirm(`Apakah Anda yakin ingin mengubah kecepatan semua breaking news menjadi ${globalSpeed} detik?`)) {
-      setLoading(true);
-      try {
-        const batch = writeBatch(db);
-        
-        breakingNews.forEach((news) => {
-          const newsRef = doc(db, 'breakingNews', news.id);
-          batch.update(newsRef, {
-            speed: globalSpeed,
-            updatedAt: serverTimestamp()
-          });
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      breakingNews.forEach((news) => {
+        const newsRef = doc(db, 'breakingNews', news.id);
+        batch.update(newsRef, {
+          speed: speedValue,
+          updatedAt: serverTimestamp()
         });
-        
-        await batch.commit();
-        fetchBreakingNews();
-        setIsSpeedModalOpen(false);
-      } catch (error) {
-        console.error('Error updating all speeds:', error);
-      }
+      });
+      await batch.commit();
+      fetchBreakingNews();
+      setIsSpeedModalOpen(false);
+    } catch (error) {
+      console.error('Error during batch update:', error.message);
+    } finally {
       setLoading(false);
     }
   };
 
   const handleSpeedWarningConfirm = () => {
-    if (isSpeedModalOpen && (globalSpeed < 5 || globalSpeed > 30)) {
-      handleUpdateAllSpeeds();
-    } else if (isModalOpen && (formData.speed < 5 || formData.speed > 30)) {
-      handleSaveNews();
+    const speedValue = isSpeedModalOpen ? parseInt(globalSpeed) || 15 : parseInt(formData.speed) || 15;
+    
+    // Override speed to be within 5-30 range
+    const adjustedSpeed = Math.max(5, Math.min(30, speedValue));
+    
+    setLoading(true);
+    try {
+      if (isSpeedModalOpen) {
+        // Update global speed
+        setGlobalSpeed(adjustedSpeed);
+        const batch = writeBatch(db);
+        breakingNews.forEach((news) => {
+          const newsRef = doc(db, 'breakingNews', news.id);
+          batch.update(newsRef, {
+            speed: adjustedSpeed,
+            updatedAt: serverTimestamp()
+          });
+        });
+        batch.commit().then(() => {
+          fetchBreakingNews();
+          setIsSpeedModalOpen(false);
+        });
+      } else if (isModalOpen) {
+        // Update single news item
+        setFormData(prev => ({ ...prev, speed: adjustedSpeed }));
+        if (editingNews) {
+          updateDoc(doc(db, 'breakingNews', editingNews.id), {
+            ...formData,
+            speed: adjustedSpeed,
+            updatedAt: serverTimestamp()
+          }).then(() => {
+            fetch
+
+BreakingNews();
+            setIsModalOpen(false);
+            setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
+          });
+        } else {
+          addDoc(collection(db, 'breakingNews'), {
+            ...formData,
+            speed: adjustedSpeed,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).then(() => {
+            fetchBreakingNews();
+            setIsModalOpen(false);
+            setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error in speed warning confirmation:', error);
+    } finally {
+      setIsSpeedWarningOpen(false);
+      setLoading(false);
     }
-    setIsSpeedWarningOpen(false);
   };
 
   const activeNews = breakingNews.filter(news => news.isActive).sort((a, b) => a.priority - b.priority);
   const isEmergency = activeNews.some(n => n.isEmergency);
   const speed = activeNews.length > 0 ? (activeNews[0].speed || 15) : 15;
 
-  // Generate duplicate content for seamless scrolling
   const newsContent = activeNews.map((news, index) => (
     `${news.text || 'No text available'}${index < activeNews.length - 1 ? ' - ' : ''}`
   )).join('');
@@ -235,13 +287,12 @@ const BreakingNewsAdmin = () => {
                     <div 
                       className="breaking-news-text whitespace-nowrap text-white font-medium" 
                       style={{ 
-                        animationDuration: `${speed}s`, 
-                        animation: 'marquee linear infinite', 
+                        animation: `marquee linear ${speed}s infinite`,
                         display: 'inline-block',
                         willChange: 'transform'
                       }}
                     >
-                      {newsContent} - {newsContent}
+                      {newsContent} {newsContent}
                     </div>
                   </div>
                 </div>
@@ -437,7 +488,6 @@ const BreakingNewsAdmin = () => {
           </div>
         </div>
 
-        {/* Modal Tambah/Edit Breaking News */}
         {isModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -508,20 +558,19 @@ const BreakingNewsAdmin = () => {
                   </label>
                   <input
                     type="number"
-                    min="1" // Changed to allow full deletion
-                    value={formData.speed === 0 ? '' : formData.speed} // Allow empty if 0
+                    value={formData.speed || ''}
                     onChange={(e) => {
                       const value = e.target.value;
                       setFormData(prev => ({
                         ...prev,
-                        speed: value === '' ? 0 : parseInt(value) || 15 // Handle empty input as 0 temporarily
+                        speed: value === '' ? '' : parseInt(value)
                       }));
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="15"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Atur kecepatan scroll (tidak ada batas atas)
+                    Atur kecepatan scroll (5-30 detik direkomendasikan)
                   </p>
                 </div>
                 <div>
@@ -554,13 +603,12 @@ const BreakingNewsAdmin = () => {
                           <div 
                             className="breaking-news-text whitespace-nowrap text-white font-medium" 
                             style={{ 
-                              animationDuration: `${(formData.speed || 15)}s`, 
-                              animation: 'marquee linear infinite', 
+                              animation: `marquee linear ${(formData.speed || 15)}s infinite`,
                               display: 'inline-block',
                               willChange: 'transform'
                             }}
                           >
-                            {formData.text} - {formData.text}
+                            {formData.text} {formData.text}
                           </div>
                         </div>
                       </div>
@@ -589,7 +637,6 @@ const BreakingNewsAdmin = () => {
           </div>
         )}
 
-        {/* Modal Pengaturan Kecepatan Global */}
         {isSpeedModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
@@ -627,17 +674,16 @@ const BreakingNewsAdmin = () => {
                   </label>
                   <input
                     type="number"
-                    min="1" // Changed to allow full deletion
-                    value={globalSpeed === 0 ? '' : globalSpeed} // Allow empty if 0
+                    value={globalSpeed || ''}
                     onChange={(e) => {
                       const value = e.target.value;
-                      setGlobalSpeed(value === '' ? 0 : parseInt(value) || 15); // Handle empty input as 0 temporarily
+                      setGlobalSpeed(value === '' ? '' : parseInt(value));
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="15"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Kecepatan yang lebih rendah = scrolling lebih cepat (tidak ada batas atas)
+                    Kecepatan yang lebih rendah = scrolling lebih cepat (5-30 detik direkomendasikan)
                   </p>
                 </div>
 
@@ -652,13 +698,12 @@ const BreakingNewsAdmin = () => {
                         <div 
                           className="breaking-news-text whitespace-nowrap text-white font-medium text-sm" 
                           style={{ 
-                            animationDuration: `${globalSpeed}s`, 
-                            animation: 'marquee linear infinite', 
+                            animation: `marquee linear ${(globalSpeed || 15)}s infinite`,
                             display: 'inline-block',
                             willChange: 'transform'
                           }}
                         >
-                          Contoh breaking news dengan kecepatan {globalSpeed} detik - Test preview kecepatan scroll
+                          Contoh breaking news dengan kecepatan {(globalSpeed || 15)} detik - Test preview kecepatan scroll
                         </div>
                       </div>
                     </div>
@@ -700,7 +745,6 @@ const BreakingNewsAdmin = () => {
           </div>
         )}
 
-        {/* Modal Peringatan Kecepatan */}
         {isSpeedWarningOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6 transform transition-all duration-300 ease-out animate-fadeInSlideDown">
@@ -718,7 +762,7 @@ const BreakingNewsAdmin = () => {
                 </button>
               </div>
               <p className="text-sm text-gray-700 mb-4">
-                Kecepatan {isSpeedModalOpen ? globalSpeed : formData.speed} detik di luar rentang normal (5-30 detik). Apakah Anda yakin ingin melanjutkan?
+                Kecepatan {isSpeedModalOpen ? (parseInt(globalSpeed) || 15) : (parseInt(formData.speed) || 15)} detik di luar rentang normal (5-30 detik). Apakah Anda yakin ingin melanjutkan?
               </p>
               <div className="flex justify-end space-x-3">
                 <button
@@ -751,6 +795,10 @@ const BreakingNewsAdmin = () => {
           }
           .animate-fadeInSlideDown {
             animation: fadeInSlideDown 0.3s ease-out;
+          }
+          .breaking-news-text {
+            display: inline-block;
+            white-space: nowrap;
           }
         `}</style>
       </div>

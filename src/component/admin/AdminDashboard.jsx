@@ -39,6 +39,7 @@ import TrendsChart from './TrendsChart';
 import BreakingNewsAdmin from './BreakingNewsAdmin';
 import NotificationManagement from './NotificationManagement';
 import ManageViews from './ManageViews';
+import LogActivity from './LogActivity'; // Impor komponen LogActivity
 
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
@@ -77,6 +78,22 @@ const AdminDashboard = () => {
     gambarDeskripsi: ''
   });
 
+  // Fungsi untuk menyimpan log aktivitas
+  const logActivity = async (action, details) => {
+    try {
+      await addDoc(collection(db, 'logs'), {
+        userId: user?.uid,
+        userEmail: user?.email,
+        action: action,
+        details: details,
+        timestamp: serverTimestamp(),
+        ipAddress: null // Bisa ditambahkan logika untuk mendapatkan IP jika diperlukan
+      });
+    } catch (error) {
+      console.error('Error logging activity:', error);
+    }
+  };
+
   useEffect(() => {
     if (!loading && user) {
       const checkAuthorization = async () => {
@@ -101,6 +118,20 @@ const AdminDashboard = () => {
         }
       };
       checkAuthorization();
+
+      // Pantau perubahan profil pengguna
+      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+        if (currentUser && currentUser.uid === user.uid) {
+          if (currentUser.photoURL !== user.photoURL) {
+            logActivity('PROFILE_UPDATE', { type: 'photo', newValue: currentUser.photoURL });
+          }
+          if (currentUser.email !== user.email) {
+            logActivity('PROFILE_UPDATE', { type: 'email', newValue: currentUser.email });
+          }
+        }
+      });
+
+      return () => unsubscribe();
     } else if (!loading && !user) {
       navigate('/');
     }
@@ -120,6 +151,7 @@ const AdminDashboard = () => {
   const handleAdminLogout = async () => {
     try {
       await auth.signOut();
+      logActivity('LOGOUT', { userEmail: user?.email });
       navigate('/');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -140,12 +172,10 @@ const AdminDashboard = () => {
         return newsItem;
       }));
 
-      // PERBAIKAN: Hitung total stats dari semua data SEBELUM filtering
       const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
       const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
       const totalNews = newsData.length;
 
-      // Update stats dengan data yang belum difilter
       setStats(prev => ({
         ...prev,
         totalNews,
@@ -156,7 +186,6 @@ const AdminDashboard = () => {
       const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
       setCategories(['', ...uniqueCategories]);
 
-      // Sekarang baru lakukan filtering untuk tampilan tabel
       if (filterTitle) {
         newsData = newsData.filter(item =>
           item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
@@ -199,7 +228,6 @@ const AdminDashboard = () => {
           break;
       }
 
-      // Set news data yang sudah difilter untuk tampilan tabel
       setNews(newsData);
 
     } catch (error) {
@@ -237,10 +265,8 @@ const AdminDashboard = () => {
     }
   };
 
-  // PERBAIKAN: Fungsi untuk refresh data ketika views diupdate
   const handleViewsUpdated = async () => {
     console.log('Views updated, refreshing data...');
-    // Refresh semua data ketika views direset dari ManageViews
     await fetchNews();
     await fetchUsers();
     await fetchComments();
@@ -269,13 +295,15 @@ const AdminDashboard = () => {
           ...formData,
           updatedAt: serverTimestamp()
         });
+        logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul });
       } else {
-        await addDoc(collection(db, 'news'), {
+        const docRef = await addDoc(collection(db, 'news'), {
           ...formData,
           createdAt: serverTimestamp(),
           views: 0,
           komentar: 0
         });
+        logActivity('ADD_NEWS', { newsId: docRef.id, title: formData.judul });
       }
 
       resetForm();
@@ -290,8 +318,13 @@ const AdminDashboard = () => {
   const handleDeleteNews = async id => {
     if (window.confirm('Apakah Anda yakin ingin menghapus berita ini?')) {
       try {
-        await deleteDoc(doc(db, 'news', id));
-        fetchNews();
+        const newsDoc = await getDoc(doc(db, 'news', id));
+        if (newsDoc.exists()) {
+          const newsData = newsDoc.data();
+          await deleteDoc(doc(db, 'news', id));
+          logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul });
+          fetchNews();
+        }
       } catch (error) {
         console.error('Error deleting news:', error);
       }
@@ -398,7 +431,8 @@ const AdminDashboard = () => {
               { id: 'comments', label: 'Kelola Komentar', icon: MessageCircle },
               { id: 'breaking-news', label: 'Kelola Breaking News', icon: RadioTower },
               { id: 'notifications', label: 'Kelola Notifikasi', icon: Bell },
-              { id: 'views', label: 'Kelola Views', icon: Eye }
+              { id: 'views', label: 'Kelola Views', icon: Eye },
+              { id: 'logs', label: 'Kelola Log', icon: FileText }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -660,10 +694,11 @@ const AdminDashboard = () => {
 
         {activeTab === 'notifications' && <NotificationManagement />}
 
-        {/* Menambahkan prop onViewsUpdated */}
         {activeTab === 'views' && (
           <ManageViews onViewsUpdated={handleViewsUpdated} />
         )}
+
+        {activeTab === 'logs' && <LogActivity />} {/* Ganti dengan LogActivity */}
 
         <NewsModal
           showModal={showModal}
