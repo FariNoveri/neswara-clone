@@ -3,12 +3,11 @@ import { FaBars, FaUserCircle, FaChevronDown, FaBookmark, FaHome, FaNewspaper, F
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import AuthModal from "../auth/AuthModal";
-import { db } from "../../firebaseconfig.js";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { logoutUser } from "../auth/Auth";
 import { getAuth } from "firebase/auth";
 import SearchBar from "../Pages/SearchBar";
 import Notifications from "../Pages/Notifications";
+import BreakingNews from "../Pages/BreakingNews";
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -17,7 +16,6 @@ const Navbar = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formMode, setFormMode] = useState("login");
   const [isScrolled, setIsScrolled] = useState(true);
-  const [breakingNews, setBreakingNews] = useState([]);
 
   const profileDropdownRef = useRef(null);
   const moreDropdownRef = useRef(null);
@@ -26,47 +24,11 @@ const Navbar = () => {
   const auth = getAuth();
   const navigate = useNavigate();
 
-  // Log auth state for debugging
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       console.log("Auth state in Navbar:", user ? user.uid : "Unauthenticated");
     });
     return () => unsubscribe();
-  }, []);
-
-  // Fetch breaking news
-  useEffect(() => {
-    const fetchBreakingNews = async () => {
-      try {
-        const collectionRef = collection(db, "breakingNews");
-        const q = query(
-          collectionRef,
-          where("isActive", "==", true),
-          orderBy("priority", "asc")
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          const newsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setBreakingNews(newsData);
-        }, (error) => {
-          console.error("Firestore onSnapshot error:", {
-            message: error.message || "Unknown error",
-            code: error.code || "No code",
-            stack: error.stack || "No stack trace",
-          });
-        });
-
-        return () => unsubscribe();
-      } catch (error) {
-        console.error("Error in fetchBreakingNews:", {
-          message: error.message || "Unknown error",
-          code: error.code || "No code",
-          stack: error.stack || "No stack trace",
-        });
-      }
-    };
-
-    fetchBreakingNews();
   }, []);
 
   const mainMenuItems = [
@@ -143,7 +105,8 @@ const Navbar = () => {
 
   return (
     <>
-      <style jsx>{`
+      <BreakingNews />
+      <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
         * {
@@ -168,6 +131,11 @@ const Navbar = () => {
         @keyframes bounce {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.05); }
+        }
+
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
         }
 
         .navbar-transition {
@@ -216,16 +184,16 @@ const Navbar = () => {
           padding: 8px 0;
           font-size: 13px;
           font-weight: 500;
+          position: relative;
+          z-index: 50;
         }
 
         .breaking-news-text {
           white-space: nowrap;
-          animation: marquee 30s linear infinite;
-        }
-
-        @keyframes marquee {
-          0% { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
+          animation: marquee linear infinite;
+          display: inline-block;
+          min-width: 200%;
+          overflow: hidden;
         }
 
         .notification-indicator {
@@ -314,26 +282,6 @@ const Navbar = () => {
           color: #2563eb;
         }
       `}</style>
-
-      {breakingNews.length > 0 && (
-        <div className="breaking-news">
-          <div className="container mx-auto px-4 flex items-center">
-            <span className="bg-white text-blue-600 px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0">
-              BREAKING
-            </span>
-            <div className="overflow-hidden flex-1">
-              <div className="breaking-news-text">
-                {breakingNews.map((news, index) => (
-                  <span key={news.id} className="mr-8">
-                    {news.text}
-                    {index < breakingNews.length - 1 && " | "}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <nav className={`w-full sticky top-0 z-40 navbar-transition ${
         isScrolled ? "glass-effect shadow-lg" : "bg-white shadow-md"

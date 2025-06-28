@@ -1,4 +1,3 @@
-// vite.config.js
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -18,4 +17,19 @@ export default defineConfig({
       },
     },
   },
+  // Hide HMR update messages - cuma show warning & error
+  logLevel: 'warn',
+  
+  // Atau kalau mau lebih spesifik, bisa pakai custom logger
+  // customLogger: {
+  //   info: (msg) => {
+  //     // Skip semua HMR messages
+  //     if (msg.includes('hmr update') || msg.includes('[vite]')) return;
+  //     console.log(msg);
+  //   },
+  //   warn: console.warn,
+  //   error: console.error,
+  //   warnOnce: console.warn,
+  //   errorOnce: console.error
+  // }
 });
