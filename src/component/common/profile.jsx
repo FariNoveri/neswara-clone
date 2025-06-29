@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  FaCamera, 
-  FaEdit, 
-  FaSave, 
-  FaTimes, 
-  FaEye, 
+import {
+  FaCamera,
+  FaEdit,
+  FaSave,
+  FaTimes,
+  FaEye,
   FaEyeSlash,
   FaArrowLeft,
   FaUser,
@@ -14,14 +14,17 @@ import {
   FaSignOutAlt,
   FaTrash,
   FaHeart,
-  FaBookmark
+  FaBookmark,
+  FaGoogle,
+  FaFacebook,
+  FaInfoCircle
 } from "react-icons/fa";
-import { 
-  auth, 
-  db 
+import {
+  auth,
+  db
 } from "../../firebaseconfig";
-import { 
-  onAuthStateChanged, 
+import {
+  onAuthStateChanged,
   updateProfile,
   updatePassword,
   updateEmail,
@@ -30,11 +33,13 @@ import {
   sendEmailVerification,
   signOut
 } from "firebase/auth";
-import { 
-  doc, 
-  setDoc, 
+import {
+  doc,
+  setDoc,
   getDoc,
-  updateDoc 
+  updateDoc,
+  addDoc,
+  collection
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { deleteDoc } from "firebase/firestore";
@@ -43,9 +48,9 @@ import { deleteDoc } from "firebase/firestore";
 const sanitizeInput = (input) => {
   if (!input) return input;
   return input
-    .replace(/[<>{}]/g, '') // Remove <, >, {, }
-    .replace(/script/gi, '') // Remove "script" (case-insensitive)
-    .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+    .replace(new RegExp('[<>}{]', 'g'), '') // Remove <, >, {, }
+    .replace(new RegExp('script', 'gi'), '') // Remove "script" (case-insensitive)
+    .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '') // Remove control characters
     .trim();
 };
 
@@ -92,7 +97,8 @@ const Profile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
   const [emailVerificationSent, setEmailVerificationSent] = useState(false);
-  
+  const [isSocialLogin, setIsSocialLogin] = useState(false);
+
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -107,7 +113,7 @@ const Profile = () => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const timeoutRef = useRef(null);
@@ -133,6 +139,43 @@ const Profile = () => {
     resetTimeout();
   };
 
+  // Helper function to determine login method
+  const getLoginMethod = (user) => {
+    if (!user?.providerData?.length) return null;
+    
+    const providers = user.providerData.map(provider => provider.providerId);
+    
+    if (providers.includes('google.com')) return 'google';
+    if (providers.includes('facebook.com')) return 'facebook';
+    if (providers.includes('password')) return 'email';
+    
+    return 'unknown';
+  };
+
+  const getLoginMethodIcon = (method) => {
+    switch (method) {
+      case 'google':
+        return <FaGoogle className="text-red-400" />;
+      case 'facebook':
+        return <FaFacebook className="text-blue-400" />;
+      default:
+        return <FaEnvelope className="text-purple-400" />;
+    }
+  };
+
+  const getLoginMethodText = (method) => {
+    switch (method) {
+      case 'google':
+        return 'Google Account';
+      case 'facebook':
+        return 'Facebook Account';
+      case 'email':
+        return 'Email & Password';
+      default:
+        return 'Unknown Method';
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -140,6 +183,10 @@ const Profile = () => {
         setDisplayName(sanitizeInput(user.displayName || ""));
         setEmail(sanitizeInput(user.email || ""));
         setProfileImageURL(user.photoURL || "");
+
+        // Check if user logged in via social media
+        const loginMethod = getLoginMethod(user);
+        setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
 
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -230,6 +277,19 @@ const Profile = () => {
           { merge: true }
         );
 
+        // Log profile image update
+        await addDoc(collection(db, "logs"), {
+          action: "PROFILE_UPDATE",
+          userEmail: user.email,
+          details: {
+            type: "photoURL",
+            oldValue: profileImageURL || "No previous image",
+            newValue: publicUrl,
+            isAdmin: false
+          },
+          timestamp: new Date()
+        });
+
         setProfileImageURL(publicUrl);
         setSuccess("Profile image updated successfully!");
         setLastUploadTime(now);
@@ -255,41 +315,64 @@ const Profile = () => {
     }
 
     try {
-      // Update display name
-      await updateProfile(user, {
-        displayName: sanitizedDisplayName
-      });
+      const originalDisplayName = user.displayName || "";
+      const originalEmail = user.email;
 
-      // Handle email update with verification
-      if (sanitizedEmail !== user.email) {
+      if (sanitizedDisplayName !== originalDisplayName) {
+        await updateProfile(user, {
+          displayName: sanitizedDisplayName
+        });
+
+        await addDoc(collection(db, "logs"), {
+          action: "PROFILE_UPDATE",
+          userEmail: user.email,
+          details: {
+            type: "displayName",
+            oldValue: originalDisplayName,
+            newValue: sanitizedDisplayName,
+            isAdmin: false
+          },
+          timestamp: new Date()
+        });
+      }
+
+      if (sanitizedEmail !== originalEmail) {
         if (!currentPassword) {
-          setError("Current password is required to change email.");
+          setError(isSocialLogin 
+            ? "Current password is required to change email. If you signed in with Google/Facebook, please use the password from that account or set up a new password first."
+            : "Current password is required to change email.");
           return;
         }
 
-        // Reauthenticate user
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
 
-        // Temporarily update email to trigger verification
         await updateEmail(user, sanitizedEmail);
-
-        // Send verification email to the new email
         await sendEmailVerification(user);
 
-        // Store pending email in Firestore
         await setDoc(doc(db, "users", user.uid), {
           displayName: sanitizedDisplayName,
-          email: user.email, // Keep original email until verified
+          email: user.email,
           pendingEmail: sanitizedEmail,
           photoURL: profileImageURL,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
+        await addDoc(collection(db, "logs"), {
+          action: "PROFILE_UPDATE",
+          userEmail: user.email,
+          details: {
+            type: "email",
+            oldValue: originalEmail,
+            newValue: sanitizedEmail,
+            isAdmin: false
+          },
+          timestamp: new Date()
+        });
+
         setEmailVerificationSent(true);
         setSuccess("A verification email has been sent to your new email address. Please verify it to complete the email change.");
       } else {
-        // Update Firestore if email is unchanged
         await setDoc(doc(db, "users", user.uid), {
           displayName: sanitizedDisplayName,
           email: sanitizedEmail,
@@ -298,10 +381,11 @@ const Profile = () => {
         }, { merge: true });
       }
 
-      // Handle password update
       if (newPassword) {
         if (!currentPassword) {
-          setError("Current password is required to change password.");
+          setError(isSocialLogin 
+            ? "Current password is required to change password. If you signed in with Google/Facebook, please enter the password from that account."
+            : "Current password is required to change password.");
           return;
         }
 
@@ -317,20 +401,30 @@ const Profile = () => {
 
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
-        
+
         await updatePassword(user, newPassword);
+
+        await addDoc(collection(db, "logs"), {
+          action: "PROFILE_UPDATE",
+          userEmail: user.email,
+          details: {
+            type: "password",
+            isAdmin: false
+          },
+          timestamp: new Date()
+        });
       }
 
-      if (!sanitizedEmail !== user.email) {
-        setSuccess("Profile updated successfully!");
-      }
+      setSuccess("Profile updated successfully!");
       setIsEditing(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (error) {
       if (error.code === 'auth/wrong-password') {
-        setError("Current password is incorrect.");
+        setError(isSocialLogin 
+          ? "Current password is incorrect. Please use the password from your Google/Facebook account or set up a new password first."
+          : "Current password is incorrect.");
       } else if (error.code === 'auth/email-already-in-use') {
         setError("This email is already in use by another account.");
       } else if (error.code === 'auth/invalid-email') {
@@ -368,6 +462,16 @@ const Profile = () => {
       await deleteDoc(doc(db, "users", user.uid));
       await user.delete();
 
+      await addDoc(collection(db, "logs"), {
+        action: "USER_DELETE",
+        userEmail: user.email,
+        details: {
+          email: user.email,
+          isAdmin: false
+        },
+        timestamp: new Date()
+      });
+
       alert("Account successfully deleted.");
       navigate("/");
     } catch (error) {
@@ -389,12 +493,14 @@ const Profile = () => {
     );
   }
 
+  const loginMethod = getLoginMethod(user);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
       <div className="absolute inset-0">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-r from-purple-500/5 to-blue-500/5 rounded-full blur-3xl animate-spin" style={{animationDuration: '20s'}}></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-r from-purple-500/5 to-blue-500/5 rounded-full blur-3xl animate-spin" style={{ animationDuration: '20s' }}></div>
       </div>
 
       <div className="relative z-10 container mx-auto px-4 max-w-4xl py-8">
@@ -435,6 +541,23 @@ const Profile = () => {
             <div className="flex items-center">
               <div className="w-2 h-2 bg-yellow-400 rounded-full mr-3"></div>
               Verification email sent to {pendingEmail}. Please verify to complete the email change.
+            </div>
+          </div>
+        )}
+
+        {/* Social Login Info Banner */}
+        {isSocialLogin && (
+          <div className="bg-blue-500/20 backdrop-blur-sm border border-blue-500/30 text-blue-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
+            <div className="flex items-start space-x-3">
+              <FaInfoCircle className="mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium mb-1">Social Login Account Detected</div>
+                <div className="text-sm text-blue-200/80">
+                  You signed in using your {getLoginMethodText(loginMethod)}. To change your email or password, 
+                  you'll need to use the password associated with your {loginMethod === 'google' ? 'Google' : 'Facebook'} account. 
+                  If you don't have a password set up, consider creating one through your social media account settings first.
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -483,6 +606,13 @@ const Profile = () => {
               </div>
 
               <div className="space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/60">Login Method</span>
+                  <div className="flex items-center space-x-2">
+                    {getLoginMethodIcon(loginMethod)}
+                    <span className="text-white font-medium">{getLoginMethodText(loginMethod)}</span>
+                  </div>
+                </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/60">Member since</span>
                   <span className="text-white font-medium">
@@ -591,54 +721,73 @@ const Profile = () => {
                       Security Settings
                     </h4>
                     
+{isSocialLogin && (
+                      <div className="bg-blue-500/10 backdrop-blur-sm border border-blue-500/20 rounded-2xl p-4 mb-4">
+                        <div className="flex items-start space-x-3">
+                          <FaInfoCircle className="text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="text-sm text-blue-200">
+                            <div className="font-medium mb-1">Akun Login Sosial Terdeteksi</div>
+                            <div className="text-blue-200/80">
+                              Untuk mengubah email atau password, gunakan password yang sama dengan akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda. 
+                              Jika Anda belum pernah mengatur password di akun {loginMethod === 'google' ? 'Google' : 'Facebook'}, 
+                              silakan buat password terlebih dahulu melalui pengaturan akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="group">
-                      <label className="block text-white/80 text-sm font-medium mb-3">
+                      <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
+                        <FaKey className="mr-2 text-purple-400" />
                         Current Password
+                        {isSocialLogin && <span className="text-xs text-blue-300 ml-2">(Password akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda)</span>}
                       </label>
                       <div className="relative">
                         <input
                           type={showCurrentPassword ? "text" : "password"}
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 transition-all duration-300 pr-12"
-                          placeholder="Enter current password"
+                          className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
+                          placeholder={isSocialLogin ? `Masukkan password akun ${loginMethod === 'google' ? 'Google' : 'Facebook'} Anda` : "Enter your current password"}
                         />
                         <button
                           type="button"
-                          className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-300"
                           onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                          className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
                         >
                           {showCurrentPassword ? <FaEyeSlash /> : <FaEye />}
                         </button>
                       </div>
-                      <p className="text-white/40 text-xs mt-2">Required to change email or password</p>
                     </div>
 
-                    <div className="group">
-                      <label className="block text-white/80 text-sm font-medium mb-3">
-                        New Password (Optional)
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showNewPassword ? "text" : "password"}
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 transition-all duration-300 pr-12"
-                          placeholder="Enter new password (leave blank to keep current)"
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-300"
-                          onClick={() => setShowNewPassword(!showNewPassword)}
-                        >
-                          {showNewPassword ? <FaEyeSlash /> : <FaEye />}
-                        </button>
-                      </div>
-                    </div>
-
-                    {newPassword && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="group">
-                        <label className="block text-white/80 text-sm font-medium mb-3">
+                        <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
+                          <FaKey className="mr-2 text-purple-400" />
+                          New Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showNewPassword ? "text" : "password"}
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
+                            placeholder="Enter new password (optional)"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                          >
+                            {showNewPassword ? <FaEyeSlash /> : <FaEye />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="group">
+                        <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
+                          <FaKey className="mr-2 text-purple-400" />
                           Confirm New Password
                         </label>
                         <div className="relative">
@@ -646,107 +795,111 @@ const Profile = () => {
                             type={showConfirmPassword ? "text" : "password"}
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 transition-all duration-300 pr-12"
+                            className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
                             placeholder="Confirm new password"
                           />
                           <button
                             type="button"
-                            className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-300"
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
                           >
                             {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
                           </button>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
 
                 {isEditing && (
-                  <div className="flex justify-end space-x-4 pt-6 border-t border-white/10">
-                    <button
-                      type="button"
-                      onClick={handleCancelEdit}
-                      className="px-8 py-3 border border-white/20 text-white/80 rounded-full hover:bg-white/5 hover:text-white transition-all duration-300 flex items-center space-x-2"
-                    >
-                      <FaTimes />
-                      <span>Cancel</span>
-                    </button>
+                  <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-white/10">
                     <button
                       type="submit"
-                      className="px-8 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-full hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2"
+                      className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white px-8 py-4 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 font-medium"
                     >
                       <FaSave />
                       <span>Save Changes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="flex-1 bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-2xl hover:bg-white/20 transition-all duration-300 border border-white/20 hover:border-white/30 flex items-center justify-center space-x-2 font-medium"
+                    >
+                      <FaTimes />
+                      <span>Cancel</span>
                     </button>
                   </div>
                 )}
               </form>
             </div>
 
+            {/* Danger Zone */}
             <div className="bg-red-500/10 backdrop-blur-md rounded-3xl p-8 border border-red-500/20 hover:border-red-500/30 transition-all duration-500">
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-red-300 flex items-center">
-                  <FaExclamationTriangle className="mr-2" />
-                  Danger Zone
-                </h3>
-                <p className="text-white/60 mt-1">Irreversible account actions</p>
+              <div className="flex items-center mb-6">
+                <FaExclamationTriangle className="text-red-400 text-2xl mr-4" />
+                <div>
+                  <h3 className="text-2xl font-bold text-white">Danger Zone</h3>
+                  <p className="text-white/60 mt-1">Irreversible and destructive actions</p>
+                </div>
               </div>
-              
+
               <div className="space-y-4">
-                <button
-                  onClick={() => {
-                    if (window.confirm('Are you sure you want to sign out?')) {
-                      signOut(auth);
-                    }
-                  }}
-                  className="w-full text-left px-6 py-4 text-red-300 hover:text-red-200 hover:bg-red-500/10 rounded-2xl transition-all duration-300 border border-red-500/20 hover:border-red-500/30 flex items-center space-x-3"
-                >
-                  <FaSignOutAlt />
-                  <div>
-                    <div className="font-medium">Sign Out</div>
-                    <div className="text-sm text-white/60">End your current session</div>
+                <div className="bg-red-500/10 backdrop-blur-sm border border-red-500/20 rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mb-4 sm:mb-0">
+                      <h4 className="text-lg font-semibold text-white mb-2">Delete Account</h4>
+                      <p className="text-white/60 text-sm">
+                        Permanently delete your account and all of your content. This action is not reversible, so please continue with caution.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleDeleteAccount}
+                      disabled={deleting}
+                      className="bg-gradient-to-r from-red-500 to-red-600 text-white px-6 py-3 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed min-w-fit"
+                    >
+                      {deleting ? (
+                        <>
+                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                          <span>Deleting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FaTrash />
+                          <span>Delete Account</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                </button>
-                
-                <button
-                  onClick={handleDeleteAccount}
-                  disabled={deleting}
-                  className="w-full text-left px-6 py-4 text-red-300 hover:text-red-200 hover:bg-red-500/10 rounded-2xl transition-all duration-300 border border-red-500/20 hover:border-red-500/30 flex items-center space-x-3 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <FaTrash />
-                  <div>
-                    <div className="font-medium">Delete Account</div>
-                    <div className="text-sm text-white/60">Permanently remove your account and all data</div>
+                </div>
+
+                <div className="bg-orange-500/10 backdrop-blur-sm border border-orange-500/20 rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mb-4 sm:mb-0">
+                      <h4 className="text-lg font-semibold text-white mb-2">Sign Out</h4>
+                      <p className="text-white/60 text-sm">
+                        Sign out of your account on this device. You can always sign back in.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        signOut(auth).then(() => {
+                          navigate('/');
+                        }).catch((error) => {
+                          setError("Error signing out: " + error.message);
+                        });
+                      }}
+                      className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-6 py-3 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2 font-medium min-w-fit"
+                    >
+                      <FaSignOutAlt />
+                      <span>Sign Out</span>
+                    </button>
                   </div>
-                </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      {uploading && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/20">
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 border-4 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-white font-medium">Uploading your image...</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleting && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/20">
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 border-4 border-red-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-white font-medium">Deleting your account...</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

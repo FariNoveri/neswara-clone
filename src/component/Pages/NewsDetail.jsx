@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../../firebaseconfig";
 import { doc, getDoc, updateDoc, increment, collection, onSnapshot, query, where, addDoc, serverTimestamp, orderBy, deleteDoc, getDocs, setDoc } from "firebase/firestore";
@@ -7,9 +7,51 @@ import CommentBox from "./CommentBox";
 import { useAuth } from "../auth/useAuth";
 import { ArrowLeft, Eye, User, Calendar, Share2, Bookmark } from "lucide-react";
 import { toast } from "react-toastify";
+import { ADMIN_EMAILS } from "../config/Constants";
+
+// Utility function untuk mengubah judul menjadi slug
+const createSlug = (title) => {
+  return title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '') // Remove special characters
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
+    .trim('-'); // Remove leading/trailing hyphens
+};
+
+// Utility function untuk mencari berita berdasarkan slug
+const findNewsBySlug = async (slug) => {
+  try {
+    // Query untuk mencari berita dengan slug yang cocok
+    const q = query(collection(db, "news"), where("slug", "==", slug));
+    const snapshot = await getDocs(q);
+    
+    if (!snapshot.empty) {
+      const doc = snapshot.docs[0];
+      return { id: doc.id, ...doc.data() };
+    }
+    
+    // Fallback: jika tidak ada slug, coba cari berdasarkan judul yang dikonversi ke slug
+    const allNewsQuery = query(collection(db, "news"));
+    const allNewsSnapshot = await getDocs(allNewsQuery);
+    
+    for (const doc of allNewsSnapshot.docs) {
+      const data = doc.data();
+      const generatedSlug = createSlug(data.judul || data.title || '');
+      if (generatedSlug === slug) {
+        return { id: doc.id, ...data };
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error finding news by slug:", error);
+    return null;
+  }
+};
 
 const NewsDetail = () => {
-  const { id } = useParams();
+  const { slug } = useParams(); // Ubah dari 'id' menjadi 'slug'
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const [news, setNews] = useState(null);
@@ -20,13 +62,14 @@ const NewsDetail = () => {
   const [likeCount, setLikeCount] = useState(0);
   const [comments, setComments] = useState([]);
   const [userLiked, setUserLiked] = useState(false);
+  const [newsId, setNewsId] = useState(null); // Store actual document ID
 
-  console.log("NewsDetail - currentUser:", currentUser, "newsId:", id);
+  console.log("NewsDetail - currentUser:", currentUser, "slug:", slug);
 
   useEffect(() => {
     const fetchNews = async () => {
-      if (!id) {
-        setError("ID berita tidak valid.");
+      if (!slug) {
+        setError("Slug berita tidak valid.");
         setLoading(false);
         return;
       }
@@ -34,22 +77,26 @@ const NewsDetail = () => {
       setLoading(true);
       setError(null);
       try {
-        const docRef = doc(db, "news", id);
-        const snapshot = await getDoc(docRef);
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          console.log("Fetched news data:", data);
+        // Cari berita berdasarkan slug
+        const newsData = await findNewsBySlug(slug);
+        
+        if (newsData) {
+          console.log("Fetched news data:", newsData);
+          setNewsId(newsData.id); // Store the actual document ID
           setNews({
-            id: snapshot.id,
-            ...data,
-            title: data.judul || "Tanpa Judul",
-            content: data.konten || "Konten belum ditulis.",
-            image: data.gambar || null,
-            imageDescription: data.gambarDeskripsi || "Gambar utama",
-            views: data.views || 0,
+            id: newsData.id,
+            ...newsData,
+            title: newsData.judul || "Tanpa Judul",
+            content: newsData.konten || "Konten belum ditulis.",
+            image: newsData.gambar || null,
+            imageDescription: newsData.gambarDeskripsi || "Gambar utama",
+            views: newsData.views || 0,
           });
+          
+          // Update views
           if (currentUser) {
             try {
+              const docRef = doc(db, "news", newsData.id);
               await updateDoc(docRef, { views: increment(1) });
               console.log("Views incremented successfully");
             } catch (updateErr) {
@@ -71,12 +118,12 @@ const NewsDetail = () => {
     };
 
     const checkBookmark = async () => {
-      if (!currentUser || !id) return;
+      if (!currentUser || !newsId) return;
       try {
         const q = query(
           collection(db, "savedArticles"),
           where("userId", "==", currentUser.uid),
-          where("articleId", "==", id)
+          where("articleId", "==", newsId)
         );
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
@@ -89,8 +136,20 @@ const NewsDetail = () => {
       }
     };
 
+    fetchNews();
+
+    // Jalankan checkBookmark setelah newsId tersedia
+    if (newsId) {
+      checkBookmark();
+    }
+  }, [slug, currentUser, newsId]);
+
+  // Setup real-time listeners setelah newsId tersedia
+  useEffect(() => {
+    if (!newsId) return;
+
     const unsubscribeLikes = onSnapshot(
-      query(collection(db, "news", id, "likes")),
+      query(collection(db, "news", newsId, "likes")),
       (snapshot) => {
         setLikeCount(snapshot.size);
         if (currentUser) {
@@ -105,14 +164,14 @@ const NewsDetail = () => {
     );
 
     const unsubscribeComments = onSnapshot(
-      query(collection(db, "news", id, "comments"), orderBy("createdAt", "desc")),
+      query(collection(db, "news", newsId, "comments"), orderBy("createdAt", "desc")),
       (snapshot) => {
         setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       },
       (error) => {
         console.error("Error fetching comments:", error.message, error.code);
         const fallbackQuery = onSnapshot(
-          query(collection(db, "news", id, "comments"), orderBy("timestamp", "desc")),
+          query(collection(db, "news", newsId, "comments"), orderBy("timestamp", "desc")),
           (snapshot) => {
             setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
           },
@@ -125,14 +184,11 @@ const NewsDetail = () => {
       }
     );
 
-    fetchNews();
-    checkBookmark();
-
     return () => {
       unsubscribeLikes();
       unsubscribeComments();
     };
-  }, [id, currentUser]);
+  }, [newsId, currentUser]);
 
   const handleShare = async () => {
     if (navigator.share) {
@@ -158,9 +214,26 @@ const NewsDetail = () => {
       return;
     }
 
+    if (!newsId) {
+      toast.error("ID berita tidak valid.");
+      return;
+    }
+
     if (isBookmarked) {
       try {
         await deleteDoc(doc(db, "savedArticles", bookmarkId));
+        // Log UNSAVE_NEWS action
+        const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+        await addDoc(collection(db, "logs"), {
+          action: "UNSAVE_NEWS",
+          userEmail: currentUser.email || "unknown@example.com",
+          details: {
+            articleId: newsId,
+            title: news.title,
+            isAdmin,
+          },
+          timestamp: serverTimestamp(),
+        });
         setIsBookmarked(false);
         setBookmarkId(null);
         toast.success("Bookmark dihapus!");
@@ -172,11 +245,23 @@ const NewsDetail = () => {
       try {
         const bookmarkRef = await addDoc(collection(db, "savedArticles"), {
           userId: currentUser.uid,
-          articleId: id,
+          articleId: newsId,
           title: news.title,
           summary: news.content ? news.content.replace(/<[^>]+>/g, '').substring(0, 200) : "No summary available",
           imageUrl: news.image || "https://via.placeholder.com/400x200",
           savedAt: serverTimestamp(),
+        });
+        // Log SAVE_NEWS action
+        const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+        await addDoc(collection(db, "logs"), {
+          action: "SAVE_NEWS",
+          userEmail: currentUser.email || "unknown@example.com",
+          details: {
+            articleId: newsId,
+            title: news.title,
+            isAdmin,
+          },
+          timestamp: serverTimestamp(),
         });
         setIsBookmarked(true);
         setBookmarkId(bookmarkRef.id);
@@ -193,18 +278,43 @@ const NewsDetail = () => {
       toast.warn("Silakan masuk untuk menyukai berita.");
       return false;
     }
+
+    if (!newsId) {
+      toast.error("ID berita tidak valid.");
+      return false;
+    }
+
     try {
-      const likeRef = doc(db, "news", id, "likes", currentUser.uid);
+      const likeRef = doc(db, "news", newsId, "likes", currentUser.uid);
+      const newsDocRef = doc(db, "news", newsId);
+      const actionType = userLiked ? "unlike" : "like";
+      const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+
       if (userLiked) {
-        // Unlike: Delete the like document
+        // Unlike: Delete the like document and decrement likeCount
         await deleteDoc(likeRef);
+        await updateDoc(newsDocRef, { likeCount: increment(-1) });
       } else {
-        // Like: Create the like document
+        // Like: Create the like document and increment likeCount
         await setDoc(likeRef, {
           userId: currentUser.uid,
           timestamp: serverTimestamp(),
         });
+        await updateDoc(newsDocRef, { likeCount: increment(1) });
       }
+
+      // Log LIKE_NEWS action
+      await addDoc(collection(db, "logs"), {
+        action: "LIKE_NEWS",
+        userEmail: currentUser.email || "unknown@example.com",
+        details: {
+          newsId: newsId,
+          actionType,
+          isAdmin,
+        },
+        timestamp: serverTimestamp(),
+      });
+
       return true;
     } catch (err) {
       console.error("Error toggling like:", err.message, err.code);
@@ -363,9 +473,9 @@ const NewsDetail = () => {
               <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
                 <h3 className="text-xl font-bold text-slate-800">Berikan Reaksi</h3>
                 <div className="flex items-center space-x-4">
-                  {id && (
+                  {newsId && (
                     <LikeButton 
-                      newsId={id} 
+                      newsId={newsId} 
                       currentUserId={currentUser?.uid} 
                       onLike={handleLike} 
                       liked={userLiked} 
@@ -375,7 +485,7 @@ const NewsDetail = () => {
               </div>
               <div className="border-t border-slate-200 pt-6">
                 <CommentBox 
-                  newsId={id} 
+                  newsId={newsId} 
                   currentUser={currentUser}
                 />
               </div>

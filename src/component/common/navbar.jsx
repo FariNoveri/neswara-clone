@@ -302,7 +302,7 @@ const Navbar = () => {
                     <FaNewspaper className="text-white text-lg" />
                   </div>
                   <div>
-                    <h1 className="text-xl font-bold text-gray-900">NewsWara</h1>
+                    <h1 className="text-xl font-bold text-gray-900">Neswara</h1>
                     <p className="text-xs text-gray-500 -mt-1">Berita Terpercaya</p>
                   </div>
                 </Link>

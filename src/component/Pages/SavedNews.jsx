@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../auth/useAuth";
 import { db } from "../../firebaseconfig";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs, deleteDoc, doc, addDoc } from "firebase/firestore";
 import { Link } from "react-router-dom";
-import { FaBookmark, FaNewspaper, FaSearch } from "react-icons/fa";
+import { FaBookmark, FaNewspaper, FaSearch, FaTrash } from "react-icons/fa";
+import { ADMIN_EMAILS } from "../config/Constants";
 
 const SavedNews = () => {
   const { currentUser, loading } = useAuth();
   const [savedArticles, setSavedArticles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("date-desc"); // Default: newest first
+  const [sortBy, setSortBy] = useState("date-desc");
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchSavedArticles = async () => {
@@ -21,6 +23,7 @@ const SavedNews = () => {
 
       try {
         setIsLoading(true);
+        setError(null);
         const q = query(
           collection(db, "savedArticles"),
           where("userId", "==", currentUser.uid)
@@ -30,6 +33,7 @@ const SavedNews = () => {
         setSavedArticles(articles);
       } catch (error) {
         console.error("Error fetching saved articles:", error);
+        setError("Gagal memuat berita tersimpan: " + error.message);
       } finally {
         setIsLoading(false);
       }
@@ -37,6 +41,40 @@ const SavedNews = () => {
 
     fetchSavedArticles();
   }, [currentUser]);
+
+  const handleUnsave = async (articleId, title) => {
+    if (!currentUser) {
+      setError("Silakan login untuk menghapus berita tersimpan.");
+      return;
+    }
+
+    if (!window.confirm("Yakin ingin menghapus berita ini dari daftar tersimpan?")) return;
+
+    try {
+      const articleDoc = doc(db, "savedArticles", articleId);
+      await deleteDoc(articleDoc);
+
+      // Log UNSAVE_NEWS action
+      const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+      await addDoc(collection(db, "logs"), {
+        action: "UNSAVE_NEWS",
+        userEmail: currentUser.email || "unknown@example.com",
+        details: {
+          articleId: articleId,
+          title: title,
+          isAdmin,
+        },
+        timestamp: new Date(),
+      });
+
+      // Update local state
+      setSavedArticles(prev => prev.filter(article => article.id !== articleId));
+      setError(null);
+    } catch (error) {
+      console.error("Error unsaving article:", error);
+      setError("Gagal menghapus berita tersimpan: " + error.message);
+    }
+  };
 
   // Filter and sort articles
   const filteredArticles = savedArticles
@@ -95,6 +133,12 @@ const SavedNews = () => {
           </h2>
         </div>
 
+        {error && (
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded">
+            {error}
+          </div>
+        )}
+
         {/* Search and Filter Controls */}
         <div className="flex flex-col md:flex-row gap-4 mb-6">
           <div className="search-bar flex items-center border border-gray-200 rounded-xl p-3 bg-white shadow-sm">
@@ -135,29 +179,37 @@ const SavedNews = () => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredArticles.map((article) => (
-              <Link
+              <div
                 key={article.id}
-                to={`/berita/${article.articleId}`}
-                className="article-card block bg-white rounded-xl shadow-md overflow-hidden transform transition-all duration-300 hover:scale-105 hover:shadow-lg"
-                style={{ animation: 'fadeIn 0.5s ease-out' }}
+                className="article-card bg-white rounded-xl shadow-md overflow-hidden transform transition-all duration-300 hover:scale-105 hover:shadow-lg"
               >
-                <img
-                  src={article.imageUrl || "https://via.placeholder.com/400x200"}
-                  alt={article.title}
-                  className="w-full h-48 object-cover"
-                />
-                <div className="p-4">
-                  <h3 className="text-lg font-semibold text-gray-800 line-clamp-2">{article.title}</h3>
-                  <p className="text-sm text-gray-600 mt-2 line-clamp-3">{article.summary}</p>
-                  <div className="mt-3 flex items-center text-xs text-gray-500">
-                    <span>{new Date(article.savedAt.toDate()).toLocaleDateString("id-ID", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    })}</span>
+                <Link to={`/berita/${article.articleId}`}>
+                  <img
+                    src={article.imageUrl || "https://via.placeholder.com/400x200"}
+                    alt={article.title}
+                    className="w-full h-48 object-cover"
+                  />
+                  <div className="p-4">
+                    <h3 className="text-lg font-semibold text-gray-800 line-clamp-2">{article.title}</h3>
+                    <p className="text-sm text-gray-600 mt-2 line-clamp-3">{article.summary}</p>
+                    <div className="mt-3 flex items-center text-xs text-gray-500">
+                      <span>{new Date(article.savedAt.toDate()).toLocaleDateString("id-ID", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}</span>
+                    </div>
                   </div>
+                </Link>
+                <div className="p-4 pt-0">
+                  <button
+                    onClick={() => handleUnsave(article.id, article.title)}
+                    className="flex items-center text-red-500 hover:text-red-700 text-sm font-medium"
+                  >
+                    <FaTrash className="mr-1" /> Hapus
+                  </button>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}

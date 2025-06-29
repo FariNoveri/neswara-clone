@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, orderBy, onSnapshot, limit, doc, getDoc, deleteDoc, collection as firestoreCollection } from 'firebase/firestore';
-import { ChevronDown, ChevronUp, Eye, EyeOff, Trash } from 'lucide-react';
+import { collection, query, orderBy, onSnapshot, limit, doc, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { ChevronDown, ChevronUp, Eye, EyeOff, Trash, Search, X, Filter, Calendar, Activity, Users, AlertCircle, Clock, User, MessageSquare, Heart, Bookmark, BookmarkX, PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { ADMIN_EMAILS } from '../config/Constants';
+import { toast } from 'react-toastify';
 
 // Custom date formatting function
 const formatDate = (date) => {
@@ -12,7 +14,7 @@ const formatDate = (date) => {
   
   const day = date.getDate().toString().padStart(2, '0');
   const month = months[date.getMonth()];
-  const year = date.getYear();
+  const year = date.getFullYear();
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
   const seconds = date.getSeconds().toString().padStart(2, '0');
@@ -20,16 +22,10 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
 };
 
-// Constants untuk admin emails
-const ADMIN_EMAILS = [
-  'cahayalunamaharani1@gmail.com',
-  'fari_noveriwinanto@teknokrat.ac.id'
-];
-
 // Constants untuk excluded actions
 const EXCLUDED_ACTIONS = [
   'ADMIN_LOGIN',
-  'ADMIN_LOGOUT', 
+  'ADMIN_LOGOUT',
   'UNAUTHORIZED_LOGOUT',
   'USER_LOGIN',
   'USER_LOGOUT'
@@ -57,12 +53,30 @@ const ACTION_LABELS = {
   DATA_EXPORT: 'Data Diekspor',
   DATA_IMPORT: 'Data Diimpor',
   BACKUP_CREATED: 'Backup Dibuat',
-  SYSTEM_MAINTENANCE: 'Pemeliharaan Sistem'
+  SYSTEM_MAINTENANCE: 'Pemeliharaan Sistem',
+  LIKE_NEWS: 'Berita Disukai/Dibatalkan',
+  SAVE_NEWS: 'Berita Disimpan',
+  UNSAVE_NEWS: 'Berita Dihapus dari Tersimpan'
 };
 
 // Utility function to check if user is admin
 const isAdminUser = (userEmail, details) => {
-  return ADMIN_EMAILS.includes(userEmail) || details?.isAdmin === true;
+  // Cek ADMIN_EMAILS terlebih dahulu
+  if (ADMIN_EMAILS.includes(userEmail)) {
+    return true;
+  }
+  
+  // Cek dari details jika ada
+  if (details && details.isAdmin === true) {
+    return true;
+  }
+  
+  // Cek dari details dengan key lain yang mungkin
+  if (details && (details.adminStatus === true || details.admin === true)) {
+    return true;
+  }
+  
+  return false;
 };
 
 // Utility function to format timestamp
@@ -86,7 +100,6 @@ const formatTimestamp = (timestamp) => {
     }
     
     return formatDate(date);
-    
   } catch (error) {
     console.error('Error formatting timestamp:', error);
     return 'Error format waktu';
@@ -126,424 +139,297 @@ const useNewsTitle = (newsId) => {
   return { title, loading };
 };
 
-// Component untuk menampilkan before/after values
-const BeforeAfterDisplay = ({ oldValue, newValue, label }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (!oldValue && !newValue) return null;
-
-  const hasLongContent = (oldValue && oldValue.length > 50) || (newValue && newValue.length > 50);
-
-  return (
-    <div className="mt-2 p-3 bg-gray-50 rounded-lg border-l-4 border-blue-500">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-700">{label}</span>
-        {hasLongContent && (
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
-          >
-            {isExpanded ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            <span>{isExpanded ? 'Sembunyikan' : 'Lihat Detail'}</span>
-          </button>
-        )}
-      </div>
-      
-      <div className="mt-2 space-y-2">
-        {oldValue && (
-          <div className="bg-red-50 p-2 rounded border-l-2 border-red-300">
-            <div className="text-xs text-red-600 font-medium mb-1">Sebelum:</div>
-            <div className="text-sm text-red-800">
-              {hasLongContent && !isExpanded 
-                ? `${oldValue.substring(0, 50)}...` 
-                : oldValue
-              }
-            </div>
-          </div>
-        )}
-        
-        {newValue && (
-          <div className="bg-green-50 p-2 rounded border-l-2 border-green-300">
-            <div className="text-xs text-green-600 font-medium mb-1">Sesudah:</div>
-            <div className="text-sm text-green-800">
-              {hasLongContent && !isExpanded 
-                ? `${newValue.substring(0, 50)}...` 
-                : newValue
-              }
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Component untuk action description dengan news title fetching
-const ActionDescription = ({ log }) => {
-  const { action, details = {}, userEmail } = log;
-  const isAdmin = isAdminUser(userEmail, details);
-  const roleLabel = isAdmin ? 'Admin' : 'User';
-  
-  const newsId = details.newsId || details.id;
-  const { title: fetchedTitle, loading: titleLoading } = useNewsTitle(newsId);
-  
-  const getActionDescription = () => {
-    switch (action) {
-      case 'PROFILE_UPDATE':
-        return `memperbarui profil${details.type ? ` (${details.type})` : ''}`;
-      
-      case 'SPEED_UPDATE':
-        const oldSpeed = details.oldSpeed || details.oldValue;
-        const newSpeed = details.newSpeed || details.newValue;
-        return `mengubah kecepatan global${oldSpeed ? ` dari ${oldSpeed} detik` : ''} menjadi ${newSpeed || 'N/A'} detik`;
-      
-      case 'NEWS_ADD':
-        const newsTitle = fetchedTitle || details.title || details.judul || details.newsTitle;
-        return `menambahkan berita "${titleLoading ? 'Memuat...' : newsTitle}"`;
-      
-      case 'EDIT_NEWS':
-        const editedTitle = fetchedTitle || details.title || details.judul || details.newsTitle;
-        return `mengedit berita "${titleLoading ? 'Memuat...' : editedTitle}"`;
-      
-      case 'DELETE_NEWS':
-        const deletedTitle = fetchedTitle || details.title || details.judul || details.newsTitle;
-        return `menghapus berita "${titleLoading ? 'Memuat...' : deletedTitle}"`;
-      
-      case 'COMMENT_ADD':
-        const commentNewsTitle = fetchedTitle || details.newsTitle || details.title;
-        return `menambahkan komentar untuk berita "${titleLoading ? 'Memuat...' : commentNewsTitle}"`;
-      
-      case 'COMMENT_DELETE':
-        const commentDeletedNewsTitle = fetchedTitle || details.newsTitle || details.title;
-        return `menghapus komentar dari berita "${titleLoading ? 'Memuat...' : commentDeletedNewsTitle}"`;
-      
-      case 'USER_ADD':
-        return `menambahkan pengguna "${details.email || details.userEmail || 'Email tidak tersedia'}"`;
-      
-      case 'USER_EDIT':
-        return `mengedit pengguna "${details.email || details.userEmail || 'Email tidak tersedia'}"`;
-      
-      case 'USER_DELETE':
-        return `menghapus pengguna "${details.email || details.userEmail || 'Email tidak tersedia'}"`;
-      
-      case 'NOTIFICATION_ADD':
-        return `menambahkan notifikasi "${details.title || details.message || 'Judul tidak tersedia'}"`;
-      
-      case 'NOTIFICATION_EDIT':
-        return `mengedit notifikasi "${details.title || details.message || 'Judul tidak tersedia'}"`;
-      
-      case 'NOTIFICATION_DELETE':
-        return `menghapus notifikasi "${details.title || details.message || 'Judul tidak tersedia'}"`;
-      
-      case 'NOTIFICATION_SENT':
-        return `mengirim notifikasi "${details.message || details.title || 'Pesan tidak tersedia'}"`;
-      
-      case 'VIEWS_UPDATED':
-        return `memperbarui total views menjadi ${details.totalViews || details.newValue || 'N/A'}`;
-      
-      case 'UNAUTHORIZED_ACCESS':
-        return `mencoba akses tanpa izin${details.path ? ` ke ${details.path}` : ''}`;
-      
-      case 'AUTH_ERROR':
-        return `mengalami error otorisasi: ${details.error || details.message || 'Error tidak diketahui'}`;
-      
-      case 'DATA_EXPORT':
-        return `mengekspor data ${details.dataType || 'sistem'}`;
-      
-      case 'DATA_IMPORT':
-        return `mengimpor data ${details.dataType || 'sistem'}`;
-      
-      case 'BACKUP_CREATED':
-        return `membuat backup ${details.backupType || 'sistem'}`;
-      
-      case 'SYSTEM_MAINTENANCE':
-        return `melakukan pemeliharaan sistem: ${details.description || 'Tidak ada deskripsi'}`;
-      
-      default:
-        return `melakukan aksi "${ACTION_LABELS[action] || action.replace(/_/g, ' ').toLowerCase()}"`;
-    }
-  };
-
-  return (
-    <div>
-      <p className="text-sm font-medium text-gray-900 mb-1">
-        <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold mr-2 ${
-          isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
-        }`}>
-          {roleLabel}
-        </span>
-        <span className="text-gray-700">{userEmail}</span>
-      </p>
-      <p className="text-sm text-gray-800 font-medium">
-        {getActionDescription()}
-      </p>
-    </div>
-  );
-};
-
-// Component untuk detail information dengan before/after
-const DetailInformation = ({ details, action }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  
-  if (!details || Object.keys(details).length === 0) return null;
-
-  const renderDetail = (key, value) => {
-    if (!value || key === 'isAdmin' || key === 'newsId' || key === 'id') return null;
+// Component untuk menampilkan detail aktivitas yang lebih user-friendly
+const ActivityDetails = ({ details, action }) => {
+  const renderDetailItem = (key, value) => {
+    // Skip null, undefined, atau empty values
+    if (value === null || value === undefined || value === '') return null;
     
-    const labelMap = {
-      oldValue: 'Nilai Lama',
-      newValue: 'Nilai Baru',
-      oldSpeed: 'Kecepatan Lama',
-      newSpeed: 'Kecepatan Baru',
-      message: 'Pesan',
-      email: 'Email',
-      userEmail: 'Email Pengguna',
-      totalViews: 'Total Views',
-      title: 'Judul',
-      judul: 'Judul',
-      newsTitle: 'Judul Berita',
-      type: 'Tipe',
-      path: 'Path',
-      error: 'Error',
-      dataType: 'Tipe Data',
-      backupType: 'Tipe Backup',
-      description: 'Deskripsi',
-      oldContent: 'Konten Lama',
-      newContent: 'Konten Baru'
+    // Format key untuk display
+    const formatKey = (key) => {
+      const keyMappings = {
+        newsId: 'ID Berita',
+        articleId: 'ID Artikel',
+        userId: 'ID Pengguna',
+        commentId: 'ID Komentar',
+        actionType: 'Jenis Aksi',
+        timestamp: 'Waktu',
+        userEmail: 'Email Pengguna',
+        isAdmin: 'Status Admin',
+        previousValue: 'Nilai Sebelumnya',
+        newValue: 'Nilai Baru',
+        ipAddress: 'Alamat IP',
+        userAgent: 'User Agent',
+        deviceInfo: 'Info Device',
+        location: 'Lokasi',
+        sessionId: 'ID Sesi'
+      };
+      return keyMappings[key] || key.charAt(0).toUpperCase() + key.slice(1);
     };
 
-    const label = labelMap[key] || key.charAt(0).toUpperCase() + key.slice(1);
-    
+    // Format value untuk display
+    const formatValue = (value) => {
+      if (typeof value === 'boolean') {
+        return value ? 'Ya' : 'Tidak';
+      }
+      if (typeof value === 'object' && value !== null) {
+        return JSON.stringify(value, null, 2);
+      }
+      return String(value);
+    };
+
     return (
-      <div key={key} className="text-xs text-gray-600 mb-1">
-        <span className="font-medium">{label}:</span> {String(value)}
+      <div key={key} className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-gray-100 last:border-b-0">
+        <div className="w-full sm:w-1/3 font-medium text-gray-700 mb-1 sm:mb-0">
+          {formatKey(key)}
+        </div>
+        <div className="w-full sm:w-2/3 text-gray-600 break-words">
+          {formatValue(value)}
+        </div>
       </div>
     );
   };
 
-  const hasBeforeAfter = (details.oldValue && details.newValue) || 
-                        (details.oldSpeed && details.newSpeed) ||
-                        (details.oldContent && details.newContent);
-
-  const hasDetailedInfo = Object.keys(details).length > 2;
+  const getActionIcon = () => {
+    switch (action) {
+      case 'LIKE_NEWS':
+        return <Heart className="w-5 h-5 text-red-500" />;
+      case 'SAVE_NEWS':
+        return <Bookmark className="w-5 h-5 text-blue-500" />;
+      case 'UNSAVE_NEWS':
+        return <BookmarkX className="w-5 h-5 text-gray-500" />;
+      case 'COMMENT_ADD':
+        return <MessageSquare className="w-5 h-5 text-green-500" />;
+      case 'COMMENT_DELETE':
+        return <Trash2 className="w-5 h-5 text-red-500" />;
+      case 'NEWS_ADD':
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
+      case 'EDIT_NEWS':
+        return <Edit3 className="w-5 h-5 text-blue-500" />;
+      case 'DELETE_NEWS':
+        return <Trash2 className="w-5 h-5 text-red-500" />;
+      default:
+        return <Activity className="w-5 h-5 text-gray-500" />;
+    }
+  };
 
   return (
-    <div className="mt-2">
-      {details.oldValue && details.newValue && (
-        <BeforeAfterDisplay 
-          oldValue={details.oldValue} 
-          newValue={details.newValue} 
-          label="Perubahan Nilai" 
-        />
-      )}
-      
-      {details.oldSpeed && details.newSpeed && (
-        <BeforeAfterDisplay 
-          oldValue={`${details.oldSpeed} detik`} 
-          newValue={`${details.newSpeed} detik`} 
-          label="Perubahan Kecepatan" 
-        />
-      )}
-      
-      {details.oldContent && details.newContent && (
-        <BeforeAfterDisplay 
-          oldValue={details.oldContent} 
-          newValue={details.newContent} 
-          label="Perubahan Konten" 
-        />
-      )}
-
-      {hasDetailedInfo && (
-        <div className="mt-2">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
-          >
-            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            <span>{isExpanded ? 'Sembunyikan Detail' : 'Lihat Detail Lainnya'}</span>
-          </button>
-          
-          {isExpanded && (
-            <div className="mt-2 pl-4 border-l-2 border-gray-200">
-              {Object.entries(details)
-                .filter(([key]) => !['oldValue', 'newValue', 'oldSpeed', 'newSpeed', 'oldContent', 'newContent', 'isAdmin', 'newsId', 'id'].includes(key))
-                .map(([key, value]) => renderDetail(key, value))}
-            </div>
-          )}
+    <div className="mt-4 animate-slideDown">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <div className="flex items-center space-x-3 mb-4">
+          {getActionIcon()}
+          <h4 className="text-lg font-semibold text-gray-800">
+            Detail Aktivitas
+          </h4>
         </div>
-      )}
+        
+        <div className="space-y-1">
+          {Object.entries(details).map(([key, value]) => renderDetailItem(key, value))}
+        </div>
+        
+        {Object.keys(details).length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            <Activity className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p>Tidak ada detail tambahan untuk aktivitas ini</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Modal Component with animations
+const DeleteModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+      <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl transform animate-scaleIn">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+              <AlertCircle className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+          </div>
+          <button 
+            onClick={onClose} 
+            className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+        <p className="text-gray-600 mb-8 leading-relaxed">{message}</p>
+        <div className="flex justify-end space-x-4">
+          <button
+            onClick={onClose}
+            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+          >
+            Hapus
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
 
 const LogActivity = () => {
   const [logs, setLogs] = useState([]);
-  const [totalLogs, setTotalLogs] = useState(0);
+  const [expandedLogs, setExpandedLogs] = useState({});
+  const [showExcluded, setShowExcluded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAction, setSelectedAction] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [loadLimit, setLoadLimit] = useState(50);
-  const [filters, setFilters] = useState({
-    role: 'all',
-    userEmail: '',
-    action: 'all',
-    dateRange: 'all'
-  });
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, type: '', id: null });
 
-  // Real-time fetch for total logs
   useEffect(() => {
-    const q = query(collection(db, 'logs'));
+    const q = query(
+      collection(db, 'logs'),
+      orderBy('timestamp', 'desc'),
+      limit(100)
+    );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTotalLogs(snapshot.size);
-    }, (error) => {
-      console.error('Error fetching total logs:', error);
-      setTotalLogs(0);
+      const fetchedLogs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setLogs(fetchedLogs);
+      setLoading(false);
+    }, (err) => {
+      console.error('Error fetching logs:', err);
+      setError('Gagal memuat log aktivitas.');
+      setLoading(false);
+      toast.error('Gagal memuat log aktivitas.');
     });
+
     return () => unsubscribe();
   }, []);
 
-  // Fetch logs from Firestore
-  useEffect(() => {
-    const fetchLogs = () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const q = query(
-          collection(db, 'logs'),
-          orderBy('timestamp', 'desc'),
-          limit(loadLimit)
-        );
-        
-        const unsubscribe = onSnapshot(
-          q,
-          (snapshot) => {
-            try {
-              const logsData = snapshot.docs
-                .map(doc => {
-                  const data = doc.data();
-                  return {
-                    id: doc.id,
-                    ...data,
-                    timestamp: data.timestamp || null
-                  };
-                })
-                .filter(log => !EXCLUDED_ACTIONS.includes(log.action))
-                .filter(log => log.action && log.userEmail && log.timestamp);
-              
-              console.log('Fetched logs:', logsData.length);
-              setLogs(logsData);
-              setLoading(false);
-            } catch (processingError) {
-              console.error('Error processing logs:', processingError);
-              setError('Error memproses data log');
-              setLoading(false);
-            }
-          },
-          (firestoreError) => {
-            console.error('Firestore error:', firestoreError);
-            setError('Error mengambil data dari server');
-            setLoading(false);
-          }
-        );
+  const toggleExpandLog = (logId) => {
+    setExpandedLogs(prev => ({
+      ...prev,
+      [logId]: !prev[logId]
+    }));
+  };
 
-        return unsubscribe;
-      } catch (setupError) {
-        console.error('Error setting up log listener:', setupError);
-        setError('Error menginisialisasi log');
-        setLoading(false);
-        return () => {};
-      }
-    };
-
-    const unsubscribe = fetchLogs();
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [loadLimit]);
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter(log => {
-      const isAdmin = isAdminUser(log.userEmail, log.details);
-      
-      const matchesRole = filters.role === 'all' || 
-        (filters.role === 'admin' && isAdmin) ||
-        (filters.role === 'user' && !isAdmin);
-      
-      const matchesUser = !filters.userEmail || 
-        log.userEmail.toLowerCase().includes(filters.userEmail.toLowerCase());
-      
-      const matchesAction = filters.action === 'all' || log.action === filters.action;
-      
-      let matchesDate = true;
-      if (filters.dateRange !== 'all' && log.timestamp) {
-        const logDate = log.timestamp.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
-        const now = new Date();
-        const diffTime = now.getTime() - logDate.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        switch (filters.dateRange) {
-          case 'today':
-            matchesDate = diffDays <= 1;
-            break;
-          case 'week':
-            matchesDate = diffDays <= 7;
-            break;
-          case 'month':
-            matchesDate = diffDays <= 30;
-            break;
-          default:
-            matchesDate = true;
-        }
-      }
-      
-      return matchesRole && matchesUser && matchesAction && matchesDate;
-    });
-  }, [logs, filters]);
-
-  const availableActions = useMemo(() => {
-    const actions = [...new Set(logs.map(log => log.action))];
-    return actions.sort();
-  }, [logs]);
-
-  const resetFilters = () => {
-    setFilters({
-      role: 'all',
-      userEmail: '',
-      action: 'all',
-      dateRange: 'all'
+  const handleDeleteLog = async (logId) => {
+    setDeleteModal({
+      isOpen: true,
+      type: 'single',
+      id: logId,
+      title: 'Hapus Log',
+      message: 'Yakin ingin menghapus log ini? Tindakan ini tidak dapat dibatalkan.'
     });
   };
 
-  const loadMore = () => {
-    setLoadLimit(prev => prev + 50);
-  };
-
-  const clearAllLogs = async () => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus semua log? Aksi ini tidak dapat dibatalkan.')) {
-      try {
-        const q = query(collection(db, 'logs'));
-        const snapshot = await onSnapshot(q, (querySnapshot) => {
-          querySnapshot.forEach(async (doc) => {
-            await deleteDoc(doc.ref);
-          });
-        });
-        console.log('Semua log telah dihapus.');
-      } catch (error) {
-        console.error('Error menghapus log:', error);
-        alert('Gagal menghapus log. Periksa konsol untuk detail.');
-      }
+  const confirmDeleteLog = async () => {
+    const { id } = deleteModal;
+    try {
+      await deleteDoc(doc(db, 'logs', id));
+      setLogs(prev => prev.filter(log => log.id !== id));
+      toast.success('Log berhasil dihapus!');
+    } catch (error) {
+      console.error('Error deleting log:', error);
+      setError('Gagal menghapus log.');
+      toast.error('Gagal menghapus log.');
+    } finally {
+      setDeleteModal({ isOpen: false, type: '', id: null });
     }
   };
 
-  if (loading && logs.length === 0) {
+  const handleDeleteAllLogs = async () => {
+    setDeleteModal({
+      isOpen: true,
+      type: 'all',
+      id: null,
+      title: 'Hapus Semua Log',
+      message: 'Yakin ingin menghapus semua log aktivitas? Tindakan ini tidak dapat dibatalkan dan akan menghapus seluruh riwayat aktivitas.'
+    });
+  };
+
+  const confirmDeleteAllLogs = async () => {
+    setIsDeletingAll(true);
+    try {
+      const logsQuery = query(collection(db, 'logs'));
+      const logsSnapshot = await getDocs(logsQuery);
+      const batch = logsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(batch);
+      setLogs([]);
+      setError(null);
+      toast.success('Semua log berhasil dihapus!');
+    } catch (error) {
+      console.error('Error deleting all logs:', error);
+      setError('Gagal menghapus semua log.');
+      toast.error('Gagal menghapus semua log.');
+    } finally {
+      setIsDeletingAll(false);
+      setDeleteModal({ isOpen: false, type: '', id: null });
+    }
+  };
+
+  const filteredLogs = useMemo(() => {
+    let result = logs;
+
+    // Apply search filter
+    if (searchQuery) {
+      const lowerQuery = searchQuery.toLowerCase();
+      result = result.filter(log => {
+        const actionLabel = ACTION_LABELS[log.action] || log.action;
+        const detailsStr = log.details ? JSON.stringify(log.details).toLowerCase() : '';
+        const timestampStr = formatTimestamp(log.timestamp).toLowerCase();
+        return (
+          log.userEmail?.toLowerCase().includes(lowerQuery) ||
+          actionLabel.toLowerCase().includes(lowerQuery) ||
+          detailsStr.includes(lowerQuery) ||
+          timestampStr.includes(lowerQuery)
+        );
+      });
+    }
+
+    // Apply action filter
+    if (selectedAction) {
+      result = result.filter(log => log.action === selectedAction);
+    }
+
+    // Apply date range filter
+    if (dateFrom || dateTo) {
+      result = result.filter(log => {
+        if (!log.timestamp) return false;
+        const logDate = log.timestamp.toDate();
+        const from = dateFrom ? new Date(dateFrom) : null;
+        const to = dateTo ? new Date(dateTo + 'T23:59:59') : null;
+        return (!from || logDate >= from) && (!to || logDate <= to);
+      });
+    }
+
+    // Apply excluded actions filter
+    if (!showExcluded) {
+      result = result.filter(log => !EXCLUDED_ACTIONS.includes(log.action));
+    }
+
+    return result;
+  }, [logs, showExcluded, searchQuery, selectedAction, dateFrom, dateTo]);
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600 text-lg">Memuat log aktivitas...</p>
-          <p className="text-gray-500 text-sm">Mohon tunggu sebentar</p>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="relative">
+            <div className="w-16 h-16 border-4 border-indigo-200 rounded-full animate-spin"></div>
+            <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+          </div>
+          <p className="text-indigo-600 font-medium animate-pulse">Memuat log aktivitas...</p>
         </div>
       </div>
     );
@@ -551,182 +437,589 @@ const LogActivity = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-500 text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Error</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            Muat Ulang
-          </button>
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-pink-50 flex items-center justify-center">
+        <div className="bg-white border border-red-200 rounded-2xl p-8 shadow-xl max-w-md w-full mx-4 animate-slideUp">
+          <div className="flex items-center space-x-3 mb-4">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+              <AlertCircle className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="text-lg font-bold text-red-800">Terjadi Kesalahan</h3>
+          </div>
+          <p className="text-red-600">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 min-h-screen">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h3 className="text-2xl font-bold text-gray-800">Log Aktivitas</h3>
-          <p className="text-gray-600 text-sm mt-1">
-            Total: {totalLogs} log | Menampilkan {filteredLogs.length} dari {logs.length} log aktivitas
-          </p>
-        </div>
-        <div>
-          <button
-            onClick={resetFilters}
-            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-sm mr-2"
-          >
-            Reset Filter
-          </button>
-          <button
-            onClick={clearAllLogs}
-            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm"
-          >
-            <Trash className="h-4 w-4 mr-2 inline" /> Hapus Semua Log
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-6 bg-gray-50 p-4 rounded-lg">
-        <h4 className="font-semibold text-gray-700 mb-3">Filter Data</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select
-              value={filters.role}
-              onChange={(e) => setFilters({ ...filters, role: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">Semua Role</option>
-              <option value="admin">Admin</option>
-              <option value="user">User</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input
-              type="text"
-              placeholder="Cari berdasarkan email..."
-              value={filters.userEmail}
-              onChange={(e) => setFilters({ ...filters, userEmail: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Aksi</label>
-            <select
-              value={filters.action}
-              onChange={(e) => setFilters({ ...filters, action: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">Semua Aksi</option>
-              {availableActions.map(action => (
-                <option key={action} value={action}>
-                  {ACTION_LABELS[action] || action}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Periode</label>
-            <select
-              value={filters.dateRange}
-              onChange={(e) => setFilters({ ...filters, dateRange: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">Semua Waktu</option>
-              <option value="today">Hari Ini</option>
-              <option value="week">7 Hari Terakhir</option>
-              <option value="month">30 Hari Terakhir</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {filteredLogs.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="text-gray-400 text-6xl mb-4">📋</div>
-          <h3 className="text-xl font-semibold text-gray-700 mb-2">Tidak ada log ditemukan</h3>
-          <p className="text-gray-500">
-            {logs.length === 0 
-              ? 'Belum ada aktivitas yang tercatat dalam sistem.'
-              : 'Coba ubah filter untuk melihat log aktivitas lainnya.'
-            }
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredLogs.map((log, index) => (
-            <div
-              key={log.id}
-              className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow duration-200 animate-fade-in"
-              style={{ animationDelay: `${index * 0.05}s` }}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <ActionDescription log={log} />
-                  <DetailInformation details={log.details} action={log.action} />
-                </div>
-                <div className="text-right ml-4 flex-shrink-0">
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                    {formatTimestamp(log.timestamp)}
-                  </span>
-                </div>
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
+      {/* Header with gradient */}
+      <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="flex items-center space-x-4 animate-slideRight">
+            <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+              <Activity className="w-8 h-8 text-white" />
             </div>
-          ))}
+            <div>
+              <h1 className="text-4xl font-bold mb-2">Log Aktivitas</h1>
+              <p className="text-indigo-100 text-lg">Pantau semua aktivitas sistem dan pengguna</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10">
+        {/* Filter Card - Fixed contrast issues */}
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
+          <div className="flex items-center space-x-3 mb-6">
+            <Filter className="w-6 h-6 text-indigo-600" />
+            <h2 className="text-xl font-bold text-gray-900">Filter & Pencarian</h2>
+          </div>
           
-          {logs.length >= loadLimit && (
-            <div className="text-center mt-6">
-              <button
-                onClick={loadMore}
-                disabled={loading}
-                className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 transition-colors"
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="relative group">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 transition-colors duration-200 group-focus-within:text-indigo-600" />
+              <input
+                type="text"
+                placeholder="Cari log aktivitas..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full transition-all duration-200 bg-white text-gray-900 placeholder-gray-500"
+              />
+            </div>
+            
+            <div className="relative">
+              <select
+                value={selectedAction}
+                onChange={(e) => setSelectedAction(e.target.value)}
+                className="appearance-none w-full py-4 px-4 pr-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
               >
-                {loading ? 'Memuat...' : 'Muat Lebih Banyak'}
+                <option value="" className="text-gray-900">Semua Aksi</option>
+                {Object.keys(ACTION_LABELS).map(action => (
+                  <option key={action} value={action} className="text-gray-900">{ACTION_LABELS[action]}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-600 pointer-events-none" />
+            </div>
+            
+            <div className="relative group">
+              <Calendar className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 transition-colors duration-200 group-focus-within:text-indigo-600" />
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full transition-all duration-200 bg-white text-gray-900"
+              />
+            </div>
+            
+            <div className="relative group">
+              <Calendar className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 transition-colors duration-200 group-focus-within:text-indigo-600" />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full transition-all duration-200 bg-white text-gray-900"
+              />
+            </div>
+          </div>
+          
+          <div className="flex flex-wrap justify-between items-center gap-4 mt-8 pt-6 border-t border-gray-200">
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <Users className="w-4 h-4" />
+              <span>Menampilkan {filteredLogs.length} dari {logs.length} log</span>
+            </div>
+            
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setShowExcluded(!showExcluded)}
+                className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 ${
+                  showExcluded 
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg' 
+                    : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg hover:shadow-xl'
+                }`}
+              >
+                {showExcluded ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                <span>{showExcluded ? 'Sembunyikan Log Sistem' : 'Tampilkan Log Sistem'}</span>
+              </button>
+              
+              <button
+                onClick={handleDeleteAllLogs}
+                disabled={isDeletingAll || logs.length === 0}
+                className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 ${
+                  isDeletingAll || logs.length === 0
+                    ? 'bg-gray-300 cursor-not-allowed text-gray-500'
+                    : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg hover:shadow-xl'
+                }`}
+              >
+                <Trash className="w-5 h-5" />
+                <span>{isDeletingAll ? 'Menghapus...' : 'Hapus Semua Log'}</span>
               </button>
             </div>
-          )}
+          </div>
         </div>
-      )}
 
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
+        {/* Logs Display */}
+        {filteredLogs.length === 0 ? (
+          <div className="text-center p-12 bg-white rounded-2xl shadow-xl border border-gray-200 animate-slideUp">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Activity className="w-12 h-12 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Log</h3>
+            <p className="text-gray-600">Belum ada log aktivitas yang cocok dengan filter yang dipilih.</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden animate-slideUp">
+            <div className="divide-y divide-gray-100">
+              {filteredLogs.map((log, index) => (
+                <LogItem
+                  key={log.id}
+                  log={log}
+                  expanded={!!expandedLogs[log.id]}
+                  toggleExpand={() => toggleExpandLog(log.id)}
+                  onDelete={() => handleDeleteLog(log.id)}
+                  index={index}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
-        .animate-fade-in {
-          animation: fadeIn 0.4s ease-out forwards;
-        }
+        <DeleteModal
+          isOpen={deleteModal.isOpen}
+          onClose={() => setDeleteModal({ isOpen: false, type: '', id: null })}
+          onConfirm={deleteModal.type === 'single' ? confirmDeleteLog : confirmDeleteAllLogs}
+          title={deleteModal.title}
+          message={deleteModal.message}
+        />
+      </div>
+      
+      <div className="h-16"></div> {/* Bottom spacing */}
+    </div>
+  );
+};
 
-        @keyframes pulse {
-          0%, 100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.02);
-          }
-        }
+const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
+  const { title, loading: titleLoading } = useNewsTitle(log.details?.newsId || log.details?.articleId);
+  
+const getActionDescription = () => {
+  const actionLabel = ACTION_LABELS[log.action] || log.action;
+  const userEmail = log.userEmail || 'Pengguna tidak diketahui';
+  
+  // Gunakan fungsi isAdminUser yang sama untuk semua case
+  const isAdmin = isAdminUser(log.userEmail, log.details);
+  const adminLabel = isAdmin ? ' (Admin)' : '';
 
-        .hover\\:animate-pulse:hover {
-          animation: pulse 1s infinite;
+  switch (log.action) {
+    case 'PROFILE_UPDATE':
+      return `${userEmail}${adminLabel} memperbarui profil`;
+      
+    case 'LIKE_NEWS':
+      return `${userEmail}${adminLabel} ${
+        log.details.actionType === 'like' ? 'menyukai' : 'membatalkan like pada'
+      } berita "${titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'}"`;
+      
+    case 'SAVE_NEWS':
+      return `${userEmail}${adminLabel} menyimpan berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    case 'UNSAVE_NEWS':
+      return `${userEmail}${adminLabel} batal simpan berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    case 'COMMENT_ADD':
+      return `${userEmail}${adminLabel} menambahkan komentar pada berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    case 'COMMENT_DELETE':
+      return `${userEmail}${adminLabel} menghapus komentar pada berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    case 'SPEED_UPDATE':
+      return `${userEmail}${adminLabel} memperbarui pengaturan kecepatan`;
+      
+    case 'NEWS_ADD':
+      return `${userEmail}${adminLabel} menambahkan berita baru`;
+      
+    case 'EDIT_NEWS':
+      return `${userEmail}${adminLabel} mengedit berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    case 'DELETE_NEWS':
+      return `${userEmail}${adminLabel} menghapus berita "${
+        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+      }"`;
+      
+    default:
+      return `${userEmail}${adminLabel} melakukan aksi: ${actionLabel}`;
+  }
+};
+
+  const getActionIcon = () => {
+    switch (log.action) {
+      case 'LIKE_NEWS':
+        return '❤️';
+      case 'SAVE_NEWS':
+        return '📌';
+      case 'UNSAVE_NEWS':
+        return '📌';
+        case 'COMMENT_ADD':
+        return '💬';
+      case 'COMMENT_DELETE':
+        return '🗑️';
+      case 'NEWS_ADD':
+        return '➕';
+      case 'EDIT_NEWS':
+        return '✏️';
+      case 'DELETE_NEWS':
+        return '🗑️';
+      case 'PROFILE_UPDATE':
+        return '👤';
+      case 'SPEED_UPDATE':
+        return '⚡';
+      case 'NOTIFICATION_ADD':
+        return '🔔';
+      case 'NOTIFICATION_SENT':
+        return '📨';
+      case 'VIEWS_UPDATED':
+        return '👁️';
+      case 'DATA_EXPORT':
+        return '📤';
+      case 'DATA_IMPORT':
+        return '📥';
+      case 'BACKUP_CREATED':
+        return '💾';
+      case 'SYSTEM_MAINTENANCE':
+        return '🔧';
+      case 'USER_ADD':
+        return '👥';
+      case 'USER_EDIT':
+        return '✏️';
+      case 'USER_DELETE':
+        return '❌';
+      case 'UNAUTHORIZED_ACCESS':
+        return '🚫';
+      case 'AUTH_ERROR':
+        return '⚠️';
+      default:
+        return '📋';
+    }
+  };
+
+  const getStatusColor = () => {
+    switch (log.action) {
+      case 'DELETE_NEWS':
+      case 'COMMENT_DELETE':
+      case 'USER_DELETE':
+      case 'NOTIFICATION_DELETE':
+      case 'UNAUTHORIZED_ACCESS':
+      case 'AUTH_ERROR':
+        return 'bg-red-50 border-red-200';
+      case 'NEWS_ADD':
+      case 'COMMENT_ADD':
+      case 'USER_ADD':
+      case 'NOTIFICATION_ADD':
+      case 'NOTIFICATION_SENT':
+        return 'bg-green-50 border-green-200';
+      case 'EDIT_NEWS':
+      case 'PROFILE_UPDATE':
+      case 'SPEED_UPDATE':
+      case 'NOTIFICATION_EDIT':
+      case 'USER_EDIT':
+        return 'bg-blue-50 border-blue-200';
+      case 'LIKE_NEWS':
+      case 'SAVE_NEWS':
+      case 'UNSAVE_NEWS':
+        return 'bg-purple-50 border-purple-200';
+      default:
+        return 'bg-gray-50 border-gray-200';
+    }
+  };
+
+  return (
+    <div 
+      className={`p-6 hover:bg-gray-50 transition-all duration-300 ${
+        index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+      } transform hover:scale-[1.01] animate-fadeInUp`}
+      style={{ animationDelay: `${index * 0.1}s` }}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-start space-x-4 flex-1">
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-medium border-2 ${getStatusColor()}`}>
+            {getActionIcon()}
+          </div>
+          
+          <div className="flex-1 min-w-0">
+<div className="flex items-center space-x-3 mb-2">
+  <h3 className="text-lg font-semibold text-gray-900 truncate">
+    {ACTION_LABELS[log.action] || log.action}
+  </h3>
+  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+    isAdminUser(log.userEmail, log.details) 
+      ? 'bg-amber-100 text-amber-800' 
+      : 'bg-blue-100 text-blue-800'
+  }`}>
+    {isAdminUser(log.userEmail, log.details) ? 'Admin' : 'User'}
+  </span>
+</div>
+            
+            <p className="text-gray-700 mb-3 leading-relaxed">
+              {getActionDescription()}
+            </p>
+            
+            <div className="flex items-center space-x-6 text-sm text-gray-500">
+              <div className="flex items-center space-x-2">
+                <User className="w-4 h-4" />
+                <span>{log.userEmail || 'Email tidak tersedia'}</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Clock className="w-4 h-4" />
+                <span>{formatTimestamp(log.timestamp)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-2 ml-4">
+          <button
+            onClick={toggleExpand}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-all duration-200 group"
+            title={expanded ? 'Sembunyikan detail' : 'Lihat detail'}
+          >
+            {expanded ? (
+              <ChevronUp className="w-5 h-5 text-gray-600 group-hover:text-indigo-600 transition-colors" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-gray-600 group-hover:text-indigo-600 transition-colors" />
+            )}
+          </button>
+          
+          <button
+            onClick={onDelete}
+            className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+            title="Hapus log ini"
+          >
+            <Trash className="w-5 h-5 text-gray-400 group-hover:text-red-600 transition-colors" />
+          </button>
+        </div>
+      </div>
+      
+      {expanded && <EnhancedActivityDetails details={log.details} action={log.action} />}
+    </div>
+  );
+};
+
+// Component Enhanced Activity Details dengan UI yang lebih baik
+const EnhancedActivityDetails = ({ details, action }) => {
+  const getDetailValue = (key, value) => {
+    // Handle null/undefined/empty values
+    if (value === null || value === undefined || value === '') {
+      return <span className="text-gray-400 italic">Tidak tersedia</span>;
+    }
+
+    // Handle boolean values
+    if (typeof value === 'boolean') {
+      return (
+        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+          value ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+        }`}>
+          {value ? '✓ Ya' : '✗ Tidak'}
+        </span>
+      );
+    }
+
+    // Handle timestamps
+    if (key.toLowerCase().includes('timestamp') || key.toLowerCase().includes('time')) {
+      try {
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+          return (
+            <div className="flex items-center space-x-2">
+              <Clock className="w-4 h-4 text-gray-400" />
+              <span>{formatDate(date)}</span>
+            </div>
+          );
         }
-      `}</style>
+      } catch (e) {
+        // Continue to default handling
+      }
+    }
+
+    // Handle email addresses
+    if (key.toLowerCase().includes('email') && typeof value === 'string' && value.includes('@')) {
+      return (
+        <div className="flex items-center space-x-2">
+          <User className="w-4 h-4 text-gray-400" />
+          <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{value}</span>
+        </div>
+      );
+    }
+
+    // Handle IDs
+    if (key.toLowerCase().includes('id') && typeof value === 'string') {
+      return (
+        <span className="font-mono text-sm bg-blue-50 text-blue-700 px-2 py-1 rounded border">
+          {value}
+        </span>
+      );
+    }
+
+    // Handle URLs
+    if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('www'))) {
+      return (
+        <a 
+          href={value} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:text-blue-800 underline break-all"
+        >
+          {value}
+        </a>
+      );
+    }
+
+    // Handle objects
+    if (typeof value === 'object' && value !== null) {
+      return (
+        <div className="bg-gray-50 rounded-lg p-3 mt-2">
+          <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-x-auto">
+            {JSON.stringify(value, null, 2)}
+          </pre>
+        </div>
+      );
+    }
+
+    // Handle long strings
+    if (typeof value === 'string' && value.length > 100) {
+      return (
+        <div className="bg-gray-50 rounded-lg p-3 mt-2">
+          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+            {value}
+          </p>
+        </div>
+      );
+    }
+
+    // Default handling
+    return <span className="break-words">{String(value)}</span>;
+  };
+
+  const getFieldIcon = (key) => {
+    const iconMap = {
+      newsId: '📄',
+      articleId: '📰',
+      userId: '👤',
+      userEmail: '📧',
+      commentId: '💬',
+      actionType: '⚡',
+      timestamp: '🕒',
+      isAdmin: '👑',
+      previousValue: '📝',
+      newValue: '✨',
+      ipAddress: '🌐',
+      userAgent: '🖥️',
+      deviceInfo: '📱',
+      location: '📍',
+      sessionId: '🔗'
+    };
+    return iconMap[key] || '📋';
+  };
+
+  const getFieldLabel = (key) => {
+    const labelMap = {
+      newsId: 'ID Berita',
+      articleId: 'ID Artikel', 
+      userId: 'ID Pengguna',
+      userEmail: 'Email Pengguna',
+      commentId: 'ID Komentar',
+      actionType: 'Jenis Aksi',
+      timestamp: 'Waktu',
+      isAdmin: 'Status Admin',
+      previousValue: 'Nilai Sebelumnya',
+      newValue: 'Nilai Baru',
+      ipAddress: 'Alamat IP',
+      userAgent: 'User Agent',
+      deviceInfo: 'Info Device',
+      location: 'Lokasi',
+      sessionId: 'ID Sesi',
+      content: 'Konten',
+      title: 'Judul',
+      category: 'Kategori',
+      status: 'Status',
+      priority: 'Prioritas'
+    };
+    return labelMap[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+  };
+
+  const getActionIcon = () => {
+    const iconMap = {
+      'LIKE_NEWS': <Heart className="w-5 h-5 text-red-500" />,
+      'SAVE_NEWS': <Bookmark className="w-5 h-5 text-blue-500" />,
+      'UNSAVE_NEWS': <BookmarkX className="w-5 h-5 text-gray-500" />,
+      'COMMENT_ADD': <MessageSquare className="w-5 h-5 text-green-500" />,
+      'COMMENT_DELETE': <Trash2 className="w-5 h-5 text-red-500" />,
+      'NEWS_ADD': <PlusCircle className="w-5 h-5 text-green-500" />,
+      'EDIT_NEWS': <Edit3 className="w-5 h-5 text-blue-500" />,
+      'DELETE_NEWS': <Trash2 className="w-5 h-5 text-red-500" />,
+      'PROFILE_UPDATE': <User className="w-5 h-5 text-blue-500" />,
+      'SPEED_UPDATE': <Activity className="w-5 h-5 text-purple-500" />
+    };
+    return iconMap[action] || <Activity className="w-5 h-5 text-gray-500" />;
+  };
+
+  // Filter out null/undefined/empty details
+  const validDetails = Object.entries(details || {}).filter(([key, value]) => 
+    value !== null && value !== undefined && value !== ''
+  );
+
+  return (
+    <div className="mt-6 animate-slideDown">
+      <div className="bg-gradient-to-r from-gray-50 to-blue-50 border border-gray-200 rounded-xl p-6 shadow-sm">
+        {/* Header */}
+        <div className="flex items-center space-x-3 mb-6 pb-4 border-b border-gray-200">
+          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+            {getActionIcon()}
+          </div>
+          <div>
+            <h4 className="text-lg font-bold text-gray-900">Detail Aktivitas</h4>
+            <p className="text-sm text-gray-600">Informasi lengkap tentang aktivitas ini</p>
+          </div>
+        </div>
+        
+        {/* Details Grid */}
+        {validDetails.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {validDetails.map(([key, value]) => (
+              <div key={key} className="bg-white rounded-lg p-4 border border-gray-100 hover:shadow-sm transition-shadow duration-200">
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
+                    <span className="text-sm">{getFieldIcon(key)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-gray-900 text-sm mb-2">
+                      {getFieldLabel(key)}
+                    </div>
+                    <div className="text-gray-700 text-sm">
+                      {getDetailValue(key, value)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Activity className="w-8 h-8 text-gray-400" />
+            </div>
+            <h5 className="text-lg font-semibold text-gray-600 mb-2">Tidak Ada Detail Tambahan</h5>
+            <p className="text-gray-500">Aktivitas ini tidak memiliki informasi detail tambahan.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
