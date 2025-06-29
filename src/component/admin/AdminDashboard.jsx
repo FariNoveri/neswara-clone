@@ -39,7 +39,7 @@ import TrendsChart from './TrendsChart';
 import BreakingNewsAdmin from './BreakingNewsAdmin';
 import NotificationManagement from './NotificationManagement';
 import ManageViews from './ManageViews';
-import LogActivity from './LogActivity'; // Impor komponen LogActivity
+import LogActivity from './LogActivity';
 
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
@@ -63,7 +63,9 @@ const AdminDashboard = () => {
     totalNews: 0,
     totalComments: 0,
     totalViews: 0,
-    totalUsers: 0
+    totalUsers: 0,
+    totalNotifications: 0,
+    totalBreakingNews: 0
   });
 
   const navigate = useNavigate();
@@ -78,14 +80,19 @@ const AdminDashboard = () => {
     gambarDeskripsi: ''
   });
 
-  // Fungsi untuk menyimpan log aktivitas
-  const logActivity = async (action, details) => {
+  // Fungsi untuk menyimpan log aktivitas dengan penanganan undefined
+  const logActivity = async (action, details = {}) => {
     try {
+      // Bersihkan data dari nilai undefined
+      const cleanedDetails = Object.fromEntries(
+        Object.entries(details).filter(([_, value]) => value !== undefined)
+      );
+
       await addDoc(collection(db, 'logs'), {
-        userId: user?.uid,
-        userEmail: user?.email,
+        userId: user?.uid || null,
+        userEmail: user?.email || null,
         action: action,
-        details: details,
+        details: cleanedDetails,
         timestamp: serverTimestamp(),
         ipAddress: null // Bisa ditambahkan logika untuk mendapatkan IP jika diperlukan
       });
@@ -104,17 +111,21 @@ const AdminDashboard = () => {
             const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
             if (isAdmin) {
               setIsAuthorized(true);
+              logActivity('ADMIN_LOGIN', { userEmail: user.email }); // Log login admin
             } else {
               setIsAuthorized(false);
               setShowUnauthorizedModal(true);
+              logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email }); // Log akses tanpa izin
             }
           } else {
             setIsAuthorized(false);
             setShowUnauthorizedModal(true);
+            logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email }); // Log akses tanpa izin
           }
         } catch (error) {
           console.error('Error checking user role:', error);
           setShowUnauthorizedModal(true);
+          logActivity('AUTH_ERROR', { userEmail: user?.email, error: error.message }); // Log error otorisasi
         }
       };
       checkAuthorization();
@@ -123,10 +134,13 @@ const AdminDashboard = () => {
       const unsubscribe = auth.onAuthStateChanged((currentUser) => {
         if (currentUser && currentUser.uid === user.uid) {
           if (currentUser.photoURL !== user.photoURL) {
-            logActivity('PROFILE_UPDATE', { type: 'photo', newValue: currentUser.photoURL });
+            logActivity('PROFILE_UPDATE', { type: 'photo', newValue: currentUser.photoURL || null });
           }
           if (currentUser.email !== user.email) {
-            logActivity('PROFILE_UPDATE', { type: 'email', newValue: currentUser.email });
+            logActivity('PROFILE_UPDATE', { type: 'email', newValue: currentUser.email || null });
+          }
+          if (currentUser.displayName !== user.displayName) {
+            logActivity('PROFILE_UPDATE', { type: 'displayName', newValue: currentUser.displayName || null });
           }
         }
       });
@@ -140,6 +154,7 @@ const AdminDashboard = () => {
   const handleUnauthorizedClose = async () => {
     try {
       await auth.signOut();
+      logActivity('UNAUTHORIZED_LOGOUT', { userEmail: user?.email || null });
       setShowUnauthorizedModal(false);
       navigate('/');
     } catch (error) {
@@ -151,7 +166,7 @@ const AdminDashboard = () => {
   const handleAdminLogout = async () => {
     try {
       await auth.signOut();
-      logActivity('LOGOUT', { userEmail: user?.email });
+      logActivity('ADMIN_LOGOUT', { userEmail: user?.email || null });
       navigate('/');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -265,11 +280,40 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchNotifications = async () => {
+    try {
+      const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
+      const totalNotifications = notificationsSnapshot.size;
+      setStats(prev => ({
+        ...prev,
+        totalNotifications
+      }));
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+
+  const fetchBreakingNews = async () => {
+    try {
+      const breakingNewsSnapshot = await getDocs(collection(db, 'breakingNews'));
+      const totalBreakingNews = breakingNewsSnapshot.size;
+      setStats(prev => ({
+        ...prev,
+        totalBreakingNews
+      }));
+    } catch (error) {
+      console.error('Error fetching breaking news:', error);
+    }
+  };
+
   const handleViewsUpdated = async () => {
     console.log('Views updated, refreshing data...');
     await fetchNews();
     await fetchUsers();
     await fetchComments();
+    await fetchNotifications();
+    await fetchBreakingNews();
+    logActivity('VIEWS_UPDATED', { totalViews: stats.totalViews || null });
   };
 
   useEffect(() => {
@@ -277,6 +321,8 @@ const AdminDashboard = () => {
       fetchNews();
       fetchUsers();
       fetchComments();
+      fetchNotifications();
+      fetchBreakingNews();
     }
   }, [isAuthorized, filterTitle, filterCategory, filterAuthor, filterDate, filterCustomDate, filterSortBy]);
 
@@ -295,7 +341,7 @@ const AdminDashboard = () => {
           ...formData,
           updatedAt: serverTimestamp()
         });
-        logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul });
+        logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul || null });
       } else {
         const docRef = await addDoc(collection(db, 'news'), {
           ...formData,
@@ -303,7 +349,7 @@ const AdminDashboard = () => {
           views: 0,
           komentar: 0
         });
-        logActivity('ADD_NEWS', { newsId: docRef.id, title: formData.judul });
+        logActivity('ADD_NEWS', { newsId: docRef.id, title: formData.judul || null });
       }
 
       resetForm();
@@ -322,7 +368,7 @@ const AdminDashboard = () => {
         if (newsDoc.exists()) {
           const newsData = newsDoc.data();
           await deleteDoc(doc(db, 'news', id));
-          logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul });
+          logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || null });
           fetchNews();
         }
       } catch (error) {
@@ -377,6 +423,7 @@ const AdminDashboard = () => {
         show={showUnauthorizedModal}
         onClose={handleUnauthorizedClose}
         userEmail={user?.email}
+        logActivity={logActivity}
       />
     );
   }
@@ -452,31 +499,45 @@ const AdminDashboard = () => {
 
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <StatCard
-                icon={FileText}
-                title="Total Berita"
-                value={stats.totalNews}
-                color="#10B981"
-              />
-              <StatCard
-                icon={MessageCircle}
-                title="Total Komentar"
-                value={stats.totalComments}
-                color="#3B82F6"
-              />
-              <StatCard
-                icon={Eye}
-                title="Total Views"
-                value={stats.totalViews}
-                color="#F59E0B"
-              />
-              <StatCard
-                icon={Users}
-                title="Total Pengguna"
-                value={stats.totalUsers}
-                color="#EF4444"
-              />
+            <div className="flex justify-end overflow-x-auto">
+              <div className="flex space-x-6">
+                <StatCard
+                  icon={FileText}
+                  title="Total Berita"
+                  value={stats.totalNews}
+                  color="#10B981"
+                />
+                <StatCard
+                  icon={MessageCircle}
+                  title="Total Komentar"
+                  value={stats.totalComments}
+                  color="#3B82F6"
+                />
+                <StatCard
+                  icon={Eye}
+                  title="Total Views"
+                  value={stats.totalViews}
+                  color="#F59E0B"
+                />
+                <StatCard
+                  icon={Users}
+                  title="Total Pengguna"
+                  value={stats.totalUsers}
+                  color="#EF4444"
+                />
+                <StatCard
+                  icon={Bell}
+                  title="Total Notifikasi"
+                  value={stats.totalNotifications}
+                  color="#8B5CF6"
+                />
+                <StatCard
+                  icon={RadioTower}
+                  title="Total Breaking News"
+                  value={stats.totalBreakingNews}
+                  color="#EC4899"
+                />
+              </div>
             </div>
 
             <TrendsChart isAuthorized={isAuthorized} activeTab={activeTab} />
@@ -686,19 +747,19 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {activeTab === 'users' && <UserManagement adminEmails={ADMIN_EMAILS} />}
+        {activeTab === 'users' && <UserManagement adminEmails={ADMIN_EMAILS} logActivity={logActivity} />}
 
-        {activeTab === 'comments' && <CommentManagement />}
+        {activeTab === 'comments' && <CommentManagement logActivity={logActivity} />}
 
-        {activeTab === 'breaking-news' && <BreakingNewsAdmin />}
+        {activeTab === 'breaking-news' && <BreakingNewsAdmin logActivity={logActivity} />}
 
-        {activeTab === 'notifications' && <NotificationManagement />}
+        {activeTab === 'notifications' && <NotificationManagement logActivity={logActivity} />}
 
         {activeTab === 'views' && (
-          <ManageViews onViewsUpdated={handleViewsUpdated} />
+          <ManageViews onViewsUpdated={handleViewsUpdated} logActivity={logActivity} />
         )}
 
-        {activeTab === 'logs' && <LogActivity />} {/* Ganti dengan LogActivity */}
+        {activeTab === 'logs' && <LogActivity />}
 
         <NewsModal
           showModal={showModal}
@@ -710,6 +771,34 @@ const AdminDashboard = () => {
           resetForm={resetForm}
           loading={newsLoading}
         />
+
+        <style jsx>{`
+          .flex {
+            display: flex;
+          }
+          .justify-end {
+            justify-content: flex-end;
+          }
+          .space-x-6 > * + * {
+            margin-left: 1.5rem;
+          }
+          .overflow-x-auto {
+            overflow-x: auto;
+          }
+          .animate-slideUp {
+            animation: slideUp 0.3s ease-out;
+          }
+          @keyframes slideUp {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}</style>
       </div>
     </div>
   );

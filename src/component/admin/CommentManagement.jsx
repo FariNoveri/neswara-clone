@@ -3,7 +3,7 @@ import { db } from '../../firebaseconfig';
 import { collection, getDocs, query, orderBy, doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
 
-const CommentManagement = () => {
+const CommentManagement = ({ logActivity }) => {
   const [comments, setComments] = useState([]);
   const [filteredComments, setFilteredComments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,35 +107,39 @@ const CommentManagement = () => {
   const handleDelete = async (newsId, commentId) => {
     if (window.confirm("Yakin ingin menghapus komentar ini?")) {
       try {
-        await deleteDoc(doc(db, "news", newsId, "comments", commentId));
-        const updatedComments = comments.filter(comment => comment.id !== commentId);
-        setComments(updatedComments);
-        setFilteredComments(updatedComments.filter(comment => {
-          // Apply current filters to updated comments
-          let include = true;
-          
-          if (filters.searchText) {
-            include = include && (
-              (comment.displayName || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-              (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase())
-            );
-          }
-          
-          if (filters.dateFrom && comment.createdAt) {
-            const fromDate = new Date(filters.dateFrom);
-            fromDate.setHours(0, 0, 0, 0);
-            include = include && comment.createdAt.toDate() >= fromDate;
-          }
-          
-          if (filters.dateTo && comment.createdAt) {
-            const toDate = new Date(filters.dateTo);
-            toDate.setHours(23, 59, 59, 999);
-            include = include && comment.createdAt.toDate() <= toDate;
-          }
-          
-          return include;
-        }));
-        console.log("Komentar berhasil dihapus:", commentId);
+        const commentDoc = await getDoc(doc(db, "news", newsId, "comments", commentId));
+        if (commentDoc.exists()) {
+          const commentData = commentDoc.data();
+          await deleteDoc(doc(db, "news", newsId, "comments", commentId));
+          logActivity('COMMENT_DELETE', { newsId, commentId, text: commentData.text, displayName: commentData.displayName });
+          const updatedComments = comments.filter(comment => comment.id !== commentId);
+          setComments(updatedComments);
+          setFilteredComments(updatedComments.filter(comment => {
+            let include = true;
+            
+            if (filters.searchText) {
+              include = include && (
+                (comment.displayName || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
+                (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase())
+              );
+            }
+            
+            if (filters.dateFrom && comment.createdAt) {
+              const fromDate = new Date(filters.dateFrom);
+              fromDate.setHours(0, 0, 0, 0);
+              include = include && comment.createdAt.toDate() >= fromDate;
+            }
+            
+            if (filters.dateTo && comment.createdAt) {
+              const toDate = new Date(filters.dateTo);
+              toDate.setHours(23, 59, 59, 999);
+              include = include && comment.createdAt.toDate() <= toDate;
+            }
+            
+            return include;
+          }));
+          console.log("Komentar berhasil dihapus:", commentId);
+        }
       } catch (err) {
         console.error("Gagal menghapus komentar:", err);
       }

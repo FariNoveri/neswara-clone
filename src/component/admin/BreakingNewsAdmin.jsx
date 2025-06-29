@@ -3,7 +3,7 @@ import { FaPlus, FaEdit, FaTrash, FaEye, FaEyeSlash, FaSave, FaTimes, FaBroadcas
 import { db } from '../../firebaseconfig';
 import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 
-const BreakingNewsAdmin = () => {
+const BreakingNewsAdmin = ({ logActivity }) => {
   const [breakingNews, setBreakingNews] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSpeedModalOpen, setIsSpeedModalOpen] = useState(false);
@@ -72,13 +72,15 @@ const BreakingNewsAdmin = () => {
           speed: speedValue,
           updatedAt: serverTimestamp()
         });
+        logActivity('NEWS_EDIT', { newsId: editingNews.id, title: formData.text, newSpeed: speedValue, oldSpeed: editingNews.speed });
       } else {
-        await addDoc(collection(db, 'breakingNews'), {
+        const docRef = await addDoc(collection(db, 'breakingNews'), {
           ...formData,
           speed: speedValue,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
+        logActivity('NEWS_ADD', { newsId: docRef.id, title: formData.text, newSpeed: speedValue });
       }
       fetchBreakingNews();
       setIsModalOpen(false);
@@ -93,8 +95,13 @@ const BreakingNewsAdmin = () => {
     if (window.confirm('Apakah Anda yakin ingin menghapus breaking news ini?')) {
       setLoading(true);
       try {
-        await deleteDoc(doc(db, 'breakingNews', id));
-        fetchBreakingNews();
+        const newsDoc = await getDoc(doc(db, 'breakingNews', id));
+        if (newsDoc.exists()) {
+          const newsData = newsDoc.data();
+          await deleteDoc(doc(db, 'breakingNews', id));
+          logActivity('NEWS_DELETE', { newsId: id, title: newsData.text });
+          fetchBreakingNews();
+        }
       } catch (error) {
         console.error('Error deleting breaking news:', error);
       }
@@ -105,11 +112,16 @@ const BreakingNewsAdmin = () => {
   const handleToggleActive = async (id, currentIsActive) => {
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'breakingNews', id), {
-        isActive: !currentIsActive,
-        updatedAt: serverTimestamp()
-      });
-      fetchBreakingNews();
+      const newsDoc = await getDoc(doc(db, 'breakingNews', id));
+      if (newsDoc.exists()) {
+        const newsData = newsDoc.data();
+        await updateDoc(doc(db, 'breakingNews', id), {
+          isActive: !currentIsActive,
+          updatedAt: serverTimestamp()
+        });
+        logActivity('TOGGLE_NEWS_STATUS', { newsId: id, title: newsData.text, newStatus: !currentIsActive });
+        fetchBreakingNews();
+      }
     } catch (error) {
       console.error('Error toggling breaking news status:', error);
     }
@@ -139,6 +151,7 @@ const BreakingNewsAdmin = () => {
         });
       });
       await batch.commit();
+      logActivity('SPEED_UPDATE', { newSpeed: speedValue, count: breakingNews.length });
       fetchBreakingNews();
       setIsSpeedModalOpen(false);
     } catch (error) {
@@ -168,6 +181,7 @@ const BreakingNewsAdmin = () => {
           });
         });
         batch.commit().then(() => {
+          logActivity('SPEED_UPDATE', { newSpeed: adjustedSpeed, count: breakingNews.length });
           fetchBreakingNews();
           setIsSpeedModalOpen(false);
         });
@@ -180,9 +194,8 @@ const BreakingNewsAdmin = () => {
             speed: adjustedSpeed,
             updatedAt: serverTimestamp()
           }).then(() => {
-            fetch
-
-BreakingNews();
+            logActivity('NEWS_EDIT', { newsId: editingNews.id, title: formData.text, newSpeed: adjustedSpeed, oldSpeed: editingNews.speed });
+            fetchBreakingNews();
             setIsModalOpen(false);
             setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
           });
@@ -193,6 +206,7 @@ BreakingNews();
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           }).then(() => {
+            logActivity('NEWS_ADD', { newsId: docRef.id, title: formData.text, newSpeed: adjustedSpeed });
             fetchBreakingNews();
             setIsModalOpen(false);
             setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });

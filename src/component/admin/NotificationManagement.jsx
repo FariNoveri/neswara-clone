@@ -1,9 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { 
+  collection, 
+  getDocs, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  where, 
+  orderBy, 
+  serverTimestamp, 
+  onSnapshot,
+  getDoc 
+} from 'firebase/firestore';
 import { PlusCircle, Edit3, Trash2, X, Upload, Link, Image } from 'lucide-react';
 
-const NotificationManagement = () => {
+const NotificationManagement = ({ logActivity }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -16,9 +29,13 @@ const NotificationManagement = () => {
     message: '',
     image: '',
     type: 'news',
-    newsLink: '' // Will be set based on selected news ID
+    newsLink: ''
   });
-  const [newsArticles, setNewsArticles] = useState([]); // Fetch from 'news' collection
+  const [newsArticles, setNewsArticles] = useState([]);
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupMessage, setPopupMessage] = useState('');
+  const [popupType, setPopupType] = useState('error'); // 'error' atau 'confirm'
+  const [deleteId, setDeleteId] = useState(null); // State untuk menyimpan ID yang akan dihapus
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -35,20 +52,19 @@ const NotificationManagement = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch news articles from 'news' collection for dropdown
   useEffect(() => {
     const q = query(collection(db, 'news')); // No orderBy to avoid issues
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('Snapshot data:', snapshot.docs.map(doc => doc.data())); // Debug all data
+      console.log('Snapshot data:', snapshot.docs.map(doc => doc.data()));
       const newsData = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
-          title: data.judul || data.title || 'Tanpa Judul', // Try 'title' as fallback
-          link: `/berita/${doc.id}` // Matches NewsDetail.jsx routing
+          title: data.judul || data.title || 'Tanpa Judul',
+          link: `/berita/${doc.id}`
         };
       });
-      console.log('Processed news articles:', newsData); // Debug processed data
+      console.log('Processed news articles:', newsData);
       if (newsData.length === 0) {
         console.warn('No news articles found in the collection.');
       }
@@ -72,11 +88,11 @@ const NotificationManagement = () => {
     const file = e.target.files[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
-        alert('Please select an image file');
+        showPopupMessage('Please select an image file', 'error');
         return;
       }
       if (file.size > 5 * 1024 * 1024) {
-        alert('File size should be less than 5MB');
+        showPopupMessage('File size should be less than 5MB', 'error');
         return;
       }
       try {
@@ -86,7 +102,7 @@ const NotificationManagement = () => {
         setNotificationForm({ ...notificationForm, image: base64 });
       } catch (error) {
         console.error('Error converting file:', error);
-        alert('Error processing image file');
+        showPopupMessage('Error processing image file', 'error');
       }
     }
   };
@@ -99,7 +115,7 @@ const NotificationManagement = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!notificationForm.title || !notificationForm.message) {
-      alert('Mohon lengkapi judul dan pesan notifikasi');
+      showPopupMessage('Mohon lengkapi judul dan pesan notifikasi', 'error');
       return;
     }
 
@@ -110,35 +126,62 @@ const NotificationManagement = () => {
           ...notificationForm,
           updatedAt: serverTimestamp()
         });
+        logActivity('NOTIFICATION_EDIT', { notificationId: editingNotification.id, title: notificationForm.title, type: notificationForm.type });
       } else {
-        await addDoc(collection(db, 'notifications'), {
+        const docRef = await addDoc(collection(db, 'notifications'), {
           ...notificationForm,
           timestamp: serverTimestamp(),
           isRead: false
         });
+        logActivity('NOTIFICATION_ADD', { notificationId: docRef.id, title: notificationForm.title, type: notificationForm.type });
       }
       resetForm();
       setShowModal(false);
     } catch (error) {
       console.error('Error saving notification:', error);
-      alert('Error saving notification');
+      showPopupMessage('Error saving notification', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Apakah Anda yakin ingin menghapus notifikasi ini?')) {
-      try {
-        setLoading(true);
-        await deleteDoc(doc(db, 'notifications', id));
-      } catch (error) {
-        console.error('Error deleting notification:', error);
-        alert('Error deleting notification');
-      } finally {
-        setLoading(false);
-      }
+  const handleDelete = (id) => {
+    setDeleteId(id); // Simpan ID notifikasi yang akan dihapus
+    setPopupType('confirm');
+    setPopupMessage('Apakah Anda yakin ingin menghapus notifikasi ini?');
+    setShowPopup(true);
+  };
+
+  const confirmDelete = async () => {
+    const id = deleteId; // Ambil ID dari state
+    if (!id) {
+      showPopupMessage('ID notifikasi tidak valid', 'error');
+      return;
     }
+    setShowPopup(false);
+    try {
+      setLoading(true);
+      const notificationDoc = await getDoc(doc(db, 'notifications', id));
+      if (notificationDoc.exists()) {
+        const notificationData = notificationDoc.data();
+        await deleteDoc(doc(db, 'notifications', id));
+        logActivity('NOTIFICATION_DELETE', { notificationId: id, title: notificationData.title || 'N/A', type: notificationData.type || 'N/A' });
+        console.log('Log activity called for NOTIFICATION_DELETE:', { notificationId: id, title: notificationData.title, type: notificationData.type });
+        const q = query(collection(db, 'notifications'), orderBy('timestamp', 'desc'));
+        const snapshot = await getDocs(q);
+        setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      showPopupMessage('Error deleting notification', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    setShowPopup(false);
+    setDeleteId(null); // Reset ID setelah pembatalan
   };
 
   const handleEdit = (notification) => {
@@ -148,7 +191,7 @@ const NotificationManagement = () => {
       message: notification.message,
       image: notification.image || '',
       type: notification.type || 'news',
-      newsLink: notification.newsLink || '' // Preserve existing newsLink
+      newsLink: notification.newsLink || ''
     });
     setPreviewImage(notification.image || '');
     setUploadType(notification.image && notification.image.startsWith('data:') ? 'file' : 'url');
@@ -167,7 +210,12 @@ const NotificationManagement = () => {
     setShowModal(false);
   };
 
-  // Handle click outside to close modal and retain form data
+  const showPopupMessage = (message, type = 'error') => {
+    setPopupType(type);
+    setPopupMessage(message);
+    setShowPopup(true);
+  };
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (modalRef.current && !modalRef.current.contains(event.target)) {
@@ -236,19 +284,19 @@ const NotificationManagement = () => {
                     <td className="px-6 py-4 text-sm text-gray-800 max-w-xs"><div className="line-clamp-2">{notification.message}</div></td>
                     <td className="px-6 py-4 text-sm"><span className="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">{notification.type}</span></td>
                     <td className="px-6 py-4 text-sm text-black">
-  {notification.image ? (
-    <div className="flex items-center space-x-2">
-      <img
-        src={notification.image}
-        alt="Preview"
-        className="h-10 w-10 rounded-lg object-cover border border-gray-300 shadow-sm"
-      />
-      <Image className="h-4 w-4 text-green-500" />
-    </div>
-  ) : (
-    <span className="text-gray-500 italic">Tidak ada</span>
-  )}
-</td>
+                      {notification.image ? (
+                        <div className="flex items-center space-x-2">
+                          <img
+                            src={notification.image}
+                            alt="Preview"
+                            className="h-10 w-10 rounded-lg object-cover border border-gray-300 shadow-sm"
+                          />
+                          <Image className="h-4 w-4 text-green-500" />
+                        </div>
+                      ) : (
+                        <span className="text-gray-500 italic">Tidak ada</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{notification.timestamp?.toDate().toLocaleString('id-ID', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'Baru'}</td>
                     <td className="px-6 py-4 text-sm font-medium">
                       <div className="flex items-center space-x-3">
@@ -265,7 +313,7 @@ const NotificationManagement = () => {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fadeIn" onClick={closeModal}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fadeIn" onClick={closeModal}>
           <div ref={modalRef} className="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 animate-slideUp" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center p-6 border-b border-gray-200">
               <h2 className="text-2xl font-bold text-black">{editingNotification ? 'Edit Notifikasi' : 'Tambah Notifikasi'}</h2>
@@ -406,20 +454,69 @@ const NotificationManagement = () => {
         </div>
       )}
 
+      {showPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fadeIn" onClick={popupType === 'confirm' ? null : () => setShowPopup(false)}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full transform transition-all duration-300 animate-slideUpAndBounce" onClick={e => e.stopPropagation()}>
+            <div className="text-center">
+              {popupType === 'error' ? (
+                <div className="text-red-600 mb-4">
+                  <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              ) : (
+                <div className="text-yellow-600 mb-4">
+                  <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4.732c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+              )}
+              <p className="text-lg font-semibold text-gray-900 mb-4">{popupMessage}</p>
+              {popupType === 'confirm' ? (
+                <div className="flex justify-center space-x-4">
+                  <button
+                    onClick={confirmDelete}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors duration-200"
+                  >
+                    Ya
+                  </button>
+                  <button
+                    onClick={cancelDelete}
+                    className="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors duration-200"
+                  >
+                    Tidak
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowPopup(false)}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors duration-200"
+                >
+                  Tutup
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
         }
         
-        @keyframes slideUp {
-          from { 
+        @keyframes slideUpAndBounce {
+          0% { 
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(20px) scale(0.9);
           }
-          to { 
+          50% { 
+            transform: translateY(-5px) scale(1.05);
+          }
+          100% { 
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
           }
         }
         
@@ -427,8 +524,8 @@ const NotificationManagement = () => {
           animation: fadeIn 0.3s ease-out;
         }
         
-        .animate-slideUp {
-          animation: slideUp 0.3s ease-out;
+        .animate-slideUpAndBounce {
+          animation: slideUpAndBounce 0.5s ease-out;
         }
         
         .line-clamp-2 {
@@ -438,17 +535,14 @@ const NotificationManagement = () => {
           overflow: hidden;
         }
         
-        /* Prevent background scroll when modal is open */
         body.modal-open {
           overflow: hidden;
         }
         
-        /* Ensure modal is scrollable */
         .max-h-\[80vh\] {
           max-height: 80vh;
         }
         
-        /* Animation for notification click without link */
         @keyframes bounce {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.05); }
@@ -458,7 +552,6 @@ const NotificationManagement = () => {
           animation: bounce 0.5s ease-in-out;
         }
         
-        /* Ensure text visibility */
         .bg-white {
           background-color: #ffffff !important;
         }

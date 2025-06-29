@@ -10,7 +10,8 @@ const NewsModal = ({
   setFormData, 
   handleSubmit, 
   resetForm, 
-  loading 
+  loading,
+  logActivity
 }) => {
   if (!showModal) return null;
 
@@ -22,6 +23,18 @@ const NewsModal = ({
         setFormData(prev => ({ ...prev, gambar: reader.result })); // Simpan sebagai base64
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmitWithLog = async () => {
+    await handleSubmit();
+    if (!loading) { // Pastikan submit berhasil sebelum logging
+      const action = editingNews ? 'NEWS_EDIT' : 'NEWS_ADD';
+      logActivity(action, { 
+        newsId: editingNews?.id || 'new', 
+        title: formData.judul, 
+        category: formData.kategori 
+      });
     }
   };
 
@@ -169,7 +182,7 @@ const NewsModal = ({
             </button>
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={handleSubmitWithLog}
               disabled={loading}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center"
             >

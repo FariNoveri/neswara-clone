@@ -1,7 +1,12 @@
 import { AlertTriangle, LogOut } from 'lucide-react';
 
-const UnauthorizedModal = ({ show, onClose, userEmail }) => {
+const UnauthorizedModal = ({ show, onClose, userEmail, logActivity }) => {
   if (!show) return null;
+
+  // Log unauthorized access attempt when modal is shown
+  if (show) {
+    logActivity('UNAUTHORIZED_ACCESS', { userEmail: userEmail || 'Unknown', action: 'attempted_admin_access' });
+  }
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">

@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { Eye, RefreshCw, User, UserX, Trash2, Shield } from 'lucide-react';
 
-const ManageViews = ({ onViewsUpdated }) => {
+const ManageViews = ({ logActivity, onViewsUpdated }) => {
   const [newsItems, setNewsItems] = useState([]);
   const [selectedNewsId, setSelectedNewsId] = useState('');
   const [selectedNewsTitle, setSelectedNewsTitle] = useState('');
@@ -131,6 +131,7 @@ const ManageViews = ({ onViewsUpdated }) => {
       
       await Promise.all(deletePromises);
 
+      logActivity('VIEWS_UPDATED', { newsId: selectedNewsId, title: selectedNewsTitle, action: 'reset', newTotal: 0 });
       alert('Views telah direset untuk berita ini.');
       
       // Refresh data
@@ -173,6 +174,7 @@ const ManageViews = ({ onViewsUpdated }) => {
       
       await Promise.all(deletePromises);
 
+      logActivity('VIEWS_UPDATED', { action: 'reset_all', newTotal: 0 });
       alert('Semua views telah direset.');
       
       // Refresh data

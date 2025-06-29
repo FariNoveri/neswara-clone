@@ -74,7 +74,7 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
   );
 };
 
-const UserManagement = ({ adminEmails }) => {
+const UserManagement = ({ logActivity, adminEmails }) => {
   const [users, setUsers] = useState([]);
   const [authUsers, setAuthUsers] = useState([]);
   const [combinedUsers, setCombinedUsers] = useState([]);
@@ -325,6 +325,7 @@ const UserManagement = ({ adminEmails }) => {
             createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           });
           
+          logActivity('USER_SYNC', { userId: user.id, email: user.email, action: 'sync_to_firestore' });
           showPopup('Berhasil', 'Pengguna berhasil ditambahkan ke Firestore.', 'success');
         } catch (error) {
           console.error('Error syncing user to Firestore:', error);
@@ -380,6 +381,7 @@ const UserManagement = ({ adminEmails }) => {
             console.log('User deleted from Authentication:', responseData);
           }
 
+          logActivity('USER_DELETE', { userId: user.id, email: user.email, source: deleteOptions.join(' dan ') });
           showPopup('Berhasil', `Pengguna berhasil dihapus dari ${deleteOptions.join(' dan ')}.`, 'success');
           await fetchAuthUsers();
         } catch (error) {
@@ -426,6 +428,7 @@ const UserManagement = ({ adminEmails }) => {
         });
       }
       
+      logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
       setEditUserId(null);
       setEditForm({ email: '', displayName: '' });
       showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
@@ -469,6 +472,7 @@ const UserManagement = ({ adminEmails }) => {
             });
           }
           
+          logActivity('USER_ROLE_UPDATE', { userId: userId, email: user.email, newRole: isAdminRole ? 'admin' : 'user' });
           showPopup('Berhasil', 'Role berhasil diperbarui.', 'success');
         } catch (error) {
           console.error('Error updating role:', error);
