@@ -1,122 +1,173 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect } from "react";
 
 const NotFound = () => {
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    setIsVisible(true);
+    
+    const handleMouseMove = (e) => {
+      setMousePosition({
+        x: (e.clientX / window.innerWidth) * 100,
+        y: (e.clientY / window.innerHeight) * 100,
+      });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  const floatingElements = [...Array(8)].map((_, i) => (
+    <div
+      key={i}
+      className="absolute w-2 h-2 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full opacity-60"
+      style={{
+        left: `${Math.random() * 100}%`,
+        top: `${Math.random() * 100}%`,
+        animationDelay: `${Math.random() * 3}s`,
+        animationDuration: `${3 + Math.random() * 4}s`,
+      }}
+    />
+  ));
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 text-gray-800 p-8 text-center relative overflow-hidden">
-      {/* Background decorative elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-20 -left-20 w-40 h-40 bg-blue-200 rounded-full opacity-20 animate-pulse"></div>
-        <div className="absolute -bottom-20 -right-20 w-60 h-60 bg-indigo-200 rounded-full opacity-20 animate-pulse delay-1000"></div>
-        <div className="absolute top-1/2 left-1/4 w-20 h-20 bg-green-200 rounded-full opacity-30 animate-bounce delay-500"></div>
-        <div className="absolute top-1/3 right-1/4 w-16 h-16 bg-purple-200 rounded-full opacity-25 animate-bounce delay-700"></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden relative">
+      {/* Dynamic background with mouse interaction */}
+      <div 
+        className="absolute inset-0 opacity-20 transition-all duration-1000 ease-out"
+        style={{
+          background: `radial-gradient(600px circle at ${mousePosition.x}% ${mousePosition.y}%, rgba(59, 130, 246, 0.15), transparent 40%)`,
+        }}
+      />
+      
+      {/* Animated floating elements */}
+      <div className="absolute inset-0">
+        {floatingElements}
       </div>
 
-      {/* Main content */}
-      <div className="relative z-10 max-w-md">
-        {/* Animated 404 number */}
-        <div className="relative mb-8">
-          <h1 className="text-8xl md:text-9xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 animate-pulse">
-            404
-          </h1>
-          <div className="absolute inset-0 text-8xl md:text-9xl font-bold text-blue-200 animate-ping opacity-20">
-            404
-          </div>
-        </div>
+      {/* Grid pattern overlay */}
+      <div className="absolute inset-0 opacity-5">
+        <div className="h-full w-full" style={{
+          backgroundImage: `
+            linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)
+          `,
+          backgroundSize: '50px 50px'
+        }} />
+      </div>
 
-        {/* Animated icon */}
-        <div className="mb-6 flex justify-center">
-          <div className="relative">
-            <div className="w-24 h-24 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-full flex items-center justify-center shadow-lg animate-bounce">
-              <svg 
-                className="w-12 h-12 text-white animate-spin" 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  strokeWidth={2} 
-                  d="M9.172 16.172a4 4 0 015.656 0M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" 
-                />
-              </svg>
+      <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
+        <div className={`text-center transform transition-all duration-1000 ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
+          
+          {/* Glitch effect 404 */}
+          <div className="relative mb-12">
+            <h1 className="text-8xl md:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 relative">
+              404
+            </h1>
+            
+            {/* Glitch layers */}
+            <h1 className="absolute inset-0 text-8xl md:text-9xl font-black text-red-400 opacity-70 animate-pulse" style={{
+              clipPath: 'polygon(0 0, 100% 0, 100% 45%, 0 45%)',
+              transform: 'translateX(-2px)'
+            }}>
+              404
+            </h1>
+            <h1 className="absolute inset-0 text-8xl md:text-9xl font-black text-cyan-400 opacity-70 animate-pulse" style={{
+              clipPath: 'polygon(0 60%, 100% 60%, 100% 100%, 0 100%)',
+              transform: 'translateX(2px)',
+              animationDelay: '0.1s'
+            }}>
+              404
+            </h1>
+          </div>
+
+          {/* Modern card container */}
+          <div className="backdrop-blur-xl bg-white/10 rounded-3xl p-8 border border-white/20 shadow-2xl max-w-md mx-auto">
+            
+            {/* Animated icon */}
+            <div className="mb-6 relative">
+              <div className="w-20 h-20 mx-auto bg-gradient-to-tr from-cyan-400 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg transform rotate-12 hover:rotate-0 transition-transform duration-300">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <div className="absolute inset-0 w-20 h-20 mx-auto bg-blue-400 rounded-2xl animate-ping opacity-20"></div>
             </div>
-            <div className="absolute inset-0 w-24 h-24 bg-blue-400 rounded-full animate-ping opacity-25"></div>
+
+            {/* Content */}
+            <div className="space-y-4 mb-8">
+              <h2 className="text-2xl md:text-3xl font-bold text-white">
+                Halaman Menghilang
+              </h2>
+              <p className="text-gray-300 leading-relaxed">
+                Sepertinya halaman yang Anda cari telah melakukan perjalanan ke dimensi paralel. Mari kita bawa Anda kembali ke realitas!
+              </p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="space-y-4">
+              <a 
+                href="/" 
+                className="group relative w-full inline-flex items-center justify-center px-6 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl overflow-hidden transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-blue-500/25"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <svg className="w-5 h-5 mr-2 relative z-10 group-hover:animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span className="relative z-10">Kembali ke Beranda</span>
+              </a>
+
+              <button 
+                onClick={() => window.history.back()}
+                className="group w-full inline-flex items-center justify-center px-6 py-3 border border-white/30 text-white font-medium rounded-xl backdrop-blur-sm hover:bg-white/10 transition-all duration-300"
+              >
+                <svg className="w-4 h-4 mr-2 group-hover:animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                Halaman Sebelumnya
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Animated text */}
-        <div className="space-y-4 mb-8">
-          <h2 className="text-2xl md:text-3xl font-semibold text-gray-700 animate-fade-in-up">
-            Oops! Halaman Tidak Ditemukan
-          </h2>
-          <p className="text-lg text-gray-600 animate-fade-in-up delay-200">
-            Sepertinya halaman yang Anda cari sedang bersembunyi di dimensi lain
-          </p>
-          <p className="text-sm text-gray-500 animate-fade-in-up delay-400">
-            Jangan khawatir, mari kita bawa Anda kembali ke tempat yang aman
-          </p>
-        </div>
-
-        {/* Animated button */}
-        <div className="animate-fade-in-up delay-600">
-          <Link 
-            to="/" 
-            className="group relative inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 ease-out"
-          >
-            <svg 
-              className="w-5 h-5 mr-2 group-hover:animate-bounce" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-            >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" 
+          {/* Animated dots */}
+          <div className="mt-12 flex justify-center space-x-3">
+            {[...Array(3)].map((_, i) => (
+              <div
+                key={i}
+                className="w-3 h-3 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full animate-bounce opacity-70"
+                style={{ animationDelay: `${i * 0.2}s` }}
               />
-            </svg>
-            Kembali ke Beranda
-            <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-20 rounded-full transition-opacity duration-300"></div>
-          </Link>
-        </div>
-
-        {/* Loading dots animation */}
-        <div className="mt-8 flex justify-center space-x-2">
-          <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-          <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-100"></div>
-          <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></div>
+            ))}
+          </div>
         </div>
       </div>
 
       <style jsx>{`
-        @keyframes fade-in-up {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
+        @keyframes float {
+          0%, 100% { 
+            transform: translateY(0) rotate(0deg); 
           }
-          to {
-            opacity: 1;
-            transform: translateY(0);
+          50% { 
+            transform: translateY(-20px) rotate(180deg); 
           }
         }
         
-        .animate-fade-in-up {
-          animation: fade-in-up 0.6s ease-out forwards;
+        .absolute:nth-child(odd) {
+          animation: float linear infinite;
         }
         
-        .delay-200 {
-          animation-delay: 0.2s;
+        .absolute:nth-child(even) {
+          animation: float linear infinite reverse;
         }
         
-        .delay-400 {
-          animation-delay: 0.4s;
-        }
-        
-        .delay-600 {
-          animation-delay: 0.6s;
+        @keyframes glitch {
+          0% { transform: translateX(0); }
+          20% { transform: translateX(-2px); }
+          40% { transform: translateX(2px); }
+          60% { transform: translateX(-1px); }
+          80% { transform: translateX(1px); }
+          100% { transform: translateX(0); }
         }
       `}</style>
     </div>
