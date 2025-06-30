@@ -401,42 +401,50 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     setEditForm({ email: user.email || '', displayName: user.displayName || '' });
   };
 
-  const handleEditSave = async () => {
-    const user = combinedUsers.find(u => u.id === editUserId);
-    if (!isAdmin && user?.email !== currentUserEmail) {
-      showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
-      return;
+const handleEditSave = async () => {
+  const user = combinedUsers.find(u => u.id === editUserId);
+  if (!isAdmin && user?.email !== currentUserEmail) {
+    showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
+    return;
+  }
+  
+  try {
+    const userRef = doc(db, 'users', editUserId);
+    if (user.source.inFirestore) {
+      await updateDoc(userRef, {
+        email: editForm.email,
+        displayName: editForm.displayName,
+        updatedAt: new Date().toISOString().split('T')[0],
+      });
+    } else {
+      await setDoc(userRef, {
+        email: editForm.email,
+        displayName: editForm.displayName,
+        isAdmin: false,
+        emailVerified: user.emailVerified || false,
+        updatedAt: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString().split('T')[0],
+      });
     }
     
-    try {
-      if (user.source.inFirestore) {
-        const userRef = doc(db, 'users', editUserId);
-        await updateDoc(userRef, {
-          email: editForm.email,
-          displayName: editForm.displayName,
-          updatedAt: new Date().toISOString().split('T')[0],
-        });
-      } else {
-        const userRef = doc(db, 'users', editUserId);
-        await setDoc(userRef, {
-          email: editForm.email,
-          displayName: editForm.displayName,
-          isAdmin: false,
-          emailVerified: user.emailVerified || false,
-          updatedAt: new Date().toISOString().split('T')[0],
-          createdAt: new Date().toISOString().split('T')[0],
-        });
-      }
-      
-      logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
-      setEditUserId(null);
-      setEditForm({ email: '', displayName: '' });
-      showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
-    } catch (error) {
-      console.error('Error updating user:', error);
-      showPopup('Error', 'Gagal menyimpan perubahan: ' + error.message, 'error');
+    // Tambahkan pembaruan real-time setelah save
+    const updatedDoc = await getDoc(userRef);
+    if (updatedDoc.exists()) {
+      const updatedData = updatedDoc.data();
+      setCombinedUsers(prevUsers =>
+        prevUsers.map(u => u.id === editUserId ? { ...u, email: updatedData.email, displayName: updatedData.displayName } : u)
+      );
     }
-  };
+    
+    logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
+    setEditUserId(null);
+    setEditForm({ email: '', displayName: '' });
+    showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
+  } catch (error) {
+    console.error('Error updating user:', error);
+    showPopup('Error', 'Gagal menyimpan perubahan: ' + error.message, 'error');
+  }
+};
 
   const handleEditRole = async (userId, isAdminRole) => {
     const userDoc = await getDoc(doc(db, 'users', currentUser.uid));

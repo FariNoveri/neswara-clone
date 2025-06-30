@@ -43,7 +43,8 @@ import {
   getDoc,
   updateDoc,
   addDoc,
-  collection
+  collection,
+  onSnapshot
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { deleteDoc } from "firebase/firestore";
@@ -201,46 +202,49 @@ const checkAdminStatus = async (userId) => {
   }
 };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUser(user);
-        setDisplayName(sanitizeInput(user.displayName || ""));
-        setEmail(sanitizeInput(user.email || ""));
-        setProfileImageURL(user.photoURL || "");
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      setUser(user);
+      setDisplayName(sanitizeInput(user.displayName || ""));
+      setEmail(sanitizeInput(user.email || ""));
+      setProfileImageURL(user.photoURL || "");
 
-        const loginMethod = getLoginMethod(user);
-        setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
+      const loginMethod = getLoginMethod(user);
+      setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
 
-        try {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
-            setProfileImageURL(userData.photoURL || user.photoURL || "");
-            setPendingEmail(userData.pendingEmail || "");
-            setEmailVerificationSent(!!userData.pendingEmail);
-            await checkAdminStatus(user.uid); // Periksa status admin dari dokumen
-          } else {
-            await checkAdminStatus(user.uid); // Inisialisasi jika belum ada dokumen
-          }
-        } catch (error) {
-          console.log("Error fetching user data:", error);
-          await checkAdminStatus(user.uid); // Fallback
+      const userRef = doc(db, "users", user.uid);
+      const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const userData = docSnap.data();
+          setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
+          setEmail(sanitizeInput(userData.email || user.email || ""));
+          setProfileImageURL(userData.photoURL || user.photoURL || "");
+          setPendingEmail(userData.pendingEmail || "");
+          setEmailVerificationSent(!!userData.pendingEmail);
+          const isAdminValue = userData.isAdmin === true;
+          setUserRole(isAdminValue ? 'admin' : 'user');
+          setIsAdmin(isAdminValue);
+          console.log(`Updated profile for ${user.uid}: displayName=${userData.displayName}, email=${userData.email}`);
+        } else {
+          checkAdminStatus(user.uid);
         }
+      }, (error) => {
+        console.error("Error with real-time listener:", error);
+        checkAdminStatus(user.uid);
+      });
 
-        resetTimeout();
+      resetTimeout();
 
-        window.addEventListener('mousemove', handleUserActivity);
-        window.addEventListener('keydown', handleUserActivity);
-        window.addEventListener('click', handleUserActivity);
-      } else {
-        navigate('/');
-      }
-      setLoading(false);
-    });
-
+      window.addEventListener('mousemove', handleUserActivity);
+      window.addEventListener('keydown', handleUserActivity);
+      window.addEventListener('click', handleUserActivity);
+    } else {
+      navigate('/');
+    }
+    setLoading(false);
     return () => {
+      unsubscribeUser();
       unsubscribe();
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -250,6 +254,7 @@ const checkAdminStatus = async (userId) => {
       window.removeEventListener('click', handleUserActivity);
     };
   }, [navigate]);
+}, [navigate]);
 
   const clearMessages = () => {
     setError("");
