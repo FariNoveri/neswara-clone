@@ -289,7 +289,7 @@ const Navbar = () => {
         }
       `}</style>
 
-      <nav className={`w-full sticky top-0 navbar-transition ${
+      <nav className={`w-full sticky top-0 z-30 navbar-transition ${
         isScrolled ? "glass-effect shadow-lg" : "bg-white shadow-md"
       }`}>
         <div className="container mx-auto px-4">
@@ -422,7 +422,7 @@ const Navbar = () => {
       </nav>
 
       <div
-        className={`fixed inset-0 bg-black bg-opacity-50 transition-all duration-300 ${
+        className={`fixed inset-0 bg-black bg-opacity-50 z-50 transition-all duration-300 ${
           isMobileMenuOpen ? "block" : "hidden"
         }`}
       >

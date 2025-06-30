@@ -12,7 +12,7 @@ import {
   onSnapshot,
   getDoc 
 } from 'firebase/firestore';
-import { PlusCircle, Edit3, Trash, X, Upload, Link, Image, FileText, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit3, Trash, X, Upload, Image, FileText, AlertCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
@@ -88,18 +88,36 @@ const NotificationModal = React.memo(({
     e.stopPropagation();
   }, []);
 
-  console.log('NotificationModal rendered'); // Debugging render
-
-  // Focus the title input when editing
   useEffect(() => {
     if (showModal && editingNotification && titleInputRef.current) {
       titleInputRef.current.focus();
     }
   }, [showModal, editingNotification]);
 
+  const handleDrag = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleImageUpload({ target: { files: e.dataTransfer.files } });
+    }
+  }, [handleImageUpload]);
+
+  const [dragActive, setDragActive] = useState(false);
+
   return (
     <div 
-      className={`fixed inset-0 z-100 overflow-y-auto transition-all duration-300 ${
+      className={`fixed inset-0 z-[100000] overflow-y-auto transition-all duration-300 ${
         showModal ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0 pointer-events-none'
       }`} 
       onClick={handleClose} 
@@ -107,7 +125,7 @@ const NotificationModal = React.memo(({
       aria-labelledby="notification-modal-title"
     >
       <div 
-        className={`relative w-full max-w-2xl mx-auto my-8 transform transition-all duration-300 ${
+        className={`relative w-full max-w-4xl mx-auto my-8 transform transition-all duration-300 ${
           showModal ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
         }`} 
         onClick={handleModalClick}
@@ -121,7 +139,7 @@ const NotificationModal = React.memo(({
                   {editingNotification ? '✏️ Edit Notifikasi' : '✨ Buat Notifikasi Baru'}
                 </h2>
                 <p className="text-blue-100 text-sm">
-                  {editingNotification ? 'Perbarui informasi notifikasi' : 'Buat notifikasi baru untuk pengguna'}
+                  {editingNotification ? 'Perbarui informasi notifikasi' : 'Kirim pesan baru kepada pengguna'}
                 </p>
               </div>
               <button
@@ -155,125 +173,105 @@ const NotificationModal = React.memo(({
             </div>
           </div>
           <div className="p-8 bg-white">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="group">
-                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                  <FileText className="h-4 w-4 mr-2 text-purple-500" />
-                  Judul Notifikasi
-                </label>
-                <input
-                  ref={titleInputRef}
-                  key={`title-${editingNotification?.id || 'new'}`}
-                  type="text"
-                  required
-                  value={notificationForm.title}
-                  onChange={(e) => setNotificationForm({ ...notificationForm, title: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
-                  placeholder="Masukkan judul notifikasi..."
-                  onFocus={() => setActiveStep(1)}
-                />
-              </div>
-              <div className="group">
-                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                  <FileText className="h-4 w-4 mr-2 text-purple-500" />
-                  Pesan Notifikasi
-                </label>
-                <textarea
-                  key="message-${editingNotification?.id || 'new'}"
-                  required
-                  value={notificationForm.message}
-                  onChange={(e) => setNotificationForm({ ...notificationForm, message: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500 resize-none"
-                  placeholder="Masukkan pesan notifikasi..."
-                  rows={4}
-                  onFocus={() => setActiveStep(1)}
-                />
-              </div>
-              <div className="group">
-                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                  <FileText className="h-4 w-4 mr-2 text-purple-500" />
-                  Tipe Notifikasi
-                </label>
-                <select
-                  key={`type-${editingNotification?.id || 'new'}`}
-                  value={notificationForm.type}
-                  onChange={(e) => setNotificationForm({ ...notificationForm, type: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900"
-                  onFocus={() => setActiveStep(1)}
-                >
-                  <option value="news">Berita</option>
-                  <option value="weather">Cuaca</option>
-                  <option value="sports">Olahraga</option>
-                  <option value="tech">Teknologi</option>
-                  <option value="economy">Ekonomi</option>
-                </select>
-              </div>
-              <div className="group">
-                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                  <Link className="h-4 w-4 mr-2 text-purple-500" />
-                  Link Berita (Opsional)
-                </label>
-                <select
-                  key={`newsLink-${editingNotification?.id || 'new'}`}
-                  value={notificationForm.newsLink}
-                  onChange={(e) => setNotificationForm({ ...notificationForm, newsLink: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900"
-                  onFocus={() => setActiveStep(1)}
-                >
-                  <option value="">Tidak ada link</option>
-                  {newsArticles && newsArticles.length > 0 ? (
-                    newsArticles.map((article) => (
-                      <option key={article.id} value={`/berita/${article.slug}`}>{article.title}</option>
-                    ))
-                  ) : (
-                    <option disabled>Tidak ada berita tersedia</option>
-                  )}
-                </select>
-              </div>
-              <div className="group">
-                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                  <Image className="h-4 w-4 mr-2 text-purple-500" />
-                  Gambar Notifikasi
-                </label>
-                <div className="flex space-x-4 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setUploadType('url')}
-                    className={`flex items-center px-4 py-2 rounded-xl transition-all duration-200 transform hover:scale-105 ${
-                      uploadType === 'url' ? 'bg-purple-500 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Link className="h-4 w-4 mr-2" />
-                    URL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUploadType('file')}
-                    className={`flex items-center px-4 py-2 rounded-xl transition-all duration-200 transform hover:scale-105 ${
-                      uploadType === 'file' ? 'bg-purple-500 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload File
-                  </button>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Left Column */}
+              <div className="space-y-6">
+                {/* Title Input */}
+                <div className="group">
+                  <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                    <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                    Judul Notifikasi
+                  </label>
+                  <div className="relative">
+                    <input
+                      ref={titleInputRef}
+                      key={`title-${editingNotification?.id || 'new'}`}
+                      type="text"
+                      required
+                      value={notificationForm.title}
+                      onChange={(e) => setNotificationForm({ ...notificationForm, title: e.target.value })}
+                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
+                      placeholder="Tulis judul yang menarik perhatian..."
+                      onFocus={() => setActiveStep(1)}
+                    />
+                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                  </div>
                 </div>
-                {uploadType === 'url' ? (
+
+                {/* Message Input */}
+                <div className="group">
+                  <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                    <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                    Pesan Notifikasi
+                  </label>
+                  <textarea
+                    key={`message-${editingNotification?.id || 'new'}`}
+                    required
+                    value={notificationForm.message}
+                    onChange={(e) => setNotificationForm({ ...notificationForm, message: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 resize-none text-gray-900 placeholder-gray-500"
+                    placeholder="Tulis pesan singkat yang informatif..."
+                    rows={4}
+                    onFocus={() => setActiveStep(1)}
+                  />
+                </div>
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-6">
+                {/* Image Upload Section */}
+                <div className="group">
+                  <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                    <Image className="h-4 w-4 mr-2 text-purple-500" />
+                    Gambar Notifikasi
+                  </label>
+                  
+                  {/* Image Preview */}
+                  {previewImage && (
+                    <div className="mb-4 relative group/preview">
+                      <img 
+                        src={previewImage} 
+                        alt="Preview" 
+                        className="w-full h-40 object-cover rounded-xl shadow-lg transition-transform duration-300 group-hover/preview:scale-105"
+                        onError={(e) => { e.target.src = '/placeholder-image.jpg'; }}
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-300 rounded-xl flex items-center justify-center">
+                        <button
+                          onClick={() => {
+                            setPreviewImage('');
+                            setNotificationForm({ ...notificationForm, image: '' });
+                          }}
+                          className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors duration-200"
+                          aria-label="Hapus gambar"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* URL Input */}
                   <input
                     key={`image-url-${editingNotification?.id || 'new'}`}
                     type="url"
                     value={notificationForm.image}
                     onChange={(e) => handleUrlChange(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 mb-3 text-gray-900 placeholder-gray-500"
                     placeholder="https://example.com/image.jpg"
                     onFocus={() => setActiveStep(2)}
                   />
-                ) : (
+
+                  {/* Drag & Drop Area */}
                   <div
-                    className={`relative border-2 border-dashed rounded-xl p-6 transition-all duration-300 text-center ${
-                      uploadType === 'file' 
-                        ? 'border-purple-500 bg-purple-50 hover:border-purple-600' 
+                    className={`relative border-2 border-dashed rounded-xl p-6 transition-all duration-300 ${
+                      dragActive 
+                        ? 'border-purple-500 bg-purple-50 scale-105' 
                         : 'border-gray-300 hover:border-purple-400 hover:bg-gray-50'
                     }`}
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
                   >
                     <input
                       key={`image-file-${editingNotification?.id || 'new'}`}
@@ -284,9 +282,9 @@ const NotificationModal = React.memo(({
                       id="image-upload"
                       aria-label="Unggah gambar"
                     />
-                    <div>
+                    <div className="text-center">
                       <Upload className={`mx-auto h-8 w-8 mb-2 transition-colors duration-300 ${
-                        uploadType === 'file' ? 'text-purple-500' : 'text-gray-400'
+                        dragActive ? 'text-purple-500' : 'text-gray-400'
                       }`} />
                       <p className="text-sm text-gray-700">
                         <span className="font-semibold text-purple-600">Klik untuk upload</span> atau drag & drop
@@ -294,59 +292,40 @@ const NotificationModal = React.memo(({
                       <p className="text-xs text-gray-500 mt-1">PNG, JPG, GIF hingga 5MB</p>
                     </div>
                   </div>
-                )}
-                {previewImage && (
-                  <div className="mt-4 relative group/preview">
-                    <img 
-                      src={previewImage} 
-                      alt="Preview" 
-                      className="w-full h-40 object-cover rounded-xl shadow-lg transition-transform duration-300 group-hover/preview:scale-105"
-                      onError={(e) => { e.target.src = '/placeholder-image.jpg'; }}
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-300 rounded-xl flex items-center justify-center">
-                      <button
-                        onClick={() => {
-                          setPreviewImage('');
-                          setNotificationForm({ ...notificationForm, image: '' });
-                        }}
-                        className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors duration-200"
-                        aria-label="Hapus gambar"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
-              <div className="flex justify-end space-x-4 pt-6 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all duration-300 font-medium hover:scale-105"
-                  aria-label="Batal"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all duration-300 font-medium disabled:opacity-50 flex items-center hover:scale-105 hover:shadow-lg"
-                  aria-label={editingNotification ? "Perbarui notifikasi" : "Publikasikan notifikasi"}
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white mr-2"></div>
-                      Menyimpan...
-                    </>
-                  ) : (
-                    <>
-                      <PlusCircle className="h-4 w-4 mr-2" />
-                      {editingNotification ? 'Perbarui Notifikasi' : 'Publikasikan Notifikasi'}
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all duration-300 font-medium hover:scale-105"
+                aria-label="Batal"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all duration-300 font-medium disabled:opacity-50 flex items-center hover:scale-105 hover:shadow-lg"
+                aria-label={editingNotification ? "Perbarui notifikasi" : "Publikasikan notifikasi"}
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white mr-2"></div>
+                    Menyimpan...
+                  </>
+                ) : (
+                  <>
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    {editingNotification ? 'Perbarui Notifikasi' : 'Publikasikan Notifikasi'}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -590,7 +569,7 @@ const NotificationManagement = ({ logActivity }) => {
   }, [confirmationModal, logActivity]);
 
   const handleEdit = useCallback((notification) => {
-    console.log('Editing notification:', notification); // Debugging log
+    console.log('Editing notification:', notification);
     try {
       if (!notification || !notification.id) {
         console.error('Invalid notification data:', notification);
@@ -601,9 +580,7 @@ const NotificationManagement = ({ logActivity }) => {
       const formData = {
         title: notification.title || '',
         message: notification.message || '',
-        image: notification.image || '',
-        type: notification.type || 'news',
-        newsLink: notification.newsLink || ''
+        image: notification.image || ''
       };
 
       editDataRef.current = notification;
@@ -612,8 +589,6 @@ const NotificationManagement = ({ logActivity }) => {
       setPreviewImage(formData.image);
       setUploadType(formData.image && formData.image.startsWith('data:') ? 'file' : 'url');
       setShowModal(true);
-
-      console.log('Form data set to:', formData); // Debugging log
     } catch (error) {
       console.error('Error preparing edit notification:', error);
       toast.error('Gagal memuat data notifikasi untuk diedit: ' + error.message);
@@ -686,7 +661,7 @@ const NotificationManagement = ({ logActivity }) => {
           </div>
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-1000000000">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative">
         <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center space-x-3">
@@ -708,7 +683,6 @@ const NotificationManagement = ({ logActivity }) => {
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Judul</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Pesan</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Tipe</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Gambar</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Tanggal</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
@@ -717,7 +691,7 @@ const NotificationManagement = ({ logActivity }) => {
               <tbody className="divide-y divide-gray-100">
                 {notifications.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="px-6 py-12 text-center">
+                    <td colSpan="5" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                           <PlusCircle className="w-12 h-12 text-gray-400" />
@@ -738,11 +712,6 @@ const NotificationManagement = ({ logActivity }) => {
                     >
                       <td className="px-6 py-4 text-sm font-medium text-gray-900">{notification.title || 'Tanpa Judul'}</td>
                       <td className="px-6 py-4 text-sm text-gray-700 max-w-xs truncate">{notification.message || 'Tanpa Pesan'}</td>
-                      <td className="px-6 py-4 text-sm">
-                        <span className="px-3 py-1 inline-flex text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">
-                          {notification.type || 'news'}
-                        </span>
-                      </td>
                       <td className="px-6 py-4 text-sm">
                         {notification.image ? (
                           <div className="flex items-center space-x-2">
