@@ -1,8 +1,9 @@
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { X, Save } from 'lucide-react';
+import { X, Save, Upload, Image, FileText, User, Tag, Globe } from 'lucide-react';
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../firebaseconfig";
+import { useState, useEffect } from 'react';
 
 const NewsModal = ({ 
   showModal, 
@@ -15,6 +16,30 @@ const NewsModal = ({
   loading,
   logActivity
 }) => {
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [activeStep, setActiveStep] = useState(1);
+  const [dragActive, setDragActive] = useState(false);
+  const [imagePreview, setImagePreview] = useState('');
+
+  useEffect(() => {
+    if (showModal) {
+      setIsAnimating(true);
+      // Set image preview if editing
+      if (editingNews && formData.gambar) {
+        setImagePreview(formData.gambar);
+      }
+    } else {
+      setIsAnimating(false);
+      setImagePreview('');
+    }
+  }, [showModal, editingNews, formData.gambar]);
+
+  useEffect(() => {
+    if (formData.gambar && formData.gambar.startsWith('http')) {
+      setImagePreview(formData.gambar);
+    }
+  }, [formData.gambar]);
+
   if (!showModal) return null;
 
   // Utility function to generate a URL-friendly slug
@@ -23,12 +48,11 @@ const NewsModal = ({
     let slug = title
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '') // Remove special characters
-      .replace(/\s+/g, '-') // Replace spaces with hyphens
-      .replace(/-+/g, '-') // Replace multiple hyphens with single
-      .substring(0, 100); // Limit length
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .substring(0, 100);
 
-    // Check for duplicate slugs
     let baseSlug = slug;
     let counter = 1;
     while (true) {
@@ -48,21 +72,46 @@ const NewsModal = ({
       const reader = new FileReader();
       reader.onloadend = () => {
         setFormData(prev => ({ ...prev, gambar: reader.result }));
+        setImagePreview(reader.result);
       };
       reader.readAsDataURL(file);
     }
   };
 
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setFormData(prev => ({ ...prev, gambar: reader.result }));
+          setImagePreview(reader.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
   const handleSubmitWithLog = async () => {
     try {
-      // Generate new slug based on title
       const newSlug = await generateSlug(formData.judul);
-      
-      // Update formData with new slug
       const updatedFormData = { ...formData, slug: newSlug };
       setFormData(updatedFormData);
 
-      // Call handleSubmit with updated formData and get the newsId
       const newsId = await handleSubmit(updatedFormData);
 
       if (!loading) {
@@ -76,7 +125,6 @@ const NewsModal = ({
       }
       setShowModal(false);
       resetForm();
-      // Dispatch event for redirection
       window.dispatchEvent(new CustomEvent('newsEdited', { 
         detail: { 
           newsId: editingNews?.id || newsId, 
@@ -97,157 +145,305 @@ const NewsModal = ({
     }
   };
 
+  const handleClose = () => {
+    setIsAnimating(false);
+    setTimeout(() => {
+      setShowModal(false);
+      resetForm();
+    }, 200);
+  };
+
+  const categories = [
+    { value: "Politik", icon: "🏛️", color: "bg-red-50 text-red-800 border-red-200" },
+    { value: "Ekonomi", icon: "💰", color: "bg-green-50 text-green-800 border-green-200" },
+    { value: "Olahraga", icon: "⚽", color: "bg-blue-50 text-blue-800 border-blue-200" },
+    { value: "Teknologi", icon: "💻", color: "bg-purple-50 text-purple-800 border-purple-200" },
+    { value: "Hiburan", icon: "🎭", color: "bg-pink-50 text-pink-800 border-pink-200" },
+    { value: "Kesehatan", icon: "🏥", color: "bg-emerald-50 text-emerald-800 border-emerald-200" },
+    { value: "Pendidikan", icon: "📚", color: "bg-indigo-50 text-indigo-800 border-indigo-200" },
+    { value: "Daerah", icon: "🏘️", color: "bg-orange-50 text-orange-800 border-orange-200" }
+  ];
+
+  const steps = [
+    { id: 1, title: "Info Dasar", icon: FileText },
+    { id: 2, title: "Media", icon: Image },
+    { id: 3, title: "Konten", icon: Globe }
+  ];
+
   return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">
-            {editingNews ? 'Edit Berita' : 'Tambah Berita Baru'}
-          </h3>
-          <button
-            onClick={() => {
-              setShowModal(false);
-              resetForm();
-            }}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="h-6 w-6" />
-          </button>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Judul Berita
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.judul}
-              onChange={(e) => setFormData(prev => ({ ...prev, judul: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Masukkan judul berita..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Kategori
-            </label>
-            <select
-              required
-              value={formData.kategori}
-              onChange={(e) => setFormData(prev => ({ ...prev, kategori: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              <option value="">Pilih Kategori</option>
-              <option value="Politik">Politik</option>
-              <option value="Ekonomi">Ekonomi</option>
-              <option value="Olahraga">Olahraga</option>
-              <option value="Teknologi">Teknologi</option>
-              <option value="Hiburan">Hiburan</option>
-              <option value="Kesehatan">Kesehatan</option>
-              <option value="Pendidikan">Pendidikan</option>
-              <option value="Daerah">Daerah</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Penulis
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.author}
-              onChange={(e) => setFormData(prev => ({ ...prev, author: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Nama penulis..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              URL Gambar (atau biarkan kosong untuk unggah lokal)
-            </label>
-            <input
-              type="url"
-              value={formData.gambar}
-              onChange={(e) => setFormData(prev => ({ ...prev, gambar: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="https://example.com/image.jpg"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Unggah Gambar Lokal
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileUpload}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Deskripsi Gambar
-            </label>
-            <input
-              type="text"
-              value={formData.gambarDeskripsi || ''}
-              onChange={(e) => setFormData(prev => ({ ...prev, gambarDeskripsi: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Contoh: Presiden saat konferensi pers"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Ringkasan
-            </label>
-            <textarea
-              value={formData.ringkasan}
-              onChange={(e) => setFormData(prev => ({ ...prev, ringkasan: e.target.value }))}
-              rows="3"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Ringkasan singkat berita..."
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Konten Berita
-            </label>
-            <ReactQuill
-              theme="snow"
-              value={formData.konten}
-              onChange={(val) => setFormData(prev => ({ ...prev, konten: val }))}
-              className="bg-white text-black"
-            />
-          </div>
-          
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={() => {
-                setShowModal(false);
-                resetForm();
-              }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
-            >
-              Batal
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmitWithLog}
-              disabled={loading}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              {loading ? 'Menyimpan...' : 'Simpan'}
-            </button>
+    <div className={`fixed inset-0 z-50 overflow-y-auto transition-all duration-300 ${
+      isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'
+    }`}>
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className={`relative w-full max-w-4xl transform transition-all duration-300 ${
+          isAnimating ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
+        }`}>
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+            {/* Header with gradient */}
+            <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 px-8 py-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-white mb-1">
+                    {editingNews ? '✏️ Edit Berita' : '✨ Buat Berita Baru'}
+                  </h2>
+                  <p className="text-blue-100 text-sm">
+                    {editingNews ? 'Perbarui informasi berita' : 'Bagikan cerita terbaru kepada dunia'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleClose}
+                  className="p-2 rounded-full bg-white/20 hover:bg-white/30 transition-all duration-200 group"
+                >
+                  <X className="h-5 w-5 text-white group-hover:rotate-90 transition-transform duration-200" />
+                </button>
+              </div>
+
+              {/* Progress Steps */}
+              <div className="flex justify-center mt-6 space-x-8">
+                {steps.map((step) => (
+                  <div key={step.id} className="flex items-center space-x-2">
+                    <div className={`p-2 rounded-full transition-all duration-300 ${
+                      activeStep >= step.id 
+                        ? 'bg-white text-purple-600 shadow-lg scale-110' 
+                        : 'bg-white/20 text-white/70'
+                    }`}>
+                      <step.icon className="h-4 w-4" />
+                    </div>
+                    <span className={`text-sm font-medium transition-colors duration-300 ${
+                      activeStep >= step.id ? 'text-white' : 'text-white/70'
+                    }`}>
+                      {step.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-8 bg-white">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Left Column */}
+                <div className="space-y-6">
+                  {/* Title Input */}
+                  <div className="group">
+                    <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                      <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                      Judul Berita
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        value={formData.judul}
+                        onChange={(e) => setFormData(prev => ({ ...prev, judul: e.target.value }))}
+                        className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
+                        placeholder="Tulis judul yang menarik perhatian..."
+                        onFocus={() => setActiveStep(1)}
+                      />
+                      <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Category Selection */}
+                  <div className="group">
+                    <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                      <Tag className="h-4 w-4 mr-2 text-purple-500" />
+                      Kategori
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, kategori: cat.value }))}
+                          className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center space-x-2 hover:scale-105 ${
+                            formData.kategori === cat.value
+                              ? `${cat.color} border-current transform scale-105 shadow-lg`
+                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          <span className="text-lg">{cat.icon}</span>
+                          <span className="text-sm font-medium">{cat.value}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Author Input */}
+                  <div className="group">
+                    <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                      <User className="h-4 w-4 mr-2 text-purple-500" />
+                      Penulis
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.author}
+                      onChange={(e) => setFormData(prev => ({ ...prev, author: e.target.value }))}
+                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
+                      placeholder="Nama penulis berita..."
+                    />
+                  </div>
+                </div>
+
+                {/* Right Column */}
+                <div className="space-y-6">
+                  {/* Image Upload Section */}
+                  <div className="group">
+                    <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                      <Image className="h-4 w-4 mr-2 text-purple-500" />
+                      Gambar Berita
+                    </label>
+                    
+                    {/* Image Preview */}
+                    {imagePreview && (
+                      <div className="mb-4 relative group/preview">
+                        <img 
+                          src={imagePreview} 
+                          alt="Preview" 
+                          className="w-full h-40 object-cover rounded-xl shadow-lg transition-transform duration-300 group-hover/preview:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-300 rounded-xl flex items-center justify-center">
+                          <button
+                            onClick={() => {
+                              setImagePreview('');
+                              setFormData(prev => ({ ...prev, gambar: '' }));
+                            }}
+                            className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors duration-200"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* URL Input */}
+                    <input
+                      type="url"
+                      value={formData.gambar}
+                      onChange={(e) => setFormData(prev => ({ ...prev, gambar: e.target.value }))}
+                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 mb-3 text-gray-900 placeholder-gray-500"
+                      placeholder="https://example.com/image.jpg"
+                      onFocus={() => setActiveStep(2)}
+                    />
+
+                    {/* Drag & Drop Area */}
+                    <div
+                      className={`relative border-2 border-dashed rounded-xl p-6 transition-all duration-300 ${
+                        dragActive 
+                          ? 'border-purple-500 bg-purple-50 scale-105' 
+                          : 'border-gray-300 hover:border-purple-400 hover:bg-gray-50'
+                      }`}
+                      onDragEnter={handleDrag}
+                      onDragLeave={handleDrag}
+                      onDragOver={handleDrag}
+                      onDrop={handleDrop}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <div className="text-center">
+                        <Upload className={`mx-auto h-8 w-8 mb-2 transition-colors duration-300 ${
+                          dragActive ? 'text-purple-500' : 'text-gray-400'
+                        }`} />
+                        <p className="text-sm text-gray-700">
+                          <span className="font-semibold text-purple-600">Klik untuk upload</span> atau drag & drop
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">PNG, JPG, GIF hingga 10MB</p>
+                      </div>
+                    </div>
+
+                    {/* Image Description */}
+                    <input
+                      type="text"
+                      value={formData.gambarDeskripsi || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, gambarDeskripsi: e.target.value }))}
+                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 mt-3 text-gray-900 placeholder-gray-500"
+                      placeholder="Deskripsi gambar (opsional)..."
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="mt-8 group">
+                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                  <Globe className="h-4 w-4 mr-2 text-purple-500" />
+                  Ringkasan Berita
+                </label>
+                <textarea
+                  value={formData.ringkasan}
+                  onChange={(e) => setFormData(prev => ({ ...prev, ringkasan: e.target.value }))}
+                  rows="3"
+                  className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 resize-none text-gray-900 placeholder-gray-500"
+                  placeholder="Tulis ringkasan singkat yang menarik..."
+                  onFocus={() => setActiveStep(3)}
+                />
+              </div>
+
+              {/* Content Editor */}
+              <div className="mt-6 group">
+                <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                  <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                  Konten Berita
+                </label>
+                <div className="rounded-xl overflow-hidden border-2 border-gray-200 focus-within:border-purple-500 transition-colors duration-300">
+                  <ReactQuill
+                    theme="snow"
+                    value={formData.konten}
+                    onChange={(val) => setFormData(prev => ({ ...prev, konten: val }))}
+                    className="bg-white"
+                    style={{
+                      '& .ql-editor': {
+                        color: '#1f2937',
+                        minHeight: '200px'
+                      }
+                    }}
+                    modules={{
+                      toolbar: [
+                        [{ 'header': [1, 2, 3, false] }],
+                        ['bold', 'italic', 'underline', 'strike'],
+                        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                        ['link', 'image'],
+                        ['clean']
+                      ],
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all duration-300 font-medium hover:scale-105"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitWithLog}
+                  disabled={loading}
+                  className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all duration-300 font-medium disabled:opacity-50 flex items-center hover:scale-105 hover:shadow-lg"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white mr-2"></div>
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      {editingNews ? 'Update Berita' : 'Publikasikan'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

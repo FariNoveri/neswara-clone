@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
 import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../auth/useAuth';
+import { Edit3, Trash2, RefreshCw, CheckCircle, X } from 'lucide-react';
 
-// Popup Component
 const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) => {
   if (!isOpen) return null;
 
@@ -28,46 +28,46 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-        <div className="flex items-center mb-4">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 ${getIconColor()}`}>
-            {type === 'success' && '✓'}
-            {type === 'error' && '✕'}
-            {type === 'warning' && '⚠'}
-            {type === 'confirm' && '?'}
-            {type === 'info' && 'ℹ'}
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+      <div className="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl transform animate-scaleIn" onClick={e => e.stopPropagation()}>
+        <div className="text-center">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${getIconColor()}`}>
+            {type === 'success' && <CheckCircle className="w-6 h-6" />}
+            {type === 'error' && <X className="w-6 h-6" />}
+            {type === 'warning' && <span>⚠</span>}
+            {type === 'confirm' && <span>?</span>}
+            {type === 'info' && <span>ℹ</span>}
           </div>
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-        </div>
-        <p className="text-gray-600 mb-6">{message}</p>
-        <div className="flex justify-end space-x-3">
-          {type === 'confirm' ? (
-            <>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+          <p className="text-gray-600 mb-6">{message}</p>
+          <div className="flex justify-center space-x-4">
+            {type === 'confirm' ? (
+              <>
+                <button
+                  onClick={onClose}
+                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-all duration-200 font-medium hover:scale-105 transform"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => {
+                    onConfirm();
+                    onClose();
+                  }}
+                  className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
+                >
+                  Konfirmasi
+                </button>
+              </>
+            ) : (
               <button
                 onClick={onClose}
-                className="px-4 py-2 text-gray-600 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
               >
-                Batal
+                OK
               </button>
-              <button
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
-                className={`px-4 py-2 text-white rounded-lg transition-colors ${getButtonColor()}`}
-              >
-                Konfirmasi
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={onClose}
-              className={`px-4 py-2 text-white rounded-lg transition-colors ${getButtonColor()}`}
-            >
-              OK
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -97,6 +97,8 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     type: 'info',
     onConfirm: null,
   });
+  const [editUserId, setEditUserId] = useState(null);
+  const [editForm, setEditForm] = useState({ email: '', displayName: '' });
 
   const showPopup = (title, message, type = 'info', onConfirm = null) => {
     setPopup({ isOpen: true, title, message, type, onConfirm });
@@ -106,7 +108,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     setPopup(prev => ({ ...prev, isOpen: false }));
   };
 
-  // Fetch users from Authentication
   const fetchAuthUsers = async () => {
     if (!currentUser) return;
     try {
@@ -118,19 +119,17 @@ const UserManagement = ({ logActivity, adminEmails }) => {
       });
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
-      console.log('Auth Users:', data.users); // Log for debugging
+      console.log('Auth Users:', data.users);
       setAuthUsers(data.users || []);
     } catch (error) {
       console.error('Error fetching auth users:', error);
     }
   };
 
-  // Combine Firestore and Auth users
   const combineUsers = () => {
     const firestoreUserMap = new Map();
     const authUserMap = new Map();
 
-    // Map Firestore users by uid
     users.forEach(user => {
       if (user.id) {
         firestoreUserMap.set(user.id, user);
@@ -139,7 +138,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
       }
     });
 
-    // Map Auth users by uid
     authUsers.forEach(user => {
       if (user.uid) {
         authUserMap.set(user.uid, user);
@@ -148,7 +146,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
       }
     });
 
-    // Get all unique UIDs
     const allUids = new Set([...firestoreUserMap.keys(), ...authUserMap.keys()]);
     console.log('Unique UIDs:', allUids.size, 'Firestore users:', firestoreUserMap.size, 'Auth users:', authUserMap.size);
 
@@ -224,10 +221,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     }
   }, [currentUser, adminEmails]);
 
-  const [editUserId, setEditUserId] = useState(null);
-  const [editForm, setEditForm] = useState({ email: '', displayName: '' });
-
-  // Fetch Firestore users
   useEffect(() => {
     setLoading(true);
     let q = query(collection(db, 'users'));
@@ -247,7 +240,7 @@ const UserManagement = ({ logActivity, adminEmails }) => {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log('Firestore Users:', usersData); // Log for debugging
+      console.log('Firestore Users:', usersData);
       setUsers(usersData);
       setLoading(false);
     }, (error) => {
@@ -258,21 +251,18 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     return () => unsubscribe();
   }, [filterDate, filterCustomDate]);
 
-  // Fetch auth users when component mounts and when users change
   useEffect(() => {
     if (currentUser && isAdmin) {
       fetchAuthUsers();
     }
   }, [currentUser, isAdmin]);
 
-  // Combine users when either source changes
   useEffect(() => {
     if (users.length > 0 || authUsers.length > 0) {
       combineUsers();
     }
   }, [users, authUsers]);
 
-  // Filter combined users
   const filteredUsers = combinedUsers.filter(user => {
     const matchesEmail = !filterEmail || user.email?.toLowerCase().includes(filterEmail.toLowerCase());
     const matchesName = !filterName || user.displayName?.toLowerCase().includes(filterName.toLowerCase());
@@ -401,50 +391,49 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     setEditForm({ email: user.email || '', displayName: user.displayName || '' });
   };
 
-const handleEditSave = async () => {
-  const user = combinedUsers.find(u => u.id === editUserId);
-  if (!isAdmin && user?.email !== currentUserEmail) {
-    showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
-    return;
-  }
-  
-  try {
-    const userRef = doc(db, 'users', editUserId);
-    if (user.source.inFirestore) {
-      await updateDoc(userRef, {
-        email: editForm.email,
-        displayName: editForm.displayName,
-        updatedAt: new Date().toISOString().split('T')[0],
-      });
-    } else {
-      await setDoc(userRef, {
-        email: editForm.email,
-        displayName: editForm.displayName,
-        isAdmin: false,
-        emailVerified: user.emailVerified || false,
-        updatedAt: new Date().toISOString().split('T')[0],
-        createdAt: new Date().toISOString().split('T')[0],
-      });
+  const handleEditSave = async () => {
+    const user = combinedUsers.find(u => u.id === editUserId);
+    if (!isAdmin && user?.email !== currentUserEmail) {
+      showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
+      return;
     }
     
-    // Tambahkan pembaruan real-time setelah save
-    const updatedDoc = await getDoc(userRef);
-    if (updatedDoc.exists()) {
-      const updatedData = updatedDoc.data();
-      setCombinedUsers(prevUsers =>
-        prevUsers.map(u => u.id === editUserId ? { ...u, email: updatedData.email, displayName: updatedData.displayName } : u)
-      );
+    try {
+      const userRef = doc(db, 'users', editUserId);
+      if (user.source.inFirestore) {
+        await updateDoc(userRef, {
+          email: editForm.email,
+          displayName: editForm.displayName,
+          updatedAt: new Date().toISOString().split('T')[0],
+        });
+      } else {
+        await setDoc(userRef, {
+          email: editForm.email,
+          displayName: editForm.displayName,
+          isAdmin: false,
+          emailVerified: user.emailVerified || false,
+          updatedAt: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString().split('T')[0],
+        });
+      }
+      
+      const updatedDoc = await getDoc(userRef);
+      if (updatedDoc.exists()) {
+        const updatedData = updatedDoc.data();
+        setCombinedUsers(prevUsers =>
+          prevUsers.map(u => u.id === editUserId ? { ...u, email: updatedData.email, displayName: updatedData.displayName } : u)
+        );
+      }
+      
+      logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
+      setEditUserId(null);
+      setEditForm({ email: '', displayName: '' });
+      showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
+    } catch (error) {
+      console.error('Error updating user:', error);
+      showPopup('Error', 'Gagal menyimpan perubahan: ' + error.message, 'error');
     }
-    
-    logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
-    setEditUserId(null);
-    setEditForm({ email: '', displayName: '' });
-    showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
-  } catch (error) {
-    console.error('Error updating user:', error);
-    showPopup('Error', 'Gagal menyimpan perubahan: ' + error.message, 'error');
-  }
-};
+  };
 
   const handleEditRole = async (userId, isAdminRole) => {
     const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
@@ -517,246 +506,336 @@ const handleEditSave = async () => {
     }
   };
 
+  const getRoleText = (user) => {
+    return user.isAdmin ? 'Admin' : 'User';
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-800 mb-2">Status Sinkronisasi</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">{combinedUsers.filter(u => u.source.inFirestore && u.source.inAuth).length}</div>
-            <div className="text-gray-600">Tersinkronisasi</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{combinedUsers.filter(u => u.source.inFirestore && !u.source.inAuth).length}</div>
-            <div className="text-gray-600">Firestore Saja</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">{combinedUsers.filter(u => !u.source.inFirestore && u.source.inAuth).length}</div>
-            <div className="text-gray-600">Auth Saja</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-gray-600">{combinedUsers.length}</div>
-            <div className="text-gray-600">Total Users</div>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
+      <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="flex items-center space-x-4 animate-slideRight">
+            <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+              <CheckCircle className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-4xl font-bold mb-2">Manajemen Pengguna</h1>
+              <p className="text-indigo-100 text-lg">Kelola dan pantau semua pengguna</p>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          <input
-            type="text"
-            placeholder="Filter by Email"
-            value={filterEmail}
-            onChange={(e) => handleFilterChange('email', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          />
-          <input
-            type="text"
-            placeholder="Filter by Nama"
-            value={filterName}
-            onChange={(e) => handleFilterChange('name', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          />
-          <select
-            value={filterRole}
-            onChange={(e) => handleFilterChange('role', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          >
-            <option value="all">Semua Role</option>
-            <option value="admin">Admin</option>
-            <option value="user">User</option>
-          </select>
-          <select
-            value={filterEmailVerified}
-            onChange={(e) => handleFilterChange('emailVerified', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          >
-            <option value="all">Semua Status</option>
-            <option value="verified">Email Verified</option>
-            <option value="unverified">Email Unverified</option>
-          </select>
-          <select
-            value={filterSource}
-            onChange={(e) => handleFilterChange('source', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          >
-            <option value="all">Semua Sumber</option>
-            <option value="both">Tersinkronisasi</option>
-            <option value="firestore">Firestore Saja</option>
-            <option value="auth">Auth Saja</option>
-            <option value="missing">Belum Sinkron</option>
-          </select>
-          <select
-            value={filterDate}
-            onChange={(e) => handleFilterChange('date', e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg"
-          >
-            <option value="all">Semua Tanggal</option>
-            <option value="last7days">7 Hari Terakhir</option>
-            <option value="last30days">30 Hari Terakhir</option>
-            <option value="custom">Tanggal Kustom</option>
-          </select>
-          {filterDate === 'custom' && (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             <input
-              type="date"
-              value={filterCustomDate}
-              onChange={(e) => handleFilterChange('customDate', e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg"
+              type="text"
+              placeholder="Filter by Email"
+              value={filterEmail}
+              onChange={(e) => handleFilterChange('email', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 placeholder-gray-500"
             />
-          )}
+            <input
+              type="text"
+              placeholder="Filter by Nama"
+              value={filterName}
+              onChange={(e) => handleFilterChange('name', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 placeholder-gray-500"
+            />
+            <select
+              value={filterRole}
+              onChange={(e) => handleFilterChange('role', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+            >
+              <option value="all">Semua Role</option>
+              <option value="admin">Admin</option>
+              <option value="user">User</option>
+            </select>
+            <select
+              value={filterEmailVerified}
+              onChange={(e) => handleFilterChange('emailVerified', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+            >
+              <option value="all">Semua Status</option>
+              <option value="verified">Email Verified</option>
+              <option value="unverified">Email Unverified</option>
+            </select>
+            <select
+              value={filterSource}
+              onChange={(e) => handleFilterChange('source', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+            >
+              <option value="all">Semua Sumber</option>
+              <option value="both">Tersinkronisasi</option>
+              <option value="firestore">Firestore Saja</option>
+              <option value="auth">Auth Saja</option>
+              <option value="missing">Belum Sinkron</option>
+            </select>
+            <select
+              value={filterDate}
+              onChange={(e) => handleFilterChange('date', e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+            >
+              <option value="all">Semua Tanggal</option>
+              <option value="last7days">7 Hari Terakhir</option>
+              <option value="last30days">30 Hari Terakhir</option>
+              <option value="custom">Tanggal Kustom</option>
+            </select>
+            {filterDate === 'custom' && (
+              <input
+                type="date"
+                value={filterCustomDate}
+                onChange={(e) => handleFilterChange('customDate', e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+              />
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Nama</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Email Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Sumber Data</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Tanggal</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
+          <h3 className="text-xl font-bold text-gray-900 mb-4">Status Sinkronisasi</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold text-green-600">{combinedUsers.filter(u => u.source.inFirestore && u.source.inAuth).length}</div>
+              <div className="text-gray-600">Tersinkronisasi</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-blue-600">{combinedUsers.filter(u => u.source.inFirestore && !u.source.inAuth).length}</div>
+              <div className="text-gray-600">Firestore Saja</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-orange-600">{combinedUsers.filter(u => !u.source.inFirestore && u.source.inAuth).length}</div>
+              <div className="text-gray-600">Auth Saja</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-gray-600">{combinedUsers.length}</div>
+              <div className="text-gray-600">Total Users</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden animate-slideUp">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan="7" className="px-6 py-4 text-center">
-                    <div className="flex justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
-                    </div>
-                  </td>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sumber Data</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
-              ) : filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="px-6 py-4 text-center text-gray-500">Tidak ada pengguna ditemukan</td>
-                </tr>
-              ) : (
-                filteredUsers.map((user, index) => {
-                  if (!user.id) {
-                    console.warn('User with missing ID:', user);
-                    return null;
-                  }
-                  const verificationStatus = getVerificationStatus(user);
-                  const sourceStatus = getSourceStatus(user);
-                  return (
-                    <tr key={user.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm text-blue-800">
-                        {editUserId === user.id ? (
-                          <input
-                            type="text"
-                            value={editForm.email}
-                            onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                            className="px-2 py-1 border border-gray-300 rounded bg-gray-100 text-gray-900"
-                          />
-                        ) : (
-                          user.email || 'N/A'
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-green-800">
-                        {editUserId === user.id ? (
-                          <input
-                            type="text"
-                            value={editForm.displayName}
-                            onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
-                            className="px-2 py-1 border border-gray-300 rounded bg-gray-100 text-gray-900"
-                          />
-                        ) : (
-                          user.displayName || 'N/A'
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-purple-800">
-                        <select
-                          value={user.isAdmin ? 'admin' : 'user'}
-                          onChange={(e) => handleEditRole(user.id, e.target.value === 'admin')}
-                          className="px-2 py-1 border border-gray-300 rounded bg-gray-100 text-purple-800"
-                          disabled={!isAdmin}
-                        >
-                          <option value="user">User</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${verificationStatus.color}`}>
-                          {verificationStatus.text}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${sourceStatus.color}`}>
-                          {sourceStatus.text}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-800">
-                        {user.updatedAt ? new Date(user.updatedAt).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-800">
-                        <div className="flex flex-wrap gap-1">
-                          {editUserId === user.id ? (
-                            <>
-                              <button
-                                onClick={handleEditSave}
-                                className="text-green-500 hover:text-green-700 px-2 py-1 text-xs"
-                                disabled={!isAdmin && user.email !== currentUserEmail}
-                              >
-                                Simpan
-                              </button>
-                              <button
-                                onClick={handleEditCancel}
-                                className="text-red-500 hover:text-red-700 px-2 py-1 text-xs"
-                              >
-                                Batal
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => handleEditClick(user)}
-                                className="text-blue-500 hover:text-blue-700 px-2 py-1 text-xs"
-                                disabled={!isAdmin && user.email !== currentUserEmail}
-                              >
-                                Edit
-                              </button>
-                              {!user.source.inFirestore && user.source.inAuth && isAdmin && (
-                                <button
-                                  onClick={() => handleSyncToFirestore(user)}
-                                  className="text-purple-500 hover:text-purple-700 px-2 py-1 text-xs"
-                                >
-                                  Sync
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleDelete(user.id)}
-                                className="text-red-500 hover:text-red-700 px-2 py-1 text-xs"
-                                disabled={!isAdmin}
-                              >
-                                Hapus
-                              </button>
-                            </>
-                          )}
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-12 text-center">
+                      <div className="flex justify-center">
+                        <div className="relative">
+                          <div className="w-12 h-12 border-4 border-indigo-200 rounded-full animate-spin"></div>
+                          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                }).filter(row => row !== null)
-              )}
-            </tbody>
-          </table>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                      Tidak ada pengguna ditemukan
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((user, index) => {
+                    if (!user.id) {
+                      console.warn('User with missing ID:', user);
+                      return null;
+                    }
+                    const verificationStatus = getVerificationStatus(user);
+                    const sourceStatus = getSourceStatus(user);
+                    return (
+                      <tr key={user.id} className={`hover:bg-gray-50 transition-all duration-300 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} transform hover:scale-[1.01] animate-fadeInUp`} style={{ animationDelay: `${index * 0.1}s` }}>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {editUserId === user.id ? (
+                            <input
+                              type="text"
+                              value={editForm.email}
+                              onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-gray-100 text-gray-900"
+                            />
+                          ) : (
+                            user.email || 'N/A'
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {editUserId === user.id ? (
+                            <input
+                              type="text"
+                              value={editForm.displayName}
+                              onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-gray-100 text-gray-900"
+                            />
+                          ) : (
+                            user.displayName || 'N/A'
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {editUserId === user.id ? (
+                            <select
+                              value={user.isAdmin ? 'admin' : 'user'}
+                              onChange={(e) => handleEditRole(user.id, e.target.value === 'admin')}
+                              className="w-full min-w-[120px] px-3 py-2 border border-gray-300 rounded-xl bg-white text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              disabled={!isAdmin}
+                            >
+                              <option value="user">User</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          ) : (
+                            <span className="inline-block px-3 py-1 bg-gray-100 text-gray-900 rounded-lg">{getRoleText(user)}</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${verificationStatus.color}`}>
+                            {verificationStatus.text}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${sourceStatus.color}`}>
+                            {sourceStatus.text}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {user.updatedAt ? new Date(user.updatedAt).toLocaleDateString() : 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <div className="flex items-center space-x-3">
+                            {editUserId === user.id ? (
+                              <>
+                                <button
+                                  onClick={handleEditSave}
+                                  className="p-2 hover:bg-green-50 rounded-lg transition-all duration-200 group"
+                                  disabled={!isAdmin && user.email !== currentUserEmail}
+                                >
+                                  <CheckCircle className="w-5 h-5 text-green-600 group-hover:text-green-800" />
+                                </button>
+                                <button
+                                  onClick={handleEditCancel}
+                                  className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+                                >
+                                  <X className="w-5 h-5 text-red-600 group-hover:text-red-800" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleEditClick(user)}
+                                  className="p-2 hover:bg-indigo-50 rounded-lg transition-all duration-200 group"
+                                  disabled={!isAdmin && user.email !== currentUserEmail}
+                                >
+                                  <Edit3 className="w-5 h-5 text-indigo-600 group-hover:text-indigo-800" />
+                                </button>
+                                {!user.source.inFirestore && user.source.inAuth && isAdmin && (
+                                  <button
+                                    onClick={() => handleSyncToFirestore(user)}
+                                    className="p-2 hover:bg-purple-50 rounded-lg transition-all duration-200 group"
+                                  >
+                                    <RefreshCw className="w-5 h-5 text-purple-600 group-hover:text-purple-800" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDelete(user.id)}
+                                  className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+                                  disabled={!isAdmin}
+                                >
+                                  <Trash2 className="w-5 h-5 text-red-600 group-hover:text-red-800" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }).filter(row => row !== null)
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
-      <Popup
-        isOpen={popup.isOpen}
-        onClose={closePopup}
-        title={popup.title}
-        message={popup.message}
-        type={popup.type}
-        onConfirm={popup.onConfirm}
-      />
+        <Popup
+          isOpen={popup.isOpen}
+          onClose={closePopup}
+          title={popup.title}
+          message={popup.message}
+          type={popup.type}
+          onConfirm={popup.onConfirm}
+        />
+      </div>
     </div>
   );
 };
 
 export default UserManagement;
+
+<style jsx>{`
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  
+  @keyframes scaleIn {
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  
+  @keyframes slideRight {
+    from { transform: translateX(-20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  .animate-slideUp {
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  .animate-scaleIn {
+    animation: scaleIn 0.3s ease-out;
+  }
+  
+  .animate-slideRight {
+    animation: slideRight 0.3s ease-out;
+  }
+  
+  .animate-fadeInUp {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  /* Penyesuaian untuk kolom Role */
+  td:nth-child(3) {
+    min-width: 150px; /* Increased minimum width to accommodate select dropdown */
+    padding-right: 16px; /* Ensure enough padding */
+  }
+
+  td:nth-child(3) span {
+    white-space: nowrap; /* Prevent text wrapping */
+  }
+
+  /* Penyesuaian untuk elemen select di mode edit */
+  td:nth-child(3) select {
+    width: 100%;
+    min-width: 120px; /* Ensure dropdown has enough width */
+    padding: 8px; /* Consistent padding */
+    box-sizing: border-box; /* Ensure padding is included in width calculation */
+    appearance: auto; /* Ensure default browser styling for dropdown arrow */
+  }
+`}</style>

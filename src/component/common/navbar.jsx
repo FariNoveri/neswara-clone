@@ -15,7 +15,7 @@ const Navbar = () => {
   const [isMoreDropdownOpen, setIsMoreDropdownOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formMode, setFormMode] = useState("login");
-  const [isScrolled, setIsScrolled] = useState(true);
+  const [isScrolled, setIsScrolled] = useState(false);
 
   const profileDropdownRef = useRef(null);
   const moreDropdownRef = useRef(null);
@@ -185,7 +185,7 @@ const Navbar = () => {
           font-size: 13px;
           font-weight: 500;
           position: relative;
-          z-index: 50;
+          z-index: 1; /* Below navbar but above content */
         }
 
         .breaking-news-text {
@@ -234,7 +234,7 @@ const Navbar = () => {
 
         .notification-dropdown {
           position: fixed;
-          z-index: 9999;
+          z-index: 1; /* Above navbar but below modals */
           max-height: 80vh;
           overflow: hidden;
         }
@@ -247,6 +247,7 @@ const Navbar = () => {
           animation: slideDown 0.2s ease-out;
           max-height: 400px;
           overflow-y: auto;
+          z-index: 1; /* Above navbar but below modals */
         }
 
         .search-suggestion:hover {
@@ -257,6 +258,7 @@ const Navbar = () => {
 
         .mobile-search-overlay {
           animation: slideInFromTop 0.3s ease-out;
+          z-index: 1; /* Above navbar but below modals */
         }
 
         .search-highlight {
@@ -281,9 +283,13 @@ const Navbar = () => {
         .clear-button:hover {
           color: #2563eb;
         }
+
+        .main-content {
+          padding-top: 80px; /* Adjusted to match navbar height */
+        }
       `}</style>
 
-      <nav className={`w-full sticky top-0 z-40 navbar-transition ${
+      <nav className={`w-full sticky top-0 z-30 navbar-transition ${
         isScrolled ? "glass-effect shadow-lg" : "bg-white shadow-md"
       }`}>
         <div className="container mx-auto px-4">
@@ -396,7 +402,7 @@ const Navbar = () => {
                   <FaChevronDown className="text-xs" />
                 </button>
                 {isMoreDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-white shadow-lg rounded-lg border border-gray-100 t-dropdown">
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-white shadow-lg rounded-lg border border-gray-100 dropdown-menu">
                     {dropdownItems.map((item, index) => (
                       <Link
                         key={index}

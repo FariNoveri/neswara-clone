@@ -357,12 +357,10 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         <h3 className="text-xl font-bold text-slate-800">Komentar ({comments.length})</h3>
       </div>
       <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-        <h4 className="font-bold text-blue-800 mb-2">Comment System</h4>
+        <h4 className="font-bold text-blue-800 mb-2">Rules Berkomentar</h4>
         <div className="text-sm text-blue-700 space-y-1">
-          <p>NewsId: {newsId || 'demo-news-id'}</p>
-          <p>Total Comments: {comments.length}</p>
-          <p>Root Comments: {organizedComments.length}</p>
-          <p>Status: Connected to Firestore, Loading: {loading.toString()}</p>
+          <p>Harap komentar yang baik aja</p>
+          <p>jangan spam, kalau spam bakalan kena sanksi</p>
         </div>
       </div>
       {error && (
