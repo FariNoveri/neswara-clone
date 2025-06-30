@@ -140,12 +140,6 @@ const NewsDetail = () => {
             try {
               const docRef = doc(db, "news", newsData.id);
               await updateDoc(docRef, { views: increment(1) });
-              await addDoc(collection(db, "logs"), {
-                action: "VIEW_NEWS",
-                userEmail: currentUser?.email || "anonymous",
-                details: { newsId: newsData.id, title: newsData.judul, slug: newsData.slug },
-                timestamp: serverTimestamp(),
-              });
             } catch (updateErr) {
               console.error("Error updating views:", updateErr);
               toast.error("Gagal memperbarui jumlah tampilan.");

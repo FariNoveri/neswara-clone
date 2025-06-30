@@ -4,6 +4,15 @@ import { db } from "../../firebaseconfig";
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, increment, getDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+// Function to create a slug from a string
+const createSlug = (text) => {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with hyphen
+    .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+    .substring(0, 100); // Limit length
+};
+
 const Ekonomi = () => {
   const [newsData, setNewsData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -64,9 +73,19 @@ const Ekonomi = () => {
     const user = auth.currentUser;
     console.log("Auth state for view update:", user ? user.uid : "Unauthenticated");
 
+    const item = newsData.find((n) => n.id === newsId);
+    if (!item) {
+      console.error("News item not found for ID:", newsId);
+      navigate(`/berita/${newsId}`); // Fallback to id if item not found
+      return;
+    }
+
+    const slug = item.slug || createSlug(item.judul || item.title || 'untitled');
+    console.log("Navigating to slug:", slug);
+
     if (!user) {
       console.log("User not authenticated, skipping view update");
-      navigate(`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`);
+      navigate(`/berita/${slug}`);
       return;
     }
 
@@ -76,7 +95,7 @@ const Ekonomi = () => {
       const newsSnap = await getDoc(newsRef);
       if (!newsSnap.exists()) {
         console.error("News document does not exist for ID:", newsId);
-        navigate(`/berita/${newsId}`);
+        navigate(`/berita/${slug}`);
         return;
       }
       if (!newsSnap.data().hasOwnProperty("views")) {
@@ -101,7 +120,7 @@ const Ekonomi = () => {
         newsId,
       });
     }
-    navigate(`/berita/${newsId}`);
+    navigate(`/berita/${slug}`);
   };
 
   // Loading skeleton

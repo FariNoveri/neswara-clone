@@ -3,6 +3,15 @@ import { Link } from "react-router-dom";
 import { db } from "../../firebaseconfig.js";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 
+// Function to create a slug from a string
+const createSlug = (text) => {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with hyphen
+    .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+    .substring(0, 100); // Limit length
+};
+
 const Olahraga = () => {
   const [news, setNews] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,7 +103,7 @@ const Olahraga = () => {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mb-12">
             {news[0] && (
               <article className="lg:col-span-2 lg:row-span-2 group cursor-pointer">
-                <Link to={`/berita/${news[0].id}`}>
+                <Link to={`/berita/${news[0].slug || createSlug(news[0].judul || news[0].title || 'untitled')}`}>
                   <div className="relative overflow-hidden rounded-2xl shadow-xl group-hover:shadow-2xl transition-all duration-500">
                     <img
                       src={news[0].gambar || "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&h=600&fit=crop"}

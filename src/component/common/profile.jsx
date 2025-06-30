@@ -52,9 +52,9 @@ import { deleteDoc } from "firebase/firestore";
 const sanitizeInput = (input) => {
   if (!input) return input;
   return input
-    .replace(new RegExp('[<>}{]', 'g'), '') // Remove <, >, {, }
-    .replace(new RegExp('script', 'gi'), '') // Remove "script" (case-insensitive)
-    .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '') // Remove control characters
+    .replace(new RegExp('[<>}{]', 'g'), '')
+    .replace(new RegExp('script', 'gi'), '')
+    .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '')
     .trim();
 };
 
@@ -62,7 +62,7 @@ const sanitizeInput = (input) => {
 const validateImageFile = (file, callback) => {
   const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  const maxSize = 5 * 1024 * 1024; // 5MB
+  const maxSize = 5 * 1024 * 1024;
 
   const fileExtension = file.name.split('.').pop().toLowerCase();
   if (!allowedExtensions.includes(fileExtension)) {
@@ -145,60 +145,61 @@ const Profile = () => {
     resetTimeout();
   };
 
-  // Helper function to determine login method
   const getLoginMethod = (user) => {
     if (!user?.providerData?.length) return null;
-    
     const providers = user.providerData.map(provider => provider.providerId);
-    
     if (providers.includes('google.com')) return 'google';
     if (providers.includes('facebook.com')) return 'facebook';
     if (providers.includes('password')) return 'email';
-    
     return 'unknown';
   };
 
   const getLoginMethodIcon = (method) => {
     switch (method) {
-      case 'google':
-        return <FaGoogle className="text-red-400" />;
-      case 'facebook':
-        return <FaFacebook className="text-blue-400" />;
-      default:
-        return <FaEnvelope className="text-purple-400" />;
+      case 'google': return <FaGoogle className="text-red-400" />;
+      case 'facebook': return <FaFacebook className="text-blue-400" />;
+      default: return <FaEnvelope className="text-purple-400" />;
     }
   };
 
   const getLoginMethodText = (method) => {
     switch (method) {
-      case 'google':
-        return 'Google Account';
-      case 'facebook':
-        return 'Facebook Account';
-      case 'email':
-        return 'Email & Password';
-      default:
-        return 'Unknown Method';
+      case 'google': return 'Google Account';
+      case 'facebook': return 'Facebook Account';
+      case 'email': return 'Email & Password';
+      default: return 'Unknown Method';
     }
   };
 
-  // Function to check if user is admin
-  const checkAdminStatus = async (userId) => {
-    try {
-      const userDoc = await getDoc(doc(db, "users", userId));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const role = userData.role || 'user';
-        setUserRole(role);
-        setIsAdmin(role === 'admin');
-        return role === 'admin';
-      }
-      return false;
-    } catch (error) {
-      console.error("Error checking admin status:", error);
+const checkAdminStatus = async (userId) => {
+  try {
+    const userDoc = await getDoc(doc(db, "users", userId));
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      const isAdminValue = userData.isAdmin === true; // Gunakan isAdmin sebagai boolean
+      setUserRole(isAdminValue ? 'admin' : 'user'); // Sesuaikan userRole berdasarkan isAdmin
+      setIsAdmin(isAdminValue);
+      console.log(`User ${userId} role checked: isAdmin=${isAdminValue}, userRole=${isAdminValue ? 'admin' : 'user'}`);
+      return isAdminValue;
+    } else {
+      // Inisialisasi dokumen untuk pengguna baru dengan isAdmin: false
+      await setDoc(doc(db, "users", userId), {
+        displayName: sanitizeInput(user?.displayName || ""),
+        email: sanitizeInput(user?.email || ""),
+        photoURL: user?.photoURL || "",
+        isAdmin: false, // Default ke non-admin
+        updatedAt: new Date().toISOString(),
+      });
+      setUserRole('user');
+      setIsAdmin(false);
+      console.log(`New user ${userId} initialized with isAdmin: false`);
       return false;
     }
-  };
+  } catch (error) {
+    console.error("Error checking admin status:", error);
+    return false;
+  }
+};
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -208,7 +209,6 @@ const Profile = () => {
         setEmail(sanitizeInput(user.email || ""));
         setProfileImageURL(user.photoURL || "");
 
-        // Check if user logged in via social media
         const loginMethod = getLoginMethod(user);
         setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
 
@@ -220,19 +220,13 @@ const Profile = () => {
             setProfileImageURL(userData.photoURL || user.photoURL || "");
             setPendingEmail(userData.pendingEmail || "");
             setEmailVerificationSent(!!userData.pendingEmail);
-            
-            // Check admin status
-            const role = userData.role || 'user';
-            setUserRole(role);
-            setIsAdmin(role === 'admin');
+            await checkAdminStatus(user.uid); // Periksa status admin dari dokumen
           } else {
-            // Check admin status if document doesn't exist
-            await checkAdminStatus(user.uid);
+            await checkAdminStatus(user.uid); // Inisialisasi jika belum ada dokumen
           }
         } catch (error) {
           console.log("Error fetching user data:", error);
-          // Fallback check for admin status
-          await checkAdminStatus(user.uid);
+          await checkAdminStatus(user.uid); // Fallback
         }
 
         resetTimeout();
@@ -287,10 +281,7 @@ const Profile = () => {
 
         const response = await fetch(
           `https://api.imgbb.com/1/upload?key=${import.meta.env.VITE_IMGBB_API_KEY}`,
-          {
-            method: "POST",
-            body: formData,
-          }
+          { method: "POST", body: formData }
         );
 
         const data = await response.json();
@@ -306,22 +297,16 @@ const Profile = () => {
             displayName: sanitizeInput(displayName || user.displayName || ""),
             email: sanitizeInput(user.email),
             photoURL: publicUrl,
-            role: userRole, // Preserve existing role
+            role: userRole,
             updatedAt: new Date().toISOString(),
           },
           { merge: true }
         );
 
-        // Log profile image update
         await addDoc(collection(db, "logs"), {
           action: "PROFILE_UPDATE",
           userEmail: user.email,
-          details: {
-            type: "photoURL",
-            oldValue: profileImageURL || "No previous image",
-            newValue: publicUrl,
-            isAdmin: isAdmin
-          },
+          details: { type: "photoURL", oldValue: profileImageURL || "No previous image", newValue: publicUrl, isAdmin },
           timestamp: new Date()
         });
 
@@ -354,26 +339,18 @@ const Profile = () => {
       const originalEmail = user.email;
 
       if (sanitizedDisplayName !== originalDisplayName) {
-        await updateProfile(user, {
-          displayName: sanitizedDisplayName
-        });
-
+        await updateProfile(user, { displayName: sanitizedDisplayName });
         await addDoc(collection(db, "logs"), {
           action: "PROFILE_UPDATE",
           userEmail: user.email,
-          details: {
-            type: "displayName",
-            oldValue: originalDisplayName,
-            newValue: sanitizedDisplayName,
-            isAdmin: isAdmin
-          },
+          details: { type: "displayName", oldValue: originalDisplayName, newValue: sanitizedDisplayName, isAdmin },
           timestamp: new Date()
         });
       }
 
       if (sanitizedEmail !== originalEmail) {
         if (!currentPassword) {
-          setError(isSocialLogin 
+          setError(isSocialLogin
             ? "Current password is required to change email. If you signed in with Google/Facebook, please use the password from that account or set up a new password first."
             : "Current password is required to change email.");
           return;
@@ -390,19 +367,14 @@ const Profile = () => {
           email: user.email,
           pendingEmail: sanitizedEmail,
           photoURL: profileImageURL,
-          role: userRole, // Preserve existing role
+          role: userRole,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
         await addDoc(collection(db, "logs"), {
           action: "PROFILE_UPDATE",
           userEmail: user.email,
-          details: {
-            type: "email",
-            oldValue: originalEmail,
-            newValue: sanitizedEmail,
-            isAdmin: isAdmin
-          },
+          details: { type: "email", oldValue: originalEmail, newValue: sanitizedEmail, isAdmin },
           timestamp: new Date()
         });
 
@@ -413,14 +385,14 @@ const Profile = () => {
           displayName: sanitizedDisplayName,
           email: sanitizedEmail,
           photoURL: profileImageURL,
-          role: userRole, // Preserve existing role
+          role: userRole,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       }
 
       if (newPassword) {
         if (!currentPassword) {
-          setError(isSocialLogin 
+          setError(isSocialLogin
             ? "Current password is required to change password. If you signed in with Google/Facebook, please enter the password from that account."
             : "Current password is required to change password.");
           return;
@@ -444,10 +416,7 @@ const Profile = () => {
         await addDoc(collection(db, "logs"), {
           action: "PROFILE_UPDATE",
           userEmail: user.email,
-          details: {
-            type: "password",
-            isAdmin: isAdmin
-          },
+          details: { type: "password", isAdmin },
           timestamp: new Date()
         });
       }
@@ -459,7 +428,7 @@ const Profile = () => {
       setConfirmPassword("");
     } catch (error) {
       if (error.code === 'auth/wrong-password') {
-        setError(isSocialLogin 
+        setError(isSocialLogin
           ? "Current password is incorrect. Please use the password from your Google/Facebook account or set up a new password first."
           : "Current password is incorrect.");
       } else if (error.code === 'auth/email-already-in-use') {
@@ -502,10 +471,7 @@ const Profile = () => {
       await addDoc(collection(db, "logs"), {
         action: "USER_DELETE",
         userEmail: user.email,
-        details: {
-          email: user.email,
-          isAdmin: isAdmin
-        },
+        details: { email: user.email, isAdmin },
         timestamp: new Date()
       });
 
@@ -582,7 +548,6 @@ const Profile = () => {
           </div>
         )}
 
-        {/* Admin Badge */}
         {isAdmin && (
           <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-sm border border-amber-500/30 text-amber-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-center space-x-3">
@@ -595,7 +560,6 @@ const Profile = () => {
           </div>
         )}
 
-        {/* Social Login Info Banner */}
         {isSocialLogin && (
           <div className="bg-blue-500/20 backdrop-blur-sm border border-blue-500/30 text-blue-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-start space-x-3">
@@ -699,7 +663,6 @@ const Profile = () => {
                 </div>
                 
                 <div className="pt-4 border-t border-white/10 space-y-3">
-                  {/* Admin Dashboard Button - Only visible to admins */}
                   {isAdmin && (
                     <button
                       onClick={() => navigate('/admin')}
@@ -769,7 +732,6 @@ const Profile = () => {
               </div>
 
               <form onSubmit={handleSaveProfile} className="space-y-6">
-                {/* Display Name Field */}
                 <div className="space-y-2">
                   <label className="block text-white/80 font-medium">
                     <FaUser className="inline mr-2 text-purple-400" />
@@ -786,7 +748,6 @@ const Profile = () => {
                   />
                 </div>
 
-                {/* Email Field */}
                 <div className="space-y-2">
                   <label className="block text-white/80 font-medium">
                     <FaEnvelope className="inline mr-2 text-purple-400" />
@@ -803,7 +764,6 @@ const Profile = () => {
                   />
                 </div>
 
-                {/* Password Section - Only show when editing */}
                 {isEditing && (
                   <div className="space-y-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10">
                     <h4 className="text-lg font-semibold text-white flex items-center">
@@ -811,13 +771,12 @@ const Profile = () => {
                       Password Settings
                     </h4>
                     <p className="text-white/60 text-sm">
-                      {isSocialLogin 
+                      {isSocialLogin
                         ? "Use your Google/Facebook account password to authenticate changes."
                         : "Leave password fields empty if you don't want to change your password."
                       }
                     </p>
 
-                    {/* Current Password */}
                     <div className="space-y-2">
                       <label className="block text-white/80 font-medium">Current Password</label>
                       <div className="relative">
@@ -838,7 +797,6 @@ const Profile = () => {
                       </div>
                     </div>
 
-                    {/* New Password */}
                     <div className="space-y-2">
                       <label className="block text-white/80 font-medium">New Password</label>
                       <div className="relative">
@@ -860,7 +818,6 @@ const Profile = () => {
                       </div>
                     </div>
 
-                    {/* Confirm Password */}
                     <div className="space-y-2">
                       <label className="block text-white/80 font-medium">Confirm New Password</label>
                       <div className="relative">
@@ -886,7 +843,6 @@ const Profile = () => {
               </form>
             </div>
 
-            {/* Account Actions */}
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                 <FaCog className="mr-3 text-purple-400" />
@@ -894,13 +850,10 @@ const Profile = () => {
               </h3>
 
               <div className="space-y-4">
-                {/* Sign Out Button */}
                 <button
                   onClick={() => {
                     signOut(auth)
-                      .then(() => {
-                        navigate('/');
-                      })
+                      .then(() => navigate('/'))
                       .catch((error) => {
                         console.error("Error signing out:", error);
                         setError("Failed to sign out: " + error.message);
@@ -915,7 +868,6 @@ const Profile = () => {
                   <div className="text-sm opacity-75">Log out of your account</div>
                 </button>
 
-                {/* Delete Account Button */}
                 <button
                   onClick={handleDeleteAccount}
                   disabled={deleting}
@@ -938,7 +890,6 @@ const Profile = () => {
                 </button>
               </div>
 
-              {/* Warning for account deletion */}
               <div className="mt-6 p-4 bg-red-500/20 backdrop-blur-sm border border-red-500/30 rounded-2xl">
                 <div className="flex items-start space-x-3">
                   <FaExclamationTriangle className="text-red-400 mt-1 flex-shrink-0" />
@@ -953,50 +904,7 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Admin-only Quick Actions */}
-            {isAdmin && (
-              <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-md rounded-3xl p-8 border border-amber-500/30 hover:border-amber-500/50 transition-all duration-500">
-                <h3 className="text-2xl font-bold text-amber-200 mb-6 flex items-center">
-                  <FaShieldAlt className="mr-3 text-amber-400" />
-                  Administrator Quick Actions
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    onClick={() => navigate('/admin')}
-                    className="group flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"
-                  >
-                    <div className="flex items-center">
-                      <FaChartBar className="mr-3 text-lg group-hover:animate-bounce" />
-                      <span className="font-medium">Dashboard</span>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => navigate('/admin/users')}
-                    className="group flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"
-                  >
-                    <div className="flex items-center">
-                      <FaUsers className="mr-3 text-lg group-hover:animate-bounce" />
-                      <span className="font-medium">User Management</span>
-                    </div>
-                  </button>
-                </div>
-
-                <div className="mt-4 p-4 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-2xl">
-                  <div className="flex items-start space-x-3">
-                    <FaInfoCircle className="text-amber-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <div className="font-medium text-amber-200 mb-1">Administrator Privileges</div>
-                      <div className="text-sm text-amber-200/80">
-                        As an administrator, you have access to user management, system analytics, 
-                        breaking news management, and activity monitoring features.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+  
           </div>
         </div>
       </div>
