@@ -1,6 +1,8 @@
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { X, Save } from 'lucide-react';
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "../../firebaseconfig";
 
 const NewsModal = ({ 
   showModal, 
@@ -15,6 +17,31 @@ const NewsModal = ({
 }) => {
   if (!showModal) return null;
 
+  // Utility function to generate a URL-friendly slug
+  const generateSlug = async (title) => {
+    if (!title || typeof title !== 'string') return '';
+    let slug = title
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .substring(0, 100); // Limit length
+
+    // Check for duplicate slugs
+    let baseSlug = slug;
+    let counter = 1;
+    while (true) {
+      const slugQuery = query(collection(db, "news"), where("slug", "==", slug));
+      const snapshot = await getDocs(slugQuery);
+      if (snapshot.empty || (editingNews && snapshot.docs[0].id === editingNews.id)) {
+        return slug;
+      }
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    }
+  };
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -28,20 +55,45 @@ const NewsModal = ({
 
   const handleSubmitWithLog = async () => {
     try {
-      await handleSubmit(); // Save news via createNews or updateDoc
+      // Generate new slug based on title
+      const newSlug = await generateSlug(formData.judul);
+      
+      // Update formData with new slug
+      const updatedFormData = { ...formData, slug: newSlug };
+      setFormData(updatedFormData);
+
+      // Call handleSubmit with updated formData and get the newsId
+      const newsId = await handleSubmit(updatedFormData);
+
       if (!loading) {
         const action = editingNews ? 'NEWS_EDIT' : 'NEWS_ADD';
         await logActivity(action, { 
-          newsId: editingNews?.id || 'new', 
+          newsId: editingNews?.id || newsId || 'new', 
           title: formData.judul, 
-          category: formData.kategori 
+          category: formData.kategori,
+          slug: newSlug
         });
       }
-      setShowModal(false); // Close modal on success
-      resetForm(); // Reset form
+      setShowModal(false);
+      resetForm();
+      // Dispatch event for redirection
+      window.dispatchEvent(new CustomEvent('newsEdited', { 
+        detail: { 
+          newsId: editingNews?.id || newsId, 
+          newSlug,
+          oldSlug: editingNews?.slug
+        }
+      }));
+      return newsId;
     } catch (error) {
       console.error('Error submitting news:', error);
       alert(`Gagal menyimpan berita: ${error.message}`);
+      await logActivity('SUBMIT_NEWS_ERROR', {
+        newsId: editingNews?.id || 'new',
+        title: formData.judul,
+        error: error.message
+      });
+      return null;
     }
   };
 

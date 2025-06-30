@@ -23,7 +23,7 @@ const NewsPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const postsQuery = query(collection(db, "news"), orderBy("createdAt", "desc"), limit(10));
+    const postsQuery = query(collection(db, "news"), orderBy("createdAt", "desc"), limit(5));
     const popularQuery = query(collection(db, "news"), orderBy("views", "desc"), limit(4));
 
     const unsubscribePosts = onSnapshot(
@@ -133,7 +133,6 @@ const NewsPage = () => {
           <div className="lg:col-span-2">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-800">Semua Berita</h2>
-              <span className="text-sm text-gray-500">{newsData.length} berita</span>
             </div>
             {newsData.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">

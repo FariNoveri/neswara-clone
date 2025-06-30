@@ -14,7 +14,7 @@ import {
   collectionGroup,
   where,
   getDoc,
-  addDoc // Added addDoc import
+  addDoc
 } from 'firebase/firestore';
 import { createNews } from './../config/createNews.js';
 import {
@@ -78,7 +78,8 @@ const AdminDashboard = () => {
     author: '',
     gambar: '',
     ringkasan: '',
-    gambarDeskripsi: ''
+    gambarDeskripsi: '',
+    slug: ''
   });
 
   const logActivity = async (action, details = {}) => {
@@ -144,11 +145,26 @@ const AdminDashboard = () => {
         }
       });
 
-      return () => unsubscribe();
+      // Listen for newsEdited event to redirect
+      const handleNewsEdited = (event) => {
+        const { newsId, newSlug, oldSlug } = event.detail;
+        console.log(`News edited event received: newsId=${newsId}, newSlug=${newSlug}, oldSlug=${oldSlug}`);
+        if (newSlug && editingNews && newsId === editingNews.id) {
+          console.log(`Redirecting to new slug: /berita/${newSlug}`);
+          navigate(`/berita/${newSlug}`, { replace: true });
+        }
+      };
+
+      window.addEventListener('newsEdited', handleNewsEdited);
+
+      return () => {
+        unsubscribe();
+        window.removeEventListener('newsEdited', handleNewsEdited);
+      };
     } else if (!loading && !user) {
       navigate('/');
     }
-  }, [user, loading, navigate]);
+  }, [user, loading, navigate, editingNews]);
 
   const handleUnauthorizedClose = async () => {
     try {
@@ -329,38 +345,67 @@ const AdminDashboard = () => {
     }
   }, [isAuthorized, filterTitle, filterCategory, filterAuthor, filterDate, filterCustomDate, filterSortBy]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (formData) => {
     setNewsLoading(true);
 
     if (!formData.judul || !formData.konten || !formData.kategori || !formData.author) {
       alert('Mohon lengkapi semua field yang wajib diisi');
       setNewsLoading(false);
-      return;
+      return null;
     }
 
     try {
+      let newsId;
       if (editingNews) {
+        // Update existing news
         const newsRef = doc(db, 'news', editingNews.id);
         await updateDoc(newsRef, {
           ...formData,
           updatedAt: serverTimestamp()
         });
-        await logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul || null });
-        console.log(`Updated news ID: ${editingNews.id}`);
+        // Update savedArticles with new slug and title
+        const bookmarkQuery = query(
+          collection(db, 'savedArticles'),
+          where('articleId', '==', editingNews.id)
+        );
+        const bookmarkSnapshot = await getDocs(bookmarkQuery);
+        for (const bookmarkDoc of bookmarkSnapshot.docs) {
+          await updateDoc(doc(db, 'savedArticles', bookmarkDoc.id), {
+            slug: formData.slug,
+            title: formData.judul
+          });
+        }
+        await logActivity('EDIT_NEWS', { 
+          newsId: editingNews.id, 
+          title: formData.judul, 
+          slug: formData.slug,
+          oldSlug: editingNews.slug
+        });
+        console.log(`Updated news ID: ${editingNews.id}, new slug: ${formData.slug}`);
+        newsId = editingNews.id;
       } else {
-        const newsId = await createNews(formData);
-        await logActivity('ADD_NEWS', { newsId, title: formData.judul || null, category: formData.kategori || null });
+        // Create new news
+        newsId = await createNews({ ...formData, createdAt: serverTimestamp(), views: 0, likeCount: 0 });
+        await logActivity('ADD_NEWS', { 
+          newsId, 
+          title: formData.judul, 
+          category: formData.kategori, 
+          slug: formData.slug 
+        });
       }
 
       resetForm();
       await fetchNews();
       setShowModal(false);
+      return newsId;
     } catch (error) {
       console.error('Error saving news:', error);
-      await logActivity('SAVE_NEWS_ERROR', { error: error.message, title: formData.judul || null });
+      await logActivity('SAVE_NEWS_ERROR', { error: error.message, title: formData.judul, slug: formData.slug });
       alert(`Gagal menyimpan berita: ${error.message}`);
+      throw error;
+    } finally {
+      setNewsLoading(false);
     }
-    setNewsLoading(false);
   };
 
   const handleDeleteNews = async id => {
@@ -370,6 +415,15 @@ const AdminDashboard = () => {
         if (newsDoc.exists()) {
           const newsData = newsDoc.data();
           await deleteDoc(doc(db, 'news', id));
+          // Delete associated savedArticles
+          const bookmarkQuery = query(
+            collection(db, 'savedArticles'),
+            where('articleId', '==', id)
+          );
+          const bookmarkSnapshot = await getDocs(bookmarkQuery);
+          for (const bookmarkDoc of bookmarkSnapshot.docs) {
+            await deleteDoc(doc(db, 'savedArticles', bookmarkDoc.id));
+          }
           await logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || null });
           await fetchNews();
         }
@@ -389,7 +443,8 @@ const AdminDashboard = () => {
       author: newsItem.author || '',
       gambar: newsItem.gambar || '',
       ringkasan: newsItem.ringkasan || '',
-      gambarDeskripsi: newsItem.gambarDeskripsi || ''
+      gambarDeskripsi: newsItem.gambarDeskripsi || '',
+      slug: newsItem.slug || ''
     });
     setShowModal(true);
   };
@@ -402,7 +457,8 @@ const AdminDashboard = () => {
       author: '',
       gambar: '',
       ringkasan: '',
-      gambarDeskripsi: ''
+      gambarDeskripsi: '',
+      slug: ''
     });
     setEditingNews(null);
   };
