@@ -3,6 +3,7 @@ import { FaComment, FaFacebook, FaInstagram, FaYoutube, FaEye, FaCalendar } from
 import { db } from "../../firebaseconfig";
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
+import { createSlug } from "../config/slug"; // Import createSlug
 
 const NewsArticle = () => {
   const [latestNews, setLatestNews] = useState([]);
@@ -21,6 +22,7 @@ const NewsArticle = () => {
         const latestData = latestSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
+          slug: doc.data().slug, // Include slug
         }));
 
         // Fetch popular news
@@ -29,6 +31,7 @@ const NewsArticle = () => {
         const popularData = popularSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
+          slug: doc.data().slug, // Include slug
         }));
 
         // Format latest news
@@ -48,7 +51,7 @@ const NewsArticle = () => {
           comments: item.komentar || 0,
           views: item.views || 0,
           category: item.kategori || "Umum",
-          link: `/news/${item.id}`,
+          link: `/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`, // Use slug
         }));
 
         // Format popular news
@@ -64,7 +67,7 @@ const NewsArticle = () => {
             : "Baru",
           comments: item.komentar || 0,
           views: item.views || 0,
-          link: `/news/${item.id}`,
+          link: `/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`, // Use slug
         }));
 
         setLatestNews(formattedLatest);
@@ -164,6 +167,7 @@ const NewsArticle = () => {
                   <article
                     key={news.id}
                     className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-all duration-300 flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-4"
+                    onClick={() => navigate(news.link)} // Add click handler
                   >
                     <div className="w-full md:w-40 h-40 flex-shrink-0 relative overflow-hidden rounded-lg group">
                       <img
@@ -226,6 +230,7 @@ const NewsArticle = () => {
                     <div
                       key={news.id}
                       className="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition-all duration-200"
+                      onClick={() => navigate(news.link)} // Add click handler
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-bold text-blue-600">#{index + 1}</span>

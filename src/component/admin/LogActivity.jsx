@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebaseconfig';
 import { collection, query, orderBy, onSnapshot, limit, doc, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
-import { ChevronDown, ChevronUp, Eye, EyeOff, Trash, Search, X, Filter, Calendar, Activity, Users, AlertCircle, Clock, User, MessageSquare, Heart, Bookmark, BookmarkX, PlusCircle, Edit3, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eye, EyeOff, Trash, Search, X, Filter, Calendar, Activity, Users, AlertCircle, Clock, User, MessageSquare, Heart, Bookmark, BookmarkX, PlusCircle, Edit3, Trash2, MessageCircle } from 'lucide-react';
 import { ADMIN_EMAILS } from '../config/Constants';
 import { toast } from 'react-toastify';
 
@@ -40,6 +40,8 @@ const ACTION_LABELS = {
   DELETE_NEWS: 'Berita Dihapus',
   COMMENT_ADD: 'Komentar Ditambahkan',
   COMMENT_DELETE: 'Komentar Dihapus',
+  REPLY_COMMENT: 'Balasan Komentar Ditambahkan',
+  LIKE_COMMENT: 'Komentar Disukai/Dibatalkan',
   USER_ADD: 'Pengguna Ditambahkan',
   USER_EDIT: 'Pengguna Diedit',
   USER_DELETE: 'Pengguna Dihapus',
@@ -61,21 +63,12 @@ const ACTION_LABELS = {
 
 // Utility function to check if user is admin
 const isAdminUser = (userEmail, details) => {
-  // Cek ADMIN_EMAILS terlebih dahulu
   if (ADMIN_EMAILS.includes(userEmail)) {
     return true;
   }
-  
-  // Cek dari details jika ada
-  if (details && details.isAdmin === true) {
+  if (details && (details.isAdmin === true || details.adminStatus === true || details.admin === true)) {
     return true;
   }
-  
-  // Cek dari details dengan key lain yang mungkin
-  if (details && (details.adminStatus === true || details.admin === true)) {
-    return true;
-  }
-  
   return false;
 };
 
@@ -137,105 +130,6 @@ const useNewsTitle = (newsId) => {
   }, [newsId]);
 
   return { title, loading };
-};
-
-// Component untuk menampilkan detail aktivitas yang lebih user-friendly
-const ActivityDetails = ({ details, action }) => {
-  const renderDetailItem = (key, value) => {
-    // Skip null, undefined, atau empty values
-    if (value === null || value === undefined || value === '') return null;
-    
-    // Format key untuk display
-    const formatKey = (key) => {
-      const keyMappings = {
-        newsId: 'ID Berita',
-        articleId: 'ID Artikel',
-        userId: 'ID Pengguna',
-        commentId: 'ID Komentar',
-        actionType: 'Jenis Aksi',
-        timestamp: 'Waktu',
-        userEmail: 'Email Pengguna',
-        isAdmin: 'Status Admin',
-        previousValue: 'Nilai Sebelumnya',
-        newValue: 'Nilai Baru',
-        ipAddress: 'Alamat IP',
-        userAgent: 'User Agent',
-        deviceInfo: 'Info Device',
-        location: 'Lokasi',
-        sessionId: 'ID Sesi'
-      };
-      return keyMappings[key] || key.charAt(0).toUpperCase() + key.slice(1);
-    };
-
-    // Format value untuk display
-    const formatValue = (value) => {
-      if (typeof value === 'boolean') {
-        return value ? 'Ya' : 'Tidak';
-      }
-      if (typeof value === 'object' && value !== null) {
-        return JSON.stringify(value, null, 2);
-      }
-      return String(value);
-    };
-
-    return (
-      <div key={key} className="flex flex-col sm:flex-row sm:items-center py-2 border-b border-gray-100 last:border-b-0">
-        <div className="w-full sm:w-1/3 font-medium text-gray-700 mb-1 sm:mb-0">
-          {formatKey(key)}
-        </div>
-        <div className="w-full sm:w-2/3 text-gray-600 break-words">
-          {formatValue(value)}
-        </div>
-      </div>
-    );
-  };
-
-  const getActionIcon = () => {
-    switch (action) {
-      case 'LIKE_NEWS':
-        return <Heart className="w-5 h-5 text-red-500" />;
-      case 'SAVE_NEWS':
-        return <Bookmark className="w-5 h-5 text-blue-500" />;
-      case 'UNSAVE_NEWS':
-        return <BookmarkX className="w-5 h-5 text-gray-500" />;
-      case 'COMMENT_ADD':
-        return <MessageSquare className="w-5 h-5 text-green-500" />;
-      case 'COMMENT_DELETE':
-        return <Trash2 className="w-5 h-5 text-red-500" />;
-      case 'NEWS_ADD':
-        return <PlusCircle className="w-5 h-5 text-green-500" />;
-      case 'EDIT_NEWS':
-        return <Edit3 className="w-5 h-5 text-blue-500" />;
-      case 'DELETE_NEWS':
-        return <Trash2 className="w-5 h-5 text-red-500" />;
-      default:
-        return <Activity className="w-5 h-5 text-gray-500" />;
-    }
-  };
-
-  return (
-    <div className="mt-4 animate-slideDown">
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <div className="flex items-center space-x-3 mb-4">
-          {getActionIcon()}
-          <h4 className="text-lg font-semibold text-gray-800">
-            Detail Aktivitas
-          </h4>
-        </div>
-        
-        <div className="space-y-1">
-          {Object.entries(details).map(([key, value]) => renderDetailItem(key, value))}
-        </div>
-        
-        {Object.keys(details).length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            <Activity className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>Tidak ada detail tambahan untuk aktivitas ini</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 };
 
 // Enhanced Modal Component with animations
@@ -469,7 +363,7 @@ const LogActivity = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10">
-        {/* Filter Card - Fixed contrast issues */}
+        {/* Filter Card */}
         <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
           <div className="flex items-center space-x-3 mb-6">
             <Filter className="w-6 h-6 text-indigo-600" />
@@ -600,113 +494,113 @@ const LogActivity = () => {
 
 const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
   const { title, loading: titleLoading } = useNewsTitle(log.details?.newsId || log.details?.articleId);
-  
-const getActionDescription = () => {
-  const actionLabel = ACTION_LABELS[log.action] || log.action;
-  const userEmail = log.userEmail || 'Pengguna tidak diketahui';
-  
-  // Gunakan fungsi isAdminUser yang sama untuk semua case
-  const isAdmin = isAdminUser(log.userEmail, log.details);
-  const adminLabel = isAdmin ? ' (Admin)' : '';
 
-  switch (log.action) {
-    case 'PROFILE_UPDATE':
-      return `${userEmail}${adminLabel} memperbarui profil`;
-      
-    case 'LIKE_NEWS':
-      return `${userEmail}${adminLabel} ${
-        log.details.actionType === 'like' ? 'menyukai' : 'membatalkan like pada'
-      } berita "${titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'}"`;
-      
-    case 'SAVE_NEWS':
-      return `${userEmail}${adminLabel} menyimpan berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    case 'UNSAVE_NEWS':
-      return `${userEmail}${adminLabel} batal simpan berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    case 'COMMENT_ADD':
-      return `${userEmail}${adminLabel} menambahkan komentar pada berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    case 'COMMENT_DELETE':
-      return `${userEmail}${adminLabel} menghapus komentar pada berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    case 'SPEED_UPDATE':
-      return `${userEmail}${adminLabel} memperbarui pengaturan kecepatan`;
-      
-    case 'NEWS_ADD':
-      return `${userEmail}${adminLabel} menambahkan berita baru`;
-      
-    case 'EDIT_NEWS':
-      return `${userEmail}${adminLabel} mengedit berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    case 'DELETE_NEWS':
-      return `${userEmail}${adminLabel} menghapus berita "${
-        titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
-      }"`;
-      
-    default:
-      return `${userEmail}${adminLabel} melakukan aksi: ${actionLabel}`;
-  }
-};
+  const getActionDescription = () => {
+    const actionLabel = ACTION_LABELS[log.action] || log.action;
+    const userEmail = log.userEmail || 'Pengguna tidak diketahui';
+    const isAdmin = isAdminUser(log.userEmail, log.details);
+    const adminLabel = isAdmin ? ' (Admin)' : '';
+
+    switch (log.action) {
+      case 'PROFILE_UPDATE':
+        return `${userEmail}${adminLabel} memperbarui profil`;
+      case 'LIKE_NEWS':
+        return `${userEmail}${adminLabel} ${
+          log.details.actionType === 'like' ? 'menyukai' : 'membatalkan like pada'
+        } berita "${titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'}"`;
+      case 'SAVE_NEWS':
+        return `${userEmail}${adminLabel} menyimpan berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      case 'UNSAVE_NEWS':
+        return `${userEmail}${adminLabel} batal simpan berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      case 'COMMENT_ADD':
+        return `${userEmail}${adminLabel} menambahkan komentar pada berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      case 'COMMENT_DELETE':
+        return `${userEmail}${adminLabel} menghapus komentar pada berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      case 'REPLY_COMMENT':
+        return `${userEmail}${adminLabel} membalas komentar dari "${
+          log.details.replyToEmail || 'Anonim'
+        }" pada berita "${titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'}"`;
+      case 'LIKE_COMMENT':
+        return `${userEmail}${adminLabel} ${
+          log.details.actionType === 'like' ? 'menyukai' : 'membatalkan like pada'
+        } komentar di berita "${titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'}"`;
+      case 'SPEED_UPDATE':
+        return `${userEmail}${adminLabel} memperbarui pengaturan kecepatan`;
+      case 'NEWS_ADD':
+        return `${userEmail}${adminLabel} menambahkan berita baru`;
+      case 'EDIT_NEWS':
+        return `${userEmail}${adminLabel} mengedit berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      case 'DELETE_NEWS':
+        return `${userEmail}${adminLabel} menghapus berita "${
+          titleLoading ? 'Memuat judul...' : title || 'Judul tidak tersedia'
+        }"`;
+      default:
+        return `${userEmail}${adminLabel} melakukan aksi: ${actionLabel}`;
+    }
+  };
 
   const getActionIcon = () => {
     switch (log.action) {
       case 'LIKE_NEWS':
-        return '❤️';
+        return <Heart className="w-5 h-5 text-red-500" />;
       case 'SAVE_NEWS':
-        return '📌';
+        return <Bookmark className="w-5 h-5 text-blue-500" />;
       case 'UNSAVE_NEWS':
-        return '📌';
-        case 'COMMENT_ADD':
-        return '💬';
+        return <BookmarkX className="w-5 h-5 text-gray-500" />;
+      case 'COMMENT_ADD':
+        return <MessageSquare className="w-5 h-5 text-green-500" />;
       case 'COMMENT_DELETE':
-        return '🗑️';
+        return <Trash2 className="w-5 h-5 text-red-500" />;
+      case 'REPLY_COMMENT':
+        return <MessageCircle className="w-5 h-5 text-green-600" />;
+      case 'LIKE_COMMENT':
+        return <Heart className="w-5 h-5 text-red-400" />;
       case 'NEWS_ADD':
-        return '➕';
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
       case 'EDIT_NEWS':
-        return '✏️';
+        return <Edit3 className="w-5 h-5 text-blue-500" />;
       case 'DELETE_NEWS':
-        return '🗑️';
+        return <Trash2 className="w-5 h-5 text-red-500" />;
       case 'PROFILE_UPDATE':
-        return '👤';
+        return <User className="w-5 h-5 text-blue-500" />;
       case 'SPEED_UPDATE':
-        return '⚡';
+        return <Activity className="w-5 h-5 text-purple-500" />;
       case 'NOTIFICATION_ADD':
-        return '🔔';
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
       case 'NOTIFICATION_SENT':
-        return '📨';
+        return <MessageSquare className="w-5 h-5 text-blue-500" />;
       case 'VIEWS_UPDATED':
-        return '👁️';
+        return <Eye className="w-5 h-5 text-blue-500" />;
       case 'DATA_EXPORT':
-        return '📤';
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
       case 'DATA_IMPORT':
-        return '📥';
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
       case 'BACKUP_CREATED':
-        return '💾';
+        return <PlusCircle className="w-5 h-5 text-green-500" />;
       case 'SYSTEM_MAINTENANCE':
-        return '🔧';
+        return <Activity className="w-5 h-5 text-gray-500" />;
       case 'USER_ADD':
-        return '👥';
+        return <User className="w-5 h-5 text-green-500" />;
       case 'USER_EDIT':
-        return '✏️';
+        return <Edit3 className="w-5 h-5 text-blue-500" />;
       case 'USER_DELETE':
-        return '❌';
+        return <Trash2 className="w-5 h-5 text-red-500" />;
       case 'UNAUTHORIZED_ACCESS':
-        return '🚫';
+        return <AlertCircle className="w-5 h-5 text-red-500" />;
       case 'AUTH_ERROR':
-        return '⚠️';
+        return <AlertCircle className="w-5 h-5 text-red-500" />;
       default:
-        return '📋';
+        return <Activity className="w-5 h-5 text-gray-500" />;
     }
   };
 
@@ -721,6 +615,7 @@ const getActionDescription = () => {
         return 'bg-red-50 border-red-200';
       case 'NEWS_ADD':
       case 'COMMENT_ADD':
+      case 'REPLY_COMMENT':
       case 'USER_ADD':
       case 'NOTIFICATION_ADD':
       case 'NOTIFICATION_SENT':
@@ -732,6 +627,7 @@ const getActionDescription = () => {
       case 'USER_EDIT':
         return 'bg-blue-50 border-blue-200';
       case 'LIKE_NEWS':
+      case 'LIKE_COMMENT':
       case 'SAVE_NEWS':
       case 'UNSAVE_NEWS':
         return 'bg-purple-50 border-purple-200';
@@ -749,23 +645,23 @@ const getActionDescription = () => {
     >
       <div className="flex items-start justify-between">
         <div className="flex items-start space-x-4 flex-1">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-medium border-2 ${getStatusColor()}`}>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center border-2 ${getStatusColor()}`}>
             {getActionIcon()}
           </div>
           
           <div className="flex-1 min-w-0">
-<div className="flex items-center space-x-3 mb-2">
-  <h3 className="text-lg font-semibold text-gray-900 truncate">
-    {ACTION_LABELS[log.action] || log.action}
-  </h3>
-  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-    isAdminUser(log.userEmail, log.details) 
-      ? 'bg-amber-100 text-amber-800' 
-      : 'bg-blue-100 text-blue-800'
-  }`}>
-    {isAdminUser(log.userEmail, log.details) ? 'Admin' : 'User'}
-  </span>
-</div>
+            <div className="flex items-center space-x-3 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 truncate">
+                {ACTION_LABELS[log.action] || log.action}
+              </h3>
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                isAdminUser(log.userEmail, log.details) 
+                  ? 'bg-amber-100 text-amber-800' 
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {isAdminUser(log.userEmail, log.details) ? 'Admin' : 'User'}
+              </span>
+            </div>
             
             <p className="text-gray-700 mb-3 leading-relaxed">
               {getActionDescription()}
@@ -815,12 +711,10 @@ const getActionDescription = () => {
 // Component Enhanced Activity Details dengan UI yang lebih baik
 const EnhancedActivityDetails = ({ details, action }) => {
   const getDetailValue = (key, value) => {
-    // Handle null/undefined/empty values
     if (value === null || value === undefined || value === '') {
       return <span className="text-gray-400 italic">Tidak tersedia</span>;
     }
 
-    // Handle boolean values
     if (typeof value === 'boolean') {
       return (
         <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -831,7 +725,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Handle timestamps
     if (key.toLowerCase().includes('timestamp') || key.toLowerCase().includes('time')) {
       try {
         const date = new Date(value);
@@ -848,7 +741,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       }
     }
 
-    // Handle email addresses
     if (key.toLowerCase().includes('email') && typeof value === 'string' && value.includes('@')) {
       return (
         <div className="flex items-center space-x-2">
@@ -858,7 +750,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Handle IDs
     if (key.toLowerCase().includes('id') && typeof value === 'string') {
       return (
         <span className="font-mono text-sm bg-blue-50 text-blue-700 px-2 py-1 rounded border">
@@ -867,7 +758,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Handle URLs
     if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('www'))) {
       return (
         <a 
@@ -881,7 +771,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Handle objects
     if (typeof value === 'object' && value !== null) {
       return (
         <div className="bg-gray-50 rounded-lg p-3 mt-2">
@@ -892,7 +781,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Handle long strings
     if (typeof value === 'string' && value.length > 100) {
       return (
         <div className="bg-gray-50 rounded-lg p-3 mt-2">
@@ -903,7 +791,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
       );
     }
 
-    // Default handling
     return <span className="break-words">{String(value)}</span>;
   };
 
@@ -914,6 +801,8 @@ const EnhancedActivityDetails = ({ details, action }) => {
       userId: '👤',
       userEmail: '📧',
       commentId: '💬',
+      parentId: '↳',
+      replyToEmail: '📧',
       actionType: '⚡',
       timestamp: '🕒',
       isAdmin: '👑',
@@ -923,7 +812,13 @@ const EnhancedActivityDetails = ({ details, action }) => {
       userAgent: '🖥️',
       deviceInfo: '📱',
       location: '📍',
-      sessionId: '🔗'
+      sessionId: '🔗',
+      content: '📜',
+      text: '📜',
+      title: '📝',
+      category: '🏷️',
+      status: '⚙️',
+      priority: '🔝'
     };
     return iconMap[key] || '📋';
   };
@@ -935,6 +830,8 @@ const EnhancedActivityDetails = ({ details, action }) => {
       userId: 'ID Pengguna',
       userEmail: 'Email Pengguna',
       commentId: 'ID Komentar',
+      parentId: 'ID Komentar Induk',
+      replyToEmail: 'Email Dibalas',
       actionType: 'Jenis Aksi',
       timestamp: 'Waktu',
       isAdmin: 'Status Admin',
@@ -946,6 +843,7 @@ const EnhancedActivityDetails = ({ details, action }) => {
       location: 'Lokasi',
       sessionId: 'ID Sesi',
       content: 'Konten',
+      text: 'Teks Komentar',
       title: 'Judul',
       category: 'Kategori',
       status: 'Status',
@@ -961,16 +859,29 @@ const EnhancedActivityDetails = ({ details, action }) => {
       'UNSAVE_NEWS': <BookmarkX className="w-5 h-5 text-gray-500" />,
       'COMMENT_ADD': <MessageSquare className="w-5 h-5 text-green-500" />,
       'COMMENT_DELETE': <Trash2 className="w-5 h-5 text-red-500" />,
+      'REPLY_COMMENT': <MessageCircle className="w-5 h-5 text-green-600" />,
+      'LIKE_COMMENT': <Heart className="w-5 h-5 text-red-400" />,
       'NEWS_ADD': <PlusCircle className="w-5 h-5 text-green-500" />,
       'EDIT_NEWS': <Edit3 className="w-5 h-5 text-blue-500" />,
       'DELETE_NEWS': <Trash2 className="w-5 h-5 text-red-500" />,
       'PROFILE_UPDATE': <User className="w-5 h-5 text-blue-500" />,
-      'SPEED_UPDATE': <Activity className="w-5 h-5 text-purple-500" />
+      'SPEED_UPDATE': <Activity className="w-5 h-5 text-purple-500" />,
+      'NOTIFICATION_ADD': <PlusCircle className="w-5 h-5 text-green-500" />,
+      'NOTIFICATION_SENT': <MessageSquare className="w-5 h-5 text-blue-500" />,
+      'VIEWS_UPDATED': <Eye className="w-5 h-5 text-blue-500" />,
+      'DATA_EXPORT': <PlusCircle className="w-5 h-5 text-green-500" />,
+      'DATA_IMPORT': <PlusCircle className="w-5 h-5 text-green-500" />,
+      'BACKUP_CREATED': <PlusCircle className="w-5 h-5 text-green-500" />,
+      'SYSTEM_MAINTENANCE': <Activity className="w-5 h-5 text-gray-500" />,
+      'USER_ADD': <User className="w-5 h-5 text-green-500" />,
+      'USER_EDIT': <Edit3 className="w-5 h-5 text-blue-500" />,
+      'USER_DELETE': <Trash2 className="w-5 h-5 text-red-500" />,
+      'UNAUTHORIZED_ACCESS': <AlertCircle className="w-5 h-5 text-red-500" />,
+      'AUTH_ERROR': <AlertCircle className="w-5 h-5 text-red-500" />
     };
     return iconMap[action] || <Activity className="w-5 h-5 text-gray-500" />;
   };
 
-  // Filter out null/undefined/empty details
   const validDetails = Object.entries(details || {}).filter(([key, value]) => 
     value !== null && value !== undefined && value !== ''
   );
@@ -978,7 +889,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
   return (
     <div className="mt-6 animate-slideDown">
       <div className="bg-gradient-to-r from-gray-50 to-blue-50 border border-gray-200 rounded-xl p-6 shadow-sm">
-        {/* Header */}
         <div className="flex items-center space-x-3 mb-6 pb-4 border-b border-gray-200">
           <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
             {getActionIcon()}
@@ -989,7 +899,6 @@ const EnhancedActivityDetails = ({ details, action }) => {
           </div>
         </div>
         
-        {/* Details Grid */}
         {validDetails.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {validDetails.map(([key, value]) => (

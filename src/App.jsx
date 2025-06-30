@@ -4,6 +4,7 @@ import ErrorBoundary from "./component/common/ErrorBoundary";
 import Navbar from "./component/common/navbar";
 import Footer from "./component/common/footer";
 import NewsDetail from "./component/Pages/NewsDetail";
+import NewsList from "./component/config/NewsList";
 import Profile from "./component/common/profile";
 import AdminDashboard from "./component/admin/AdminDashboard";
 import SavedNews from "./component/Pages/SavedNews";
@@ -41,13 +42,15 @@ const App = () => {
           <Route
             path="/"
             element={
-              <div className="container mx-auto px-4">
-                <NewsSection />
-                <HeroSection />
-                <NewsPage />
-                <LiveNewsSection />
-                <LatestNewsSection />
-              </div>
+              <ErrorBoundary>
+                <div className="container mx-auto px-4">
+                  <NewsSection />
+                  <HeroSection />
+                  <NewsPage />
+                  <LiveNewsSection />
+                  <LatestNewsSection />
+                </div>
+              </ErrorBoundary>
             }
           />
           <Route
@@ -59,7 +62,7 @@ const App = () => {
             }
           />
           <Route
-            path="/berita/:id"
+            path="/berita/:slug"
             element={
               <ErrorBoundary>
                 <NewsDetail />

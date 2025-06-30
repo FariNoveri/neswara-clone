@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   collection,
   getDocs,
-  addDoc,
   updateDoc,
   deleteDoc,
   doc,
@@ -14,8 +13,10 @@ import {
   serverTimestamp,
   collectionGroup,
   where,
-  getDoc
+  getDoc,
+  addDoc // Added addDoc import
 } from 'firebase/firestore';
+import { createNews } from './../config/createNews.js';
 import {
   PlusCircle,
   Edit3,
@@ -80,10 +81,8 @@ const AdminDashboard = () => {
     gambarDeskripsi: ''
   });
 
-  // Fungsi untuk menyimpan log aktivitas dengan penanganan undefined
   const logActivity = async (action, details = {}) => {
     try {
-      // Bersihkan data dari nilai undefined
       const cleanedDetails = Object.fromEntries(
         Object.entries(details).filter(([_, value]) => value !== undefined)
       );
@@ -94,8 +93,9 @@ const AdminDashboard = () => {
         action: action,
         details: cleanedDetails,
         timestamp: serverTimestamp(),
-        ipAddress: null // Bisa ditambahkan logika untuk mendapatkan IP jika diperlukan
+        ipAddress: null
       });
+      console.log(`Logged ${action}:`, cleanedDetails);
     } catch (error) {
       console.error('Error logging activity:', error);
     }
@@ -111,26 +111,25 @@ const AdminDashboard = () => {
             const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
             if (isAdmin) {
               setIsAuthorized(true);
-              logActivity('ADMIN_LOGIN', { userEmail: user.email }); // Log login admin
+              await logActivity('ADMIN_LOGIN', { userEmail: user.email });
             } else {
               setIsAuthorized(false);
               setShowUnauthorizedModal(true);
-              logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email }); // Log akses tanpa izin
+              await logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email });
             }
           } else {
             setIsAuthorized(false);
             setShowUnauthorizedModal(true);
-            logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email }); // Log akses tanpa izin
+            await logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email });
           }
         } catch (error) {
           console.error('Error checking user role:', error);
           setShowUnauthorizedModal(true);
-          logActivity('AUTH_ERROR', { userEmail: user?.email, error: error.message }); // Log error otorisasi
+          await logActivity('AUTH_ERROR', { userEmail: user?.email, error: error.message });
         }
       };
       checkAuthorization();
 
-      // Pantau perubahan profil pengguna
       const unsubscribe = auth.onAuthStateChanged((currentUser) => {
         if (currentUser && currentUser.uid === user.uid) {
           if (currentUser.photoURL !== user.photoURL) {
@@ -154,7 +153,7 @@ const AdminDashboard = () => {
   const handleUnauthorizedClose = async () => {
     try {
       await auth.signOut();
-      logActivity('UNAUTHORIZED_LOGOUT', { userEmail: user?.email || null });
+      await logActivity('UNAUTHORIZED_LOGOUT', { userEmail: user?.email || null });
       setShowUnauthorizedModal(false);
       navigate('/');
     } catch (error) {
@@ -166,7 +165,7 @@ const AdminDashboard = () => {
   const handleAdminLogout = async () => {
     try {
       await auth.signOut();
-      logActivity('ADMIN_LOGOUT', { userEmail: user?.email || null });
+      await logActivity('ADMIN_LOGOUT', { userEmail: user?.email || null });
       navigate('/');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -244,9 +243,9 @@ const AdminDashboard = () => {
       }
 
       setNews(newsData);
-
     } catch (error) {
       console.error('Error fetching news:', error);
+      await logActivity('FETCH_NEWS_ERROR', { error: error.message });
     }
     setNewsLoading(false);
   };
@@ -261,6 +260,7 @@ const AdminDashboard = () => {
       }));
     } catch (error) {
       console.error('Error fetching users:', error);
+      await logActivity('FETCH_USERS_ERROR', { error: error.message });
     }
   };
 
@@ -277,6 +277,7 @@ const AdminDashboard = () => {
       if (error.message.includes('index')) {
         console.log('Missing index for comments collection group. Please create it in Firebase Console.');
       }
+      await logActivity('FETCH_COMMENTS_ERROR', { error: error.message });
     }
   };
 
@@ -290,6 +291,7 @@ const AdminDashboard = () => {
       }));
     } catch (error) {
       console.error('Error fetching notifications:', error);
+      await logActivity('FETCH_NOTIFICATIONS_ERROR', { error: error.message });
     }
   };
 
@@ -303,6 +305,7 @@ const AdminDashboard = () => {
       }));
     } catch (error) {
       console.error('Error fetching breaking news:', error);
+      await logActivity('FETCH_BREAKING_NEWS_ERROR', { error: error.message });
     }
   };
 
@@ -313,7 +316,7 @@ const AdminDashboard = () => {
     await fetchComments();
     await fetchNotifications();
     await fetchBreakingNews();
-    logActivity('VIEWS_UPDATED', { totalViews: stats.totalViews || null });
+    await logActivity('VIEWS_UPDATED', { totalViews: stats.totalViews || null });
   };
 
   useEffect(() => {
@@ -337,26 +340,25 @@ const AdminDashboard = () => {
 
     try {
       if (editingNews) {
-        await updateDoc(doc(db, 'news', editingNews.id), {
+        const newsRef = doc(db, 'news', editingNews.id);
+        await updateDoc(newsRef, {
           ...formData,
           updatedAt: serverTimestamp()
         });
-        logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul || null });
+        await logActivity('EDIT_NEWS', { newsId: editingNews.id, title: formData.judul || null });
+        console.log(`Updated news ID: ${editingNews.id}`);
       } else {
-        const docRef = await addDoc(collection(db, 'news'), {
-          ...formData,
-          createdAt: serverTimestamp(),
-          views: 0,
-          komentar: 0
-        });
-        logActivity('ADD_NEWS', { newsId: docRef.id, title: formData.judul || null });
+        const newsId = await createNews(formData);
+        await logActivity('ADD_NEWS', { newsId, title: formData.judul || null, category: formData.kategori || null });
       }
 
       resetForm();
-      fetchNews();
+      await fetchNews();
       setShowModal(false);
     } catch (error) {
       console.error('Error saving news:', error);
+      await logActivity('SAVE_NEWS_ERROR', { error: error.message, title: formData.judul || null });
+      alert(`Gagal menyimpan berita: ${error.message}`);
     }
     setNewsLoading(false);
   };
@@ -368,11 +370,12 @@ const AdminDashboard = () => {
         if (newsDoc.exists()) {
           const newsData = newsDoc.data();
           await deleteDoc(doc(db, 'news', id));
-          logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || null });
-          fetchNews();
+          await logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || null });
+          await fetchNews();
         }
       } catch (error) {
         console.error('Error deleting news:', error);
+        await logActivity('DELETE_NEWS_ERROR', { newsId: id, error: error.message });
       }
     }
   };
@@ -770,6 +773,7 @@ const AdminDashboard = () => {
           handleSubmit={handleSubmit}
           resetForm={resetForm}
           loading={newsLoading}
+          logActivity={logActivity}
         />
 
         <style jsx>{`

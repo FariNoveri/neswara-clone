@@ -4,12 +4,6 @@ import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { Link } from "react-router-dom";
 import { Eye, Clock, User, MessageCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
-// Update untuk LatestNewsSection.jsx - ganti /news menjadi /allnews
-// Di baris 159, ubah:
-// to="/news" 
-// menjadi:
-// to="/allnews"
-
 const AllNews = () => {
   const [newsFromDB, setNewsFromDB] = useState([]);
   const [categorizedNews, setCategorizedNews] = useState({});
@@ -32,6 +26,7 @@ const AllNews = () => {
           views: doc.data().views || 0,
           comments: doc.data().komentar || doc.data().comments || 0,
           createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+          slug: doc.data().slug || doc.id // Add slug, fallback to doc.id
         }));
         
         setNewsFromDB(news);
@@ -158,7 +153,7 @@ const AllNews = () => {
                     </span>
                   </div>
                   <div className="p-4">
-                    <Link to={`/berita/${news.id}`}>
+                    <Link to={`/berita/${news.slug}`}>
                       <h3 className="text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors mb-2 line-clamp-2">
                         {news.title}
                       </h3>

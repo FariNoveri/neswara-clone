@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "../../firebaseconfig";
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
+import { createSlug } from "../config/slug"; // Import createSlug
 
 const LiveNewsSection = () => {
   const [newsList, setNewsList] = useState([]);
@@ -11,6 +13,7 @@ const LiveNewsSection = () => {
   const dragRef = useRef(null);
   const startX = useRef(0);
   const isDragging = useRef(false);
+  const navigate = useNavigate();
 
   // Fetch news from Firebase
   useEffect(() => {
@@ -25,6 +28,7 @@ const LiveNewsSection = () => {
         const newsData = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
+          slug: doc.data().slug, // Include slug
         }));
 
         const formattedNews = newsData.map((item) => ({
@@ -44,7 +48,7 @@ const LiveNewsSection = () => {
           comments: item.komentar || 0,
           views: item.views || 0,
           content: item.ringkasan || item.konten?.substring(0, 120) + "..." || "",
-          link: `/news/${item.id}`,
+          link: `/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`, // Use slug
         }));
 
         setNewsList(formattedNews);
@@ -57,6 +61,11 @@ const LiveNewsSection = () => {
 
     fetchNews();
   }, []);
+
+  const handleNewsClick = (link) => {
+    console.log(`Navigating to: ${link}`);
+    navigate(link);
+  };
 
   const handleNext = () => {
     if (newsList.length > 0) {
@@ -212,6 +221,7 @@ const LiveNewsSection = () => {
               onTouchStart={handleDragStart}
               onTouchMove={handleDragMove}
               onTouchEnd={handleDragEnd}
+              onClick={() => handleNewsClick(newsList[activeIndex].link)}
             >
               <AnimatePresence mode="wait">
                 <motion.div
@@ -355,7 +365,10 @@ const LiveNewsSection = () => {
                       ? "bg-gradient-to-r from-cyan-500/20 to-purple-600/20 border border-cyan-500/50 shadow-lg shadow-cyan-500/25"
                       : "bg-slate-800/50 hover:bg-slate-700/70 border border-transparent"
                   }`}
-                  onClick={() => setActiveIndex(index)}
+                  onClick={() => {
+                    setActiveIndex(index);
+                    handleNewsClick(news.link);
+                  }}
                 >
                   <div className="flex space-x-4">
                     <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">

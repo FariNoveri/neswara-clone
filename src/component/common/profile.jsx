@@ -17,7 +17,11 @@ import {
   FaBookmark,
   FaGoogle,
   FaFacebook,
-  FaInfoCircle
+  FaInfoCircle,
+  FaCog,
+  FaShieldAlt,
+  FaChartBar,
+  FaUsers
 } from "react-icons/fa";
 import {
   auth,
@@ -91,6 +95,8 @@ const validateImageFile = (file, callback) => {
 
 const Profile = () => {
   const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState('user'); // Default role
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -176,6 +182,24 @@ const Profile = () => {
     }
   };
 
+  // Function to check if user is admin
+  const checkAdminStatus = async (userId) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const role = userData.role || 'user';
+        setUserRole(role);
+        setIsAdmin(role === 'admin');
+        return role === 'admin';
+      }
+      return false;
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      return false;
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -196,9 +220,19 @@ const Profile = () => {
             setProfileImageURL(userData.photoURL || user.photoURL || "");
             setPendingEmail(userData.pendingEmail || "");
             setEmailVerificationSent(!!userData.pendingEmail);
+            
+            // Check admin status
+            const role = userData.role || 'user';
+            setUserRole(role);
+            setIsAdmin(role === 'admin');
+          } else {
+            // Check admin status if document doesn't exist
+            await checkAdminStatus(user.uid);
           }
         } catch (error) {
           console.log("Error fetching user data:", error);
+          // Fallback check for admin status
+          await checkAdminStatus(user.uid);
         }
 
         resetTimeout();
@@ -272,6 +306,7 @@ const Profile = () => {
             displayName: sanitizeInput(displayName || user.displayName || ""),
             email: sanitizeInput(user.email),
             photoURL: publicUrl,
+            role: userRole, // Preserve existing role
             updatedAt: new Date().toISOString(),
           },
           { merge: true }
@@ -285,7 +320,7 @@ const Profile = () => {
             type: "photoURL",
             oldValue: profileImageURL || "No previous image",
             newValue: publicUrl,
-            isAdmin: false
+            isAdmin: isAdmin
           },
           timestamp: new Date()
         });
@@ -330,7 +365,7 @@ const Profile = () => {
             type: "displayName",
             oldValue: originalDisplayName,
             newValue: sanitizedDisplayName,
-            isAdmin: false
+            isAdmin: isAdmin
           },
           timestamp: new Date()
         });
@@ -355,6 +390,7 @@ const Profile = () => {
           email: user.email,
           pendingEmail: sanitizedEmail,
           photoURL: profileImageURL,
+          role: userRole, // Preserve existing role
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
@@ -365,7 +401,7 @@ const Profile = () => {
             type: "email",
             oldValue: originalEmail,
             newValue: sanitizedEmail,
-            isAdmin: false
+            isAdmin: isAdmin
           },
           timestamp: new Date()
         });
@@ -377,6 +413,7 @@ const Profile = () => {
           displayName: sanitizedDisplayName,
           email: sanitizedEmail,
           photoURL: profileImageURL,
+          role: userRole, // Preserve existing role
           updatedAt: new Date().toISOString()
         }, { merge: true });
       }
@@ -409,7 +446,7 @@ const Profile = () => {
           userEmail: user.email,
           details: {
             type: "password",
-            isAdmin: false
+            isAdmin: isAdmin
           },
           timestamp: new Date()
         });
@@ -467,7 +504,7 @@ const Profile = () => {
         userEmail: user.email,
         details: {
           email: user.email,
-          isAdmin: false
+          isAdmin: isAdmin
         },
         timestamp: new Date()
       });
@@ -545,6 +582,19 @@ const Profile = () => {
           </div>
         )}
 
+        {/* Admin Badge */}
+        {isAdmin && (
+          <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-sm border border-amber-500/30 text-amber-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
+            <div className="flex items-center space-x-3">
+              <FaShieldAlt className="text-amber-400 text-xl" />
+              <div>
+                <div className="font-bold text-lg">Administrator Account</div>
+                <div className="text-amber-200/80 text-sm">You have administrative privileges on this platform</div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Social Login Info Banner */}
         {isSocialLogin && (
           <div className="bg-blue-500/20 backdrop-blur-sm border border-blue-500/30 text-blue-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
@@ -603,6 +653,12 @@ const Profile = () => {
                 </div>
                 <h2 className="text-2xl font-bold text-white mt-4 text-center">{displayName || "User"}</h2>
                 <p className="text-white/60 text-sm mt-1">{email}</p>
+                {isAdmin && (
+                  <div className="flex items-center space-x-2 mt-2 px-3 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 rounded-full border border-amber-500/30">
+                    <FaShieldAlt className="text-amber-400 text-sm" />
+                    <span className="text-amber-200 text-sm font-medium">Administrator</span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4">
@@ -612,6 +668,16 @@ const Profile = () => {
                     {getLoginMethodIcon(loginMethod)}
                     <span className="text-white font-medium">{getLoginMethodText(loginMethod)}</span>
                   </div>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/60">Account Type</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    isAdmin 
+                      ? 'bg-amber-500/20 text-amber-300' 
+                      : 'bg-blue-500/20 text-blue-300'
+                  }`}>
+                    {isAdmin ? 'Administrator' : 'Regular User'}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/60">Member since</span>
@@ -631,7 +697,22 @@ const Profile = () => {
                     {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString() : 'N/A'}
                   </span>
                 </div>
-                <div className="pt-4 border-t border-white/10">
+                
+                <div className="pt-4 border-t border-white/10 space-y-3">
+                  {/* Admin Dashboard Button - Only visible to admins */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => navigate('/admin')}
+                      className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700"
+                    >
+                      <span className="font-medium">Admin Dashboard</span>
+                      <div className="flex items-center space-x-2">
+                        <FaShieldAlt className="text-lg group-hover:animate-bounce" />
+                        <FaChartBar className="text-lg group-hover:animate-pulse" />
+                      </div>
+                    </button>
+                  )}
+                  
                   <button
                     onClick={() => navigate('/liked')}
                     className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700"
@@ -639,7 +720,7 @@ const Profile = () => {
                     <span className="font-medium">Go to Liked News</span>
                     <FaHeart className="text-lg group-hover:animate-bounce" />
                   </button>
-                  <br />
+                  
                   <button
                     onClick={() => navigate('/saved')}
                     className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100"
@@ -654,249 +735,268 @@ const Profile = () => {
 
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-white">Account Information</h3>
-                  <p className="text-white/60 mt-1">Update your personal details</p>
-                </div>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold text-white flex items-center">
+                  <FaUser className="mr-3 text-purple-400" />
+                  Account Information
+                </h3>
                 {!isEditing ? (
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="bg-gradient-to-r from-purple-500 to-blue-500 text-white px-6 py-3 rounded-full hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2"
+                    className="group flex items-center px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
                   >
-                    <FaEdit />
-                    <span>Edit Profile</span>
+                    <FaEdit className="mr-2 group-hover:animate-bounce" />
+                    Edit Profile
                   </button>
-                ) : null}
+                ) : (
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={handleSaveProfile}
+                      className="group flex items-center px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
+                    >
+                      <FaSave className="mr-2 group-hover:animate-bounce" />
+                      Save Changes
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="group flex items-center px-4 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
+                    >
+                      <FaTimes className="mr-2 group-hover:animate-bounce" />
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
 
               <form onSubmit={handleSaveProfile} className="space-y-6">
-                <div className="group">
-                  <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
-                    <FaUser className="mr-2 text-purple-400" />
+                {/* Display Name Field */}
+                <div className="space-y-2">
+                  <label className="block text-white/80 font-medium">
+                    <FaUser className="inline mr-2 text-purple-400" />
                     Display Name
                   </label>
                   <input
                     type="text"
                     value={displayName}
-                    onChange={(e) => setDisplayName(sanitizeInput(e.target.value))}
+                    onChange={(e) => setDisplayName(e.target.value)}
                     disabled={!isEditing}
-                    className={`w-full px-6 py-4 bg-white/5 backdrop-blur-sm border rounded-2xl text-white placeholder-white/40 transition-all duration-300 ${
-                      isEditing 
-                        ? 'border-white/20 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30' 
-                        : 'border-white/10 cursor-not-allowed opacity-60'
-                    }`}
+                    className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter your display name"
+                    required
                   />
                 </div>
 
-                <div className="group">
-                  <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
-                    <FaEnvelope className="mr-2 text-purple-400" />
+                {/* Email Field */}
+                <div className="space-y-2">
+                  <label className="block text-white/80 font-medium">
+                    <FaEnvelope className="inline mr-2 text-purple-400" />
                     Email Address
                   </label>
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(sanitizeInput(e.target.value))}
+                    onChange={(e) => setEmail(e.target.value)}
                     disabled={!isEditing}
-                    className={`w-full px-6 py-4 bg-white/5 backdrop-blur-sm border rounded-2xl text-white placeholder-white/40 transition-all duration-300 ${
-                      isEditing 
-                        ? 'border-white/20 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30' 
-                        : 'border-white/10 cursor-not-allowed opacity-60'
-                    }`}
-                    placeholder="Enter your email"
+                    className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Enter your email address"
+                    required
                   />
-                  {pendingEmail && (
-                    <p className="text-yellow-200 text-xs mt-2">
-                      Pending email: {pendingEmail} (awaiting verification)
-                    </p>
-                  )}
                 </div>
 
+                {/* Password Section - Only show when editing */}
                 {isEditing && (
-                  <div className="space-y-6 border-t border-white/10 pt-6">
+                  <div className="space-y-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10">
                     <h4 className="text-lg font-semibold text-white flex items-center">
                       <FaKey className="mr-2 text-purple-400" />
-                      Security Settings
+                      Password Settings
                     </h4>
-                    
-{isSocialLogin && (
-                      <div className="bg-blue-500/10 backdrop-blur-sm border border-blue-500/20 rounded-2xl p-4 mb-4">
-                        <div className="flex items-start space-x-3">
-                          <FaInfoCircle className="text-blue-400 mt-0.5 flex-shrink-0" />
-                          <div className="text-sm text-blue-200">
-                            <div className="font-medium mb-1">Akun Login Sosial Terdeteksi</div>
-                            <div className="text-blue-200/80">
-                              Untuk mengubah email atau password, gunakan password yang sama dengan akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda. 
-                              Jika Anda belum pernah mengatur password di akun {loginMethod === 'google' ? 'Google' : 'Facebook'}, 
-                              silakan buat password terlebih dahulu melalui pengaturan akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda.
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <p className="text-white/60 text-sm">
+                      {isSocialLogin 
+                        ? "Use your Google/Facebook account password to authenticate changes."
+                        : "Leave password fields empty if you don't want to change your password."
+                      }
+                    </p>
 
-                    <div className="group">
-                      <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
-                        <FaKey className="mr-2 text-purple-400" />
-                        Current Password
-                        {isSocialLogin && <span className="text-xs text-blue-300 ml-2">(Password akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda)</span>}
-                      </label>
+                    {/* Current Password */}
+                    <div className="space-y-2">
+                      <label className="block text-white/80 font-medium">Current Password</label>
                       <div className="relative">
                         <input
                           type={showCurrentPassword ? "text" : "password"}
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
-                          placeholder={isSocialLogin ? `Masukkan password akun ${loginMethod === 'google' ? 'Google' : 'Facebook'} Anda` : "Enter your current password"}
+                          className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
+                          placeholder="Enter current password"
                         />
                         <button
                           type="button"
                           onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                          className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
                         >
                           {showCurrentPassword ? <FaEyeSlash /> : <FaEye />}
                         </button>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="group">
-                        <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
-                          <FaKey className="mr-2 text-purple-400" />
-                          New Password
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showNewPassword ? "text" : "password"}
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
-                            placeholder="Enter new password (optional)"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowNewPassword(!showNewPassword)}
-                            className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
-                          >
-                            {showNewPassword ? <FaEyeSlash /> : <FaEye />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="group">
-                        <label className="block text-white/80 text-sm font-medium mb-3 flex items-center">
-                          <FaKey className="mr-2 text-purple-400" />
-                          Confirm New Password
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showConfirmPassword ? "text" : "password"}
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full px-6 py-4 bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl text-white placeholder-white/40 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 hover:border-white/30 transition-all duration-300 pr-12"
-                            placeholder="Confirm new password"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
-                          >
-                            {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
-                          </button>
-                        </div>
+                    {/* New Password */}
+                    <div className="space-y-2">
+                      <label className="block text-white/80 font-medium">New Password</label>
+                      <div className="relative">
+                        <input
+                          type={showNewPassword ? "text" : "password"}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
+                          placeholder="Enter new password (min 6 characters)"
+                          minLength="6"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                        >
+                          {showNewPassword ? <FaEyeSlash /> : <FaEye />}
+                        </button>
                       </div>
                     </div>
-                  </div>
-                )}
 
-                {isEditing && (
-                  <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-white/10">
-                    <button
-                      type="submit"
-                      className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white px-8 py-4 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2 font-medium"
-                    >
-                      <FaSave />
-                      <span>Save Changes</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelEdit}
-                      className="flex-1 bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-2xl hover:bg-white/20 transition-all duration-300 border border-white/20 hover:border-white/30 flex items-center justify-center space-x-2 font-medium"
-                    >
-                      <FaTimes />
-                      <span>Cancel</span>
-                    </button>
+                    {/* Confirm Password */}
+                    <div className="space-y-2">
+                      <label className="block text-white/80 font-medium">Confirm New Password</label>
+                      <div className="relative">
+                        <input
+                          type={showConfirmPassword ? "text" : "password"}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
+                          placeholder="Confirm new password"
+                          minLength="6"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                        >
+                          {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </form>
             </div>
 
-            {/* Danger Zone */}
-            <div className="bg-red-500/10 backdrop-blur-md rounded-3xl p-8 border border-red-500/20 hover:border-red-500/30 transition-all duration-500">
-              <div className="flex items-center mb-6">
-                <FaExclamationTriangle className="text-red-400 text-2xl mr-4" />
-                <div>
-                  <h3 className="text-2xl font-bold text-white">Danger Zone</h3>
-                  <p className="text-white/60 mt-1">Irreversible and destructive actions</p>
-                </div>
-              </div>
+            {/* Account Actions */}
+            <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
+              <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
+                <FaCog className="mr-3 text-purple-400" />
+                Account Actions
+              </h3>
 
               <div className="space-y-4">
-                <div className="bg-red-500/10 backdrop-blur-sm border border-red-500/20 rounded-2xl p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                    <div className="mb-4 sm:mb-0">
-                      <h4 className="text-lg font-semibold text-white mb-2">Delete Account</h4>
-                      <p className="text-white/60 text-sm">
-                        Permanently delete your account and all of your content. This action is not reversible, so please continue with caution.
-                      </p>
-                    </div>
-                    <button
-                      onClick={handleDeleteAccount}
-                      disabled={deleting}
-                      className="bg-gradient-to-r from-red-500 to-red-600 text-white px-6 py-3 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed min-w-fit"
-                    >
-                      {deleting ? (
-                        <>
-                          <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                          <span>Deleting...</span>
-                        </>
-                      ) : (
-                        <>
-                          <FaTrash />
-                          <span>Delete Account</span>
-                        </>
-                      )}
-                    </button>
+                {/* Sign Out Button */}
+                <button
+                  onClick={() => {
+                    signOut(auth)
+                      .then(() => {
+                        navigate('/');
+                      })
+                      .catch((error) => {
+                        console.error("Error signing out:", error);
+                        setError("Failed to sign out: " + error.message);
+                      });
+                  }}
+                  className="group w-full flex items-center justify-between px-6 py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"
+                >
+                  <div className="flex items-center">
+                    <FaSignOutAlt className="mr-3 text-lg group-hover:animate-bounce" />
+                    <span className="font-medium">Sign Out</span>
                   </div>
-                </div>
+                  <div className="text-sm opacity-75">Log out of your account</div>
+                </button>
 
-                <div className="bg-orange-500/10 backdrop-blur-sm border border-orange-500/20 rounded-2xl p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                    <div className="mb-4 sm:mb-0">
-                      <h4 className="text-lg font-semibold text-white mb-2">Sign Out</h4>
-                      <p className="text-white/60 text-sm">
-                        Sign out of your account on this device. You can always sign back in.
-                      </p>
+                {/* Delete Account Button */}
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleting}
+                  className="group w-full flex items-center justify-between px-6 py-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center">
+                    {deleting ? (
+                      <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full mr-3"></div>
+                    ) : (
+                      <FaTrash className="mr-3 text-lg group-hover:animate-bounce" />
+                    )}
+                    <span className="font-medium">
+                      {deleting ? "Deleting Account..." : "Delete Account"}
+                    </span>
+                  </div>
+                  <div className="flex items-center">
+                    <FaExclamationTriangle className="mr-2 text-yellow-400" />
+                    <div className="text-sm opacity-75">Permanent action</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Warning for account deletion */}
+              <div className="mt-6 p-4 bg-red-500/20 backdrop-blur-sm border border-red-500/30 rounded-2xl">
+                <div className="flex items-start space-x-3">
+                  <FaExclamationTriangle className="text-red-400 mt-1 flex-shrink-0" />
+                  <div>
+                    <div className="font-medium text-red-200 mb-1">Warning</div>
+                    <div className="text-sm text-red-200/80">
+                      Deleting your account will permanently remove all your data, including liked and saved news, 
+                      profile information, and activity history. This action cannot be undone.
                     </div>
-                    <button
-                      onClick={() => {
-                        signOut(auth).then(() => {
-                          navigate('/');
-                        }).catch((error) => {
-                          setError("Error signing out: " + error.message);
-                        });
-                      }}
-                      className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-6 py-3 rounded-2xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center space-x-2 font-medium min-w-fit"
-                    >
-                      <FaSignOutAlt />
-                      <span>Sign Out</span>
-                    </button>
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Admin-only Quick Actions */}
+            {isAdmin && (
+              <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-md rounded-3xl p-8 border border-amber-500/30 hover:border-amber-500/50 transition-all duration-500">
+                <h3 className="text-2xl font-bold text-amber-200 mb-6 flex items-center">
+                  <FaShieldAlt className="mr-3 text-amber-400" />
+                  Administrator Quick Actions
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    onClick={() => navigate('/admin')}
+                    className="group flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"
+                  >
+                    <div className="flex items-center">
+                      <FaChartBar className="mr-3 text-lg group-hover:animate-bounce" />
+                      <span className="font-medium">Dashboard</span>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => navigate('/admin/users')}
+                    className="group flex items-center justify-between px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"
+                  >
+                    <div className="flex items-center">
+                      <FaUsers className="mr-3 text-lg group-hover:animate-bounce" />
+                      <span className="font-medium">User Management</span>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="mt-4 p-4 bg-amber-500/20 backdrop-blur-sm border border-amber-500/30 rounded-2xl">
+                  <div className="flex items-start space-x-3">
+                    <FaInfoCircle className="text-amber-400 mt-1 flex-shrink-0" />
+                    <div>
+                      <div className="font-medium text-amber-200 mb-1">Administrator Privileges</div>
+                      <div className="text-sm text-amber-200/80">
+                        As an administrator, you have access to user management, system analytics, 
+                        breaking news management, and activity monitoring features.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

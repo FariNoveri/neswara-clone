@@ -20,21 +20,28 @@ const NewsModal = ({
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, gambar: reader.result })); // Simpan sebagai base64
+        setFormData(prev => ({ ...prev, gambar: reader.result }));
       };
       reader.readAsDataURL(file);
     }
   };
 
   const handleSubmitWithLog = async () => {
-    await handleSubmit();
-    if (!loading) { // Pastikan submit berhasil sebelum logging
-      const action = editingNews ? 'NEWS_EDIT' : 'NEWS_ADD';
-      logActivity(action, { 
-        newsId: editingNews?.id || 'new', 
-        title: formData.judul, 
-        category: formData.kategori 
-      });
+    try {
+      await handleSubmit(); // Save news via createNews or updateDoc
+      if (!loading) {
+        const action = editingNews ? 'NEWS_EDIT' : 'NEWS_ADD';
+        await logActivity(action, { 
+          newsId: editingNews?.id || 'new', 
+          title: formData.judul, 
+          category: formData.kategori 
+        });
+      }
+      setShowModal(false); // Close modal on success
+      resetForm(); // Reset form
+    } catch (error) {
+      console.error('Error submitting news:', error);
+      alert(`Gagal menyimpan berita: ${error.message}`);
     }
   };
 
@@ -64,7 +71,7 @@ const NewsModal = ({
               type="text"
               required
               value={formData.judul}
-              onChange={(e) => setFormData(prev => ({...prev, judul: e.target.value}))}
+              onChange={(e) => setFormData(prev => ({ ...prev, judul: e.target.value }))}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="Masukkan judul berita..."
             />
@@ -77,7 +84,7 @@ const NewsModal = ({
             <select
               required
               value={formData.kategori}
-              onChange={(e) => setFormData(prev => ({...prev, kategori: e.target.value}))}
+              onChange={(e) => setFormData(prev => ({ ...prev, kategori: e.target.value }))}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
             >
               <option value="">Pilih Kategori</option>
@@ -100,7 +107,7 @@ const NewsModal = ({
               type="text"
               required
               value={formData.author}
-              onChange={(e) => setFormData(prev => ({...prev, author: e.target.value}))}
+              onChange={(e) => setFormData(prev => ({ ...prev, author: e.target.value }))}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="Nama penulis..."
             />
@@ -113,7 +120,7 @@ const NewsModal = ({
             <input
               type="url"
               value={formData.gambar}
-              onChange={(e) => setFormData(prev => ({...prev, gambar: e.target.value}))}
+              onChange={(e) => setFormData(prev => ({ ...prev, gambar: e.target.value }))}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="https://example.com/image.jpg"
             />
@@ -150,7 +157,7 @@ const NewsModal = ({
             </label>
             <textarea
               value={formData.ringkasan}
-              onChange={(e) => setFormData(prev => ({...prev, ringkasan: e.target.value}))}
+              onChange={(e) => setFormData(prev => ({ ...prev, ringkasan: e.target.value }))}
               rows="3"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="Ringkasan singkat berita..."

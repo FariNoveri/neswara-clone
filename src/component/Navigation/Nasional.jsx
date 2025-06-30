@@ -124,7 +124,7 @@ const Nasional = () => {
             )}
             {news.slice(1, 7).map((item, index) => (
               <article key={item.id || index} className="group cursor-pointer">
-                <Link to={`/berita/${item.id}`}>
+                <Link to={`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`}>
                   <div className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group-hover:-translate-y-1">
                     <div className="relative overflow-hidden">
                       <img

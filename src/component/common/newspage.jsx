@@ -4,6 +4,17 @@ import { db } from "../../firebaseconfig";
 import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 
+// Utility function to create a slug from a title
+const createSlug = (title) => {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim('-');
+};
+
 const NewsPage = () => {
   const [newsData, setNewsData] = useState([]);
   const [popularNews, setPopularNews] = useState([]);
@@ -29,6 +40,7 @@ const NewsPage = () => {
           comments: doc.data().comments || doc.data().komentar || 0,
           createdAt: doc.data().createdAt?.toDate?.() || new Date(),
           featured: doc.data().featured || false,
+          slug: doc.data().slug, // Include slug field
         }));
         setNewsData(posts);
         setLoading(false);
@@ -48,6 +60,7 @@ const NewsPage = () => {
           title: doc.data().title || doc.data().judul || "Judul tidak tersedia",
           views: doc.data().views || 0,
           createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+          slug: doc.data().slug, // Include slug field
         }));
         setPopularNews(popular);
       },
@@ -159,7 +172,10 @@ const NewsPage = () => {
                           </span>
                         )}
                       </div>
-                      <Link to={`/berita/${news.id}`}>
+                      <Link
+                        to={`/berita/${news.slug || createSlug(news.judul || news.title || 'untitled')}`}
+                        onClick={() => console.log(`Navigating to: /berita/${news.slug || createSlug(news.judul || news.title || 'untitled')}`)}
+                      >
                         <h2 className="text-xl font-bold text-gray-800 hover:text-blue-600 transition-colors mb-2 line-clamp-2">
                           {news.title}
                         </h2>
@@ -226,7 +242,10 @@ const NewsPage = () => {
                           {item.views}
                         </span>
                       </div>
-                      <Link to={`/berita/${item.id}`}>
+                      <Link
+                        to={`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`}
+                        onClick={() => console.log(`Navigating to: /berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`)}
+                      >
                         <h4 className="text-base font-bold text-gray-800 hover:text-blue-600 transition-colors line-clamp-2">
                           {item.title}
                         </h4>
@@ -238,7 +257,7 @@ const NewsPage = () => {
               )}
             </div>
 
-            {/* Newsletter (ganti sponsor) */}
+            {/* Newsletter */}
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="text-xl font-bold text-gray-800 mb-4">Langganan Newsletter</h3>
               <p className="text-sm text-gray-600 mb-4">Dapatkan berita terbaru langsung di inbox Anda.</p>

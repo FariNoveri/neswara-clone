@@ -4,6 +4,17 @@ import { collection, getDocs, orderBy, query, limit } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Clock, User, MessageCircle } from "lucide-react";
 
+// Utility function to create a slug from a title
+const createSlug = (title) => {
+  if (!title) return "";
+  return title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim('-');
+};
+
 const LatestNewsSection = () => {
   const [newsFromDB, setNewsFromDB] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +37,7 @@ const LatestNewsSection = () => {
           views: doc.data().views || 0,
           comments: doc.data().komentar || doc.data().comments || 0,
           createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+          slug: doc.data().slug, // Include slug field
         }));
         setNewsFromDB(news);
       } catch (error) {
@@ -88,7 +100,10 @@ const LatestNewsSection = () => {
                   </span>
                 </div>
                 <div className="p-4">
-                  <Link to={`/berita/${news.id}`}>
+                  <Link
+                    to={`/berita/${news.slug || createSlug(news.judul || news.title || 'untitled')}`}
+                    onClick={() => console.log(`Navigating to: /berita/${news.slug || createSlug(news.judul || news.title || 'untitled')}`)}
+                  >
                     <h3 className="text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors mb-2 line-clamp-2">
                       {news.title}
                     </h3>
@@ -121,7 +136,7 @@ const LatestNewsSection = () => {
                   <div
                     key={idx}
                     className="flex items-start space-x-3 pb-2 border-b border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer"
-                    onClick={() => navigate(`/berita/${item.id}`)}
+                    onClick={() => navigate(`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`)}
                   >
                     <img
                       src={item.image}
@@ -131,7 +146,10 @@ const LatestNewsSection = () => {
                       onError={(e) => (e.target.src = "https://source.unsplash.com/600x400/?news")}
                     />
                     <div className="flex-1">
-                      <Link to={`/berita/${item.id}`}>
+                      <Link
+                        to={`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`}
+                        onClick={() => console.log(`Navigating to: /berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`)}
+                      >
                         <p className="text-sm font-medium text-gray-800 hover:text-blue-600 transition-colors line-clamp-2">
                           {item.title}
                         </p>

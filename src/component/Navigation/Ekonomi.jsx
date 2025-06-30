@@ -66,7 +66,7 @@ const Ekonomi = () => {
 
     if (!user) {
       console.log("User not authenticated, skipping view update");
-      navigate(`/berita/${newsId}`);
+      navigate(`/berita/${item.slug || createSlug(item.judul || item.title || 'untitled')}`);
       return;
     }
 
