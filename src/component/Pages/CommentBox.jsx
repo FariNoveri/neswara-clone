@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle } from "lucide-react";
+import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle, Edit2 } from "lucide-react";
 import { db } from "../../firebaseconfig";
 import { 
   collection, 
@@ -13,7 +13,8 @@ import {
   serverTimestamp, 
   setDoc,
   getDocs,
-  getDoc
+  getDoc,
+  updateDoc
 } from "firebase/firestore";
 import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
@@ -51,6 +52,28 @@ const Modal = ({ isOpen, onClose, children, title }) => {
     </div>
   );
 };
+
+// Admin Info Modal
+const AdminInfoModal = ({ isOpen, onClose }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Informasi Admin">
+    <div className="text-center space-y-4">
+      <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto">
+        <svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5.121 18.879A3 3 0 018 16h8a3 3 0 012.879 2.879M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+      </div>
+      <div>
+        <p className="text-slate-700 mb-2">Ini adalah admin yang bertugas untuk mengelola dan memoderasi komentar agar diskusi tetap hormat dan menarik.</p>
+      </div>
+      <button
+        onClick={onClose}
+        className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded-lg transition-colors"
+      >
+        Mengerti
+      </button>
+    </div>
+  </Modal>
+);
 
 // Spam Warning Modal
 const SpamWarningModal = ({ isOpen, onClose, remainingTime }) => (
@@ -98,6 +121,60 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, isDeleting, commentTex
           {isDeleting ? "Menghapus..." : "Hapus"}
         </button>
       </div>
+    </div>
+  </Modal>
+);
+
+// Edit Comment Modal
+const EditCommentModal = ({ isOpen, onClose, onSubmit, isSubmitting, commentText }) => {
+  const [editedText, setEditedText] = useState(commentText);
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Komentar">
+      <div className="space-y-4">
+        <textarea
+          className="w-full p-3 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
+          rows="4"
+          value={editedText}
+          onChange={(e) => setEditedText(e.target.value)}
+          maxLength={500}
+          disabled={isSubmitting}
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500">{editedText.length}/500</span>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+            >
+              Batal
+            </button>
+            <button
+              onClick={() => onSubmit(editedText)}
+              disabled={isSubmitting || editedText.trim() === "" || editedText === commentText}
+              className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isSubmitting ? "Menyimpan..." : "Simpan"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// Original Comment Modal
+const OriginalCommentModal = ({ isOpen, onClose, originalText }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Komentar Asli">
+    <div className="space-y-4">
+      <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200">{originalText || 'Komentar asli tidak tersedia.'}</p>
+      <button
+        onClick={onClose}
+        className="w-full bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded-lg transition-colors"
+      >
+        Tutup
+      </button>
     </div>
   </Modal>
 );
@@ -241,18 +318,39 @@ const useCommentAvatar = (cmt, logSecurityEvent) => {
 };
 
 // Comment Component
-const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo }) => {
+const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, highlightedComment, setHighlightedComment, sanitizeInput, formatTimeAgo, commentRefs }) => {
   const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
   const isOwner = cmt.userId === currentUser?.uid;
   const canDelete = isAdmin || isOwner;
+  const canEdit = (isAdmin || isOwner) && cmt.createdAt && (Date.now() - cmt.createdAt.toDate().getTime()) < 300000; // 5 minutes
   const likes = commentLikes[cmt.id] || { count: 0, userLiked: currentUser ? !!currentUser.uid : false };
   const isReported = reportedComments[cmt.id] || false;
   const { renderAvatar } = useCommentAvatar(cmt, logSecurityEvent);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const commentRef = useRef(null);
+
+  // Register this comment's ref
+  useEffect(() => {
+    commentRefs.current[cmt.id] = commentRef;
+  }, [cmt.id, commentRefs]);
+
+  const handleReplyBadgeClick = () => {
+    if (cmt.parentId && commentRefs.current[cmt.parentId]) {
+      commentRefs.current[cmt.parentId].current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedComment(cmt.parentId);
+      setTimeout(() => setHighlightedComment(null), 1000); // Clear highlight after 1s
+      logSecurityEvent('REPLY_BADGE_CLICK', { commentId: cmt.id, parentId: cmt.parentId });
+    }
+  };
 
   return (
-    <div key={cmt.id} className={`space-y-4`}>
+    <div key={cmt.id} className={`space-y-4`} ref={commentRef}>
+      <AdminInfoModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+      />
       <div
-        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
+        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''} ${cmt.id === focusedComment && cmt.id === highlightedComment ? 'animate-pulse border-cyan-500' : ''}`}
         onMouseEnter={() => setFocusedComment(cmt.id)}
         onMouseLeave={() => setFocusedComment(null)}
       >
@@ -262,14 +360,26 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-slate-800">{sanitizeInput(cmt.author || "User")}</span>
-                {isAdmin && cmt.userId === currentUser?.uid && (
-                  <span className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full">Admin</span>
+                {ADMIN_EMAILS.includes(cmt.userEmail) && (
+                  <button
+                    onClick={() => setIsAdminModalOpen(true)}
+                    className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full hover:from-purple-600 hover:to-pink-600 transition-colors"
+                    aria-label="Lihat informasi admin"
+                  >
+                    Admin
+                  </button>
                 )}
                 {isOwner && (
                   <span className="text-xs bg-slate-400 text-white px-2 py-0.5 rounded-full">(You)</span>
                 )}
                 {cmt.parentId && cmt.replyToAuthor && (
-                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Membalas {sanitizeInput(cmt.replyToAuthor)}</span>
+                  <button
+                    onClick={handleReplyBadgeClick}
+                    className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                    aria-label={`Lihat komentar yang dibalas oleh ${sanitizeInput(cmt.replyToAuthor)}`}
+                  >
+                    Membalas {sanitizeInput(cmt.replyToAuthor)}
+                  </button>
                 )}
               </div>
               <span className="text-xs text-slate-500">{formatTimeAgo(cmt.createdAt)}</span>
@@ -295,10 +405,30 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
+            {canEdit && (
+              <button
+                onClick={() => handleEditClick(cmt.id, cmt.text)}
+                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                title="Edit komentar"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
         <div className="mb-4">
-          <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">{sanitizeInput(cmt.text)}</p>
+          <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+            {sanitizeInput(cmt.text)}
+            {cmt.isEdited && (
+              <button
+                onClick={() => handleShowOriginalClick(cmt.id, cmt.originalText)}
+                className="text-xs text-slate-500 italic ml-2 hover:text-slate-700"
+                aria-label="Lihat komentar asli"
+              >
+                (edited)
+              </button>
+            )}
+          </p>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -324,7 +454,9 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
           </div>
         </div>
         {replyTo && replyTo.id === cmt.id && (
-          <div className="mt-4 p-4 bg-slate-50 rounded-lg">
+          <div
+            className="mt-4 p-4 bg-slate-50 rounded-lg transform transition-all duration-300 scale-95 opacity-0 animate-[scaleIn_0.3s_ease-out_forwards]"
+          >
             <div className="space-y-3">
               <textarea
                 className="w-full p-3 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
@@ -383,11 +515,16 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               handleReplyClick={handleReplyClick}
               handleDeleteClick={handleDeleteClick}
               handleReportClick={handleReportClick}
+              handleEditClick={handleEditClick}
+              handleShowOriginalClick={handleShowOriginalClick}
               logSecurityEvent={logSecurityEvent}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
+              highlightedComment={highlightedComment}
+              setHighlightedComment={setHighlightedComment}
               sanitizeInput={sanitizeInput}
               formatTimeAgo={formatTimeAgo}
+              commentRefs={commentRefs}
             />
           ))}
         </div>
@@ -408,11 +545,18 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [replyComment, setReplyComment] = useState("");
   const [commentLikes, setCommentLikes] = useState({});
   const [reportedComments, setReportedComments] = useState({});
-
-  // Modal states
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
-  const [reportModal, setReportModal] = useState({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
+  const [highlightedComment, setHighlightedComment] = useState(null);
+  const [editModal, setEditModal] = useState({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
+  const [originalCommentModal, setOriginalCommentModal] = useState({ isOpen: false, originalText: '' });
   const [spamWarning, setSpamWarning] = useState({ isOpen: false, remainingTime: 0 });
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
+  const [reportModal, setReportModal] = useState({
+    isOpen: false,
+    commentId: null,
+    isSubmitting: false,
+    commentText: ''
+  });
+  const commentRefs = useRef({});
 
   // Input sanitization
   const sanitizeInput = (input) => {
@@ -587,7 +731,8 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         photoURL: currentUser.photoURL || null,
         createdAt: serverTimestamp(),
         parentId: parentId || null,
-        ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) })
+        ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) }),
+        isEdited: false
       });
 
       if (parentId) {
@@ -611,6 +756,130 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleEditClick = (commentId, commentText) => {
+    if (!currentUser) {
+      setError("Silakan masuk untuk mengedit komentar.");
+      toast.error("Silakan masuk untuk mengedit komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-no-user'
+      });
+      logSecurityEvent('UNAUTHENTICATED_EDIT_ATTEMPT', { commentId });
+      return;
+    }
+
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) {
+      setError("Komentar tidak ditemukan.");
+      toast.error("Komentar tidak ditemukan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-not-found'
+      });
+      logSecurityEvent('EDIT_NONEXISTENT_COMMENT', { commentId });
+      return;
+    }
+
+    const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+    const isOwner = comment.userId === currentUser.uid;
+    const withinTimeLimit = comment.createdAt && (Date.now() - comment.createdAt.toDate().getTime()) < 300000;
+
+    if (!isAdmin && !isOwner) {
+      setError("Anda tidak memiliki izin untuk mengedit komentar ini.");
+      toast.error("Anda tidak memiliki izin untuk mengedit komentar ini.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-no-permission'
+      });
+      logSecurityEvent('UNAUTHORIZED_EDIT_ATTEMPT', { commentId, userId: currentUser.uid, commentUserId: comment.userId });
+      return;
+    }
+
+    if (!withinTimeLimit) {
+      setError("Batas waktu 5 menit untuk mengedit komentar telah berlalu.");
+      toast.error("Batas waktu 5 menit untuk mengedit komentar telah berlalu.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-time-limit'
+      });
+      logSecurityEvent('EDIT_TIME_LIMIT_EXCEEDED', { commentId });
+      return;
+    }
+
+    setEditModal({ isOpen: true, commentId, isSubmitting: false, commentText });
+  };
+
+  const handleEditSubmit = async (editedText) => {
+    const { commentId } = editModal;
+    if (!currentUser || !commentId) return;
+
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) {
+      setError("Komentar tidak ditemukan.");
+      toast.error("Komentar tidak ditemukan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-not-found'
+      });
+      logSecurityEvent('EDIT_NONEXISTENT_COMMENT', { commentId });
+      return;
+    }
+
+    const sanitizedText = sanitizeInput(editedText);
+    if (sanitizedText.length < 3 || sanitizedText.length > 500) {
+      setError("Komentar harus antara 3 hingga 500 karakter.");
+      toast.error("Komentar harus antara 3 hingga 500 karakter.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-invalid-length'
+      });
+      logSecurityEvent('INVALID_EDIT_LENGTH', { length: sanitizedText.length, commentId });
+      return;
+    }
+
+    setEditModal(prev => ({ ...prev, isSubmitting: true }));
+
+    try {
+      const commentRef = doc(db, `news/${newsId}/comments`, commentId);
+      await updateDoc(commentRef, {
+        text: sanitizedText,
+        isEdited: true,
+        originalText: comment.originalText || comment.text
+      });
+      setEditModal({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
+      toast.success("Komentar berhasil diedit.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-success'
+      });
+      logSecurityEvent('COMMENT_EDITED', { commentId, originalText: comment.text, newText: sanitizedText });
+    } catch (err) {
+      console.error("Error editing comment:", err);
+      setError("Gagal mengedit komentar.");
+      toast.error("Gagal mengedit komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'edit-error'
+      });
+      logSecurityEvent('EDIT_COMMENT_ERROR', { commentId, error: err.message });
+      setEditModal(prev => ({ ...prev, isSubmitting: false }));
+    }
+  };
+
+  const handleShowOriginalClick = (commentId, originalText) => {
+    if (!originalText) {
+      toast.warn("Komentar asli tidak tersedia.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'original-not-found'
+      });
+      logSecurityEvent('ORIGINAL_COMMENT_NOT_FOUND', { commentId });
+      return;
+    }
+    setOriginalCommentModal({ isOpen: true, originalText });
+    logSecurityEvent('VIEW_ORIGINAL_COMMENT', { commentId });
   };
 
   const handleDeleteClick = (commentId) => {
@@ -913,6 +1182,16 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
             background: #f59e0b !important;
             color: white !important;
           }
+          @keyframes scaleIn {
+            from {
+              transform: scale(0.95);
+              opacity: 0;
+            }
+            to {
+              transform: scale(1);
+              opacity: 1;
+            }
+          }
         `}
       </style>
       <SpamWarningModal 
@@ -926,6 +1205,18 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         onConfirm={handleDeleteConfirm}
         isDeleting={deleteModal.isDeleting}
         commentText={deleteModal.commentText}
+      />
+      <EditCommentModal
+        isOpen={editModal.isOpen}
+        onClose={() => setEditModal({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' })}
+        onSubmit={handleEditSubmit}
+        isSubmitting={editModal.isSubmitting}
+        commentText={editModal.commentText}
+      />
+      <OriginalCommentModal
+        isOpen={originalCommentModal.isOpen}
+        onClose={() => setOriginalCommentModal({ isOpen: false, originalText: '' })}
+        originalText={originalCommentModal.originalText}
       />
       <ReportModal
         isOpen={reportModal.isOpen}
@@ -1002,11 +1293,16 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               handleReplyClick={handleReplyClick}
               handleDeleteClick={handleDeleteClick}
               handleReportClick={handleReportClick}
+              handleEditClick={handleEditClick}
+              handleShowOriginalClick={handleShowOriginalClick}
               logSecurityEvent={logSecurityEvent}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
+              highlightedComment={highlightedComment}
+              setHighlightedComment={setHighlightedComment}
               sanitizeInput={sanitizeInput}
               formatTimeAgo={formatTimeAgo}
+              commentRefs={commentRefs}
             />
           ))
         )}
