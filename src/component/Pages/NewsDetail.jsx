@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../../firebaseconfig";
-import { doc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, onSnapshot, setDoc } from "firebase/firestore";
 import LikeButton from "./LikeButton";
 import CommentBox from "./CommentBox";
+import ReportModal from "./ReportModal"; // Adjusted import path
 import { useAuth } from "../auth/useAuth";
-import { ArrowLeft, Eye, User, Calendar, Share2, Bookmark, MessageCircle } from "lucide-react";
+import { ArrowLeft, Eye, User, Calendar, Share2, Bookmark, MessageCircle, Flag } from "lucide-react";
 import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
 
@@ -54,6 +55,7 @@ const NewsDetail = () => {
   const [userLiked, setUserLiked] = useState(false);
   const [newsId, setNewsId] = useState(null);
   const [commentCount, setCommentCount] = useState(0);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const initialFetchRef = useRef(false);
 
   useEffect(() => {
@@ -94,7 +96,6 @@ const NewsDetail = () => {
         const snapshot = await getDocs(q);
         let newsData = null;
         if (!snapshot.empty) {
-          // Map and reduce to get the latest document with id preserved
           newsData = snapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() }))
             .reduce((latest, current) => {
@@ -121,7 +122,6 @@ const NewsDetail = () => {
             likeCount: newsData.likeCount || 0
           });
 
-          // Immediate redirect if slug mismatches
           if (newsData.slug && newsData.slug !== slug) {
             console.log(`Initial fetch detected slug mismatch: redirecting from ${slug} to ${newsData.slug}`);
             navigate(`/berita/${newsData.slug}`, { replace: true });
@@ -293,7 +293,7 @@ const NewsDetail = () => {
 
     const unsubscribeComments = onSnapshot(query(collection(db, "news", newsId, "comments")), (snapshot) => {
       setCommentCount(snapshot.size);
-      console.log("Comments snapshot received, count:", snapshot.size); // Debug log
+      console.log("Comments snapshot received, count:", snapshot.size);
     }, (err) => {
       console.error("Error fetching comments count:", err);
       toast.error("Gagal memuat jumlah komentar.");
@@ -477,6 +477,18 @@ const NewsDetail = () => {
     }
   };
 
+  const handleReportClick = () => {
+    if (!currentUser) {
+      toast.warn("Silakan masuk untuk melaporkan berita.");
+      return;
+    }
+    if (!newsId) {
+      toast.error("ID berita tidak valid.");
+      return;
+    }
+    setIsReportModalOpen(true);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
@@ -531,6 +543,9 @@ const NewsDetail = () => {
               <button onClick={handleShare} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-all">
                 <Share2 className="w-5 h-5" />
               </button>
+              <button onClick={handleReportClick} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-all">
+                <Flag className="w-5 h-5" />
+              </button>
               <button onClick={toggleBookmark} className={`p-2 rounded-full transition-all ${isBookmarked ? "bg-yellow-100 text-yellow-600 hover:bg-yellow-200" : "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900"}`}>
                 <Bookmark className={`w-5 h-5 ${isBookmarked ? "fill-current" : ""}`} />
               </button>
@@ -538,6 +553,14 @@ const NewsDetail = () => {
           </div>
         </div>
       </div>
+
+      <ReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        newsId={newsId}
+        currentUser={currentUser}
+        newsTitle={news?.title}
+      />
 
       {news.image && (
         <div className="w-full py-8 mt-16">
