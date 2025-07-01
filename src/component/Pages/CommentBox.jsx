@@ -338,7 +338,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
     if (cmt.parentId && commentRefs.current[cmt.parentId]) {
       commentRefs.current[cmt.parentId].current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setHighlightedComment(cmt.parentId);
-      setTimeout(() => setHighlightedComment(null), 1000); // Clear highlight after 1s
+      setTimeout(() => setHighlightedComment(null), 2000); // Clear highlight after 2s
       logSecurityEvent('REPLY_BADGE_CLICK', { commentId: cmt.id, parentId: cmt.parentId });
     }
   };
@@ -350,7 +350,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
         onClose={() => setIsAdminModalOpen(false)}
       />
       <div
-        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''} ${cmt.id === focusedComment && cmt.id === highlightedComment ? 'animate-pulse border-cyan-500' : ''}`}
+        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''} ${cmt.id === highlightedComment ? 'bg-cyan-50 border-cyan-600 animate-highlight' : ''}`}
         onMouseEnter={() => setFocusedComment(cmt.id)}
         onMouseLeave={() => setFocusedComment(null)}
       >
@@ -1190,6 +1190,20 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
             to {
               transform: scale(1);
               opacity: 1;
+            }
+          }
+          @keyframes highlight {
+            0% {
+              background-color: rgba(207, 250, 254, 0);
+              border-color: #e2e8f0;
+            }
+            50% {
+              background-color: #cffafe;
+              border-color: #0891b2;
+            }
+            100% {
+              background-color: rgba(207, 250, 254, 0);
+              border-color: #e2e8f0;
             }
           }
         `}
