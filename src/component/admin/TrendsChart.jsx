@@ -1,9 +1,63 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Chart from 'chart.js/auto';
 import { collection, query, collectionGroup, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebaseconfig';
 import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Custom date formatting function (from ReportManagement.jsx)
+const formatDate = (date) => {
+  const months = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+  
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  
+  return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
+};
+
+// Utility function to parse createdAt in various formats and convert to WITA
+const parseCreatedAt = (createdAt, docId, collectionName) => {
+  try {
+    if (!createdAt) {
+      console.warn(`Missing createdAt in ${collectionName} doc: ${docId}`);
+      toast.warn(`Missing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+      return null;
+    }
+    let date;
+    if (createdAt.toDate && typeof createdAt.toDate === 'function') {
+      date = createdAt.toDate(); // Firestore Timestamp to JS Date (UTC)
+    } else if (typeof createdAt === 'string') {
+      date = new Date(createdAt);
+      if (isNaN(date)) {
+        console.warn(`Invalid createdAt string in ${collectionName} doc: ${docId}, value: ${createdAt}`);
+        toast.warn(`Invalid createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+        return null;
+      }
+    } else if (typeof createdAt === 'number') {
+      date = new Date(createdAt);
+    } else {
+      console.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}, type: ${typeof createdAt}, value: ${createdAt}`);
+      toast.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+      return null;
+    }
+    // Convert UTC to WITA (UTC+8)
+    const witaOffset = 8 * 60; // 8 hours in minutes
+    const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60 * 1000);
+    const witaDate = new Date(utcDate.getTime() + witaOffset * 60 * 1000);
+    return witaDate;
+  } catch (error) {
+    console.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, error);
+    toast.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+    return null;
+  }
+};
 
 const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity }) => {
   const chartRef = useRef(null);
@@ -21,6 +75,11 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
   const [timeRange, setTimeRange] = useState(() => {
     return localStorage.getItem('trendsChartTimeRange') || '7days';
   });
+  const [, forceUpdate] = useState();
+
+  const forceRender = useCallback(() => {
+    forceUpdate({});
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('trendsChartTimeRange', timeRange);
@@ -43,6 +102,11 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
     const fetchTrendsData = () => {
       setIsLoading(true);
       const today = new Date();
+      // Set to end of day in WITA (UTC+8)
+      const witaOffset = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+      const todayWita = new Date(today.getTime() + witaOffset);
+      todayWita.setHours(23, 59, 59, 999);
+
       let rangeDays;
       switch (timeRange) {
         case '30days':
@@ -54,8 +118,8 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
         default:
           rangeDays = 7;
       }
-      const rangeStart = new Date(today);
-      rangeStart.setDate(today.getDate() - (rangeDays - 1));
+      const rangeStart = new Date(todayWita);
+      rangeStart.setDate(todayWita.getDate() - (rangeDays - 1));
       rangeStart.setHours(0, 0, 0, 0);
 
       const data = [];
@@ -68,7 +132,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
       for (let i = 0; i < rangeDays; i++) {
         const date = new Date(rangeStart);
         date.setDate(rangeStart.getDate() + i);
-        const dateStr = date.toLocaleDateString('id-ID');
+        const dateStr = formatDate(date).split(',')[0]; // Use DD MMMM YYYY format for consistency
         const shortDate = rangeDays <= 30
           ? date.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })
           : date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
@@ -101,23 +165,27 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
 
           let newsCount = 0;
           snapshot.forEach(doc => {
-            const createdAt = doc.data().createdAt?.toDate() || new Date();
-            const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (createdAt >= rangeStart && createdAt <= today && newsTrends[dateStr] !== undefined) {
-              newsTrends[dateStr]++;
-              data.find(d => d.fullDate === dateStr).news++;
-              viewsTrends[dateStr] += doc.data().views || 0;
-              data.find(d => d.fullDate === dateStr).views += doc.data().views || 0;
-              newsCount++;
+            try {
+              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'news') || rangeStart;
+              const dateStr = formatDate(createdAt).split(',')[0];
+              if (createdAt >= rangeStart && createdAt <= todayWita && newsTrends[dateStr] !== undefined) {
+                newsTrends[dateStr]++;
+                data.find(d => d.fullDate === dateStr).news++;
+                viewsTrends[dateStr] += doc.data().views || 0;
+                data.find(d => d.fullDate === dateStr).views += doc.data().views || 0;
+                newsCount++;
+              }
+            } catch (error) {
+              console.error(`Error processing news doc: ${doc.id}`, error);
             }
           });
 
           setTrends(prev => ({ ...prev, news: { ...newsTrends }, views: { ...viewsTrends } }));
-          setChartData([...data]);
-          console.log('News snapshot:', { newsCount, data: data.map(d => ({ date: d.fullDate, news: d.news, views: d.views })) });
+          setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_NEWS_SUCCESS', { timeRange, newsCount });
+            logActivity('FETCH_TRENDS_NEWS_SUCCESS', { timeRange, newsCount, totalDocs: snapshot.size });
           }
+          forceRender();
         } catch (error) {
           console.error('Error fetching news trends:', error);
           if (typeof logActivity === 'function') {
@@ -144,25 +212,29 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
 
           let commentsCount = 0;
           snapshot.forEach(doc => {
-            const createdAt = doc.data().createdAt?.toDate() || new Date();
-            const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (createdAt >= rangeStart && createdAt <= today && commentsTrends[dateStr] !== undefined) {
-              commentsTrends[dateStr]++;
-              data.find(d => d.fullDate === dateStr).comments++;
-              commentsCount++;
+            try {
+              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'comments') || rangeStart;
+              const dateStr = formatDate(createdAt).split(',')[0];
+              if (createdAt >= rangeStart && createdAt <= todayWita && commentsTrends[dateStr] !== undefined) {
+                commentsTrends[dateStr]++;
+                data.find(d => d.fullDate === dateStr).comments++;
+                commentsCount++;
+              }
+            } catch (error) {
+              console.error(`Error processing comment doc: ${doc.id}`, error);
             }
           });
 
           setTrends(prev => ({ ...prev, comments: { ...commentsTrends } }));
-          setChartData([...data]);
-          console.log('Comments snapshot:', { commentsCount, data: data.map(d => ({ date: d.fullDate, comments: d.comments })) });
+          setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_COMMENTS_SUCCESS', { timeRange, commentsCount });
+            logActivity('FETCH_TRENDS_COMMENTS_SUCCESS', { timeRange, commentsCount, totalDocs: snapshot.size });
           }
+          forceRender();
         } catch (error) {
           console.error('Error fetching comments trends:', error);
           if (error.message.includes('index')) {
-            console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+            console.log('Missing index for comments collection group. Create it in Firebase Console.');
           }
           if (typeof logActivity === 'function') {
             logActivity('FETCH_TRENDS_COMMENTS_ERROR', { error: error.message, timeRange });
@@ -188,21 +260,25 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
 
           let usersCount = 0;
           snapshot.forEach(doc => {
-            const createdAt = doc.data().createdAt?.toDate() || new Date();
-            const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (createdAt >= rangeStart && createdAt <= today && usersTrends[dateStr] !== undefined) {
-              usersTrends[dateStr]++;
-              data.find(d => d.fullDate === dateStr).users++;
-              usersCount++;
+            try {
+              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'users') || rangeStart;
+              const dateStr = formatDate(createdAt).split(',')[0];
+              if (createdAt >= rangeStart && createdAt <= todayWita && usersTrends[dateStr] !== undefined) {
+                usersTrends[dateStr]++;
+                data.find(d => d.fullDate === dateStr).users++;
+                usersCount++;
+              }
+            } catch (error) {
+              console.error(`Error processing user doc: ${doc.id}`, error);
             }
           });
 
           setTrends(prev => ({ ...prev, users: { ...usersTrends } }));
-          setChartData([...data]);
-          console.log('Users snapshot:', { usersCount, data: data.map(d => ({ date: d.fullDate, users: d.users })) });
+          setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_USERS_SUCCESS', { timeRange, usersCount });
+            logActivity('FETCH_TRENDS_USERS_SUCCESS', { timeRange, usersCount, totalDocs: snapshot.size });
           }
+          forceRender();
         } catch (error) {
           console.error('Error fetching users trends:', error);
           if (typeof logActivity === 'function') {
@@ -229,21 +305,25 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
 
           let reportCount = 0;
           snapshot.forEach(doc => {
-            const createdAt = doc.data().createdAt?.toDate() || new Date();
-            const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (createdAt >= rangeStart && createdAt <= today && reportsTrends[dateStr] !== undefined) {
-              reportsTrends[dateStr]++;
-              data.find(d => d.fullDate === dateStr).reports++;
-              reportCount++;
+            try {
+              const createdAt = parseCreatedAt(doc.data().timestamp, doc.id, 'reports') || rangeStart;
+              const dateStr = formatDate(createdAt).split(',')[0];
+              if (createdAt >= rangeStart && createdAt <= todayWita && reportsTrends[dateStr] !== undefined) {
+                reportsTrends[dateStr]++;
+                data.find(d => d.fullDate === dateStr).reports++;
+                reportCount++;
+              }
+            } catch (error) {
+              console.error(`Error processing report doc: ${doc.id}`, error);
             }
           });
 
           setTrends(prev => ({ ...prev, reports: { ...reportsTrends } }));
-          setChartData([...data]);
-          console.log('Reports snapshot:', { reportCount, data: data.map(d => ({ date: d.fullDate, reports: d.reports })) });
+          setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_REPORTS_SUCCESS', { timeRange, reportCount });
+            logActivity('FETCH_TRENDS_REPORTS_SUCCESS', { timeRange, reportCount, totalDocs: snapshot.size });
           }
+          forceRender();
         } catch (error) {
           console.error('Error fetching reports trends:', error);
           if (typeof logActivity === 'function') {
@@ -262,7 +342,6 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
       setIsLoading(false);
 
       return () => {
-        console.log('Cleaning up TrendsChart listeners');
         unsubscribeNews();
         unsubscribeComments();
         unsubscribeUsers();
@@ -272,7 +351,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
 
     const unsubscribe = fetchTrendsData();
     return unsubscribe;
-  }, [isAuthorized, activeTab, logActivity, timeRange]);
+  }, [isAuthorized, activeTab, logActivity, timeRange, forceRender]);
 
   const metrics = [
     { key: 'all', label: 'Semua Metrik', color: '#6366f1' },
@@ -512,7 +591,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="w-12 h-12 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
               </div>
@@ -522,7 +601,9 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
               <h3 className="text-2xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
                 Perkembangan {timeRange === '7days' ? '7 Hari' : timeRange === '30days' ? '30 Hari' : '1 Tahun'} Terakhir
               </h3>
-              <p className="text-gray-500 text-sm">Analisis tren konten dan engagement</p>
+              <p className="text-gray-500 text-sm">
+                Analisis tren konten dan engagement
+              </p>
             </div>
           </div>
           
@@ -623,7 +704,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
                 return (
                   <motion.div
                     key={metric.key}
-                    className="bg-gradient-to-br from-white to-gray-50 rounded-xl p-4 border border-gray-100 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 cursor-pointer"
+                    className={`bg-gradient-to-br from-white to-gray-50 rounded-xl p-4 border border-gray-100 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 cursor-pointer ${metric.key === 'reports' && total > 0 ? 'animate-pulse' : ''}`}
                     onClick={() => setSelectedMetric(metric.key)}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
