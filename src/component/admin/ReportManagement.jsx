@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebaseconfig';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc, addDoc, serverTimestamp, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../auth/useAuth';
-import { Flag, Search, X, Filter, Calendar, Clock, User, Trash2, AlertCircle, ChevronDown, ChevronUp, Eye } from 'lucide-react';
+import { Flag, Search, X, Filter, Calendar, Clock, User, Trash2, AlertCircle, ChevronDown, ChevronUp, Eye, CheckCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { ADMIN_EMAILS } from '../config/Constants';
 
@@ -52,7 +52,7 @@ const formatTimestamp = (timestamp) => {
 };
 
 // Confirmation Modal Component
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProcessing, confirmLabel = 'Konfirmasi', confirmColor = 'red' }) => {
   if (!isOpen) return null;
 
   return (
@@ -68,6 +68,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
           <button 
             onClick={onClose} 
             className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
+            disabled={isProcessing}
           >
             <X className="w-6 h-6" />
           </button>
@@ -76,15 +77,17 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
         <div className="flex justify-end space-x-4">
           <button
             onClick={onClose}
-            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform disabled:opacity-50"
+            disabled={isProcessing}
           >
             Batal
           </button>
           <button
             onClick={onConfirm}
-            className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+            className={`px-6 py-3 bg-gradient-to-r from-${confirmColor}-500 to-${confirmColor}-600 text-white rounded-xl hover:from-${confirmColor}-600 hover:to-${confirmColor}-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg disabled:opacity-50`}
+            disabled={isProcessing}
           >
-            Hapus
+            {isProcessing ? 'Memproses...' : confirmLabel}
           </button>
         </div>
       </div>
@@ -93,7 +96,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
 };
 
 // Report Item Component
-const ReportItem = ({ report, expanded, toggleExpand, onDelete, onResolve, index }) => {
+const ReportItem = ({ report, expanded, toggleExpand, onDeleteReport, onDeleteComment, onResolve, onViewNews, index }) => {
   const getStatusColor = () => {
     return report.status === 'resolved' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
   };
@@ -124,7 +127,7 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, onResolve, index
             </div>
             
             <p className="text-gray-700 mb-3 leading-relaxed">
-              Konten: <span className="cursor-pointer text-blue-600 hover:underline" onClick={() => onResolve(report.newsSlug)}>
+              Konten: <span className="cursor-pointer text-blue-600 hover:underline" onClick={() => onViewNews(report.newsSlug)}>
                 {report.title || 'N/A'}
               </span>
             </p>
@@ -144,11 +147,35 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, onResolve, index
         
         <div className="flex items-center space-x-2 ml-4">
           <button
-            onClick={() => onResolve(report.newsSlug)}
+            onClick={() => onViewNews(report.newsSlug)}
             className="p-2 hover:bg-cyan-50 rounded-lg transition-all duration-200 group"
             title="Lihat berita"
+            disabled={!report.newsSlug}
           >
-            <Eye className="w-5 h-5 text-gray-400 group-hover:text-cyan-600 transition-colors" />
+            <Eye className={`w-5 h-5 ${!report.newsSlug ? 'text-gray-300' : 'text-gray-400 group-hover:text-cyan-600 transition-colors'}`} />
+          </button>
+          <button
+            onClick={() => onResolve(report.id)}
+            className="p-2 hover:bg-green-50 rounded-lg transition-all duration-200 group"
+            title="Tandai sebagai selesai"
+            disabled={report.status === 'resolved'}
+          >
+            <CheckCircle className={`w-5 h-5 ${report.status === 'resolved' ? 'text-gray-300' : 'text-gray-400 group-hover:text-green-600 transition-colors'}`} />
+          </button>
+          <button
+            onClick={() => onDeleteComment(report.id, report.commentId, report.newsId)}
+            className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+            title="Hapus komentar"
+            disabled={report.status === 'resolved' || !report.commentId || !report.newsId}
+          >
+            <Trash2 className={`w-5 h-5 ${report.status === 'resolved' || !report.commentId || !report.newsId ? 'text-gray-300' : 'text-gray-400 group-hover:text-red-600 transition-colors'}`} />
+          </button>
+          <button
+            onClick={() => onDeleteReport(report.id)}
+            className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+            title="Hapus laporan ini"
+          >
+            <Trash2 className="w-5 h-5 text-gray-400 group-hover:text-red-600 transition-colors" />
           </button>
           <button
             onClick={toggleExpand}
@@ -160,13 +187,6 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, onResolve, index
             ) : (
               <ChevronDown className="w-5 h-5 text-gray-600 group-hover:text-indigo-600 transition-colors" />
             )}
-          </button>
-          <button
-            onClick={onDelete}
-            className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
-            title="Hapus laporan ini"
-          >
-            <Trash2 className="w-5 h-5 text-gray-400 group-hover:text-red-600 transition-colors" />
           </button>
         </div>
       </div>
@@ -193,7 +213,7 @@ const ReportDetails = ({ details }) => {
       );
     }
 
-    if (key.toLowerCase().includes('timestamp') || key.toLowerCase().includes('createdat')) {
+    if (key.toLowerCase().includes('timestamp') || key.toLowerCase().includes('createdat') || key.toLowerCase().includes('resolvedat')) {
       try {
         const date = new Date(value);
         if (!isNaN(date.getTime())) {
@@ -272,6 +292,11 @@ const ReportDetails = ({ details }) => {
       newsId: '📄',
       status: '⚙️',
       customReason: '✍️',
+      resolvedAt: '🕒',
+      resolvedBy: '👤',
+      commentId: '💬',
+      commentText: '📝',
+      newsSlug: '🔗'
     };
     return iconMap[key] || '📋';
   };
@@ -286,6 +311,11 @@ const ReportDetails = ({ details }) => {
       newsId: 'ID Berita',
       status: 'Status',
       customReason: 'Alasan Kustom',
+      resolvedAt: 'Waktu Penyelesaian',
+      resolvedBy: 'Diselesaikan Oleh',
+      commentId: 'ID Komentar',
+      commentText: 'Teks Komentar',
+      newsSlug: 'Slug Berita'
     };
     return labelMap[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
   };
@@ -352,7 +382,16 @@ const ReportManagement = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
-  const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, type: '', id: null });
+  const [confirmationModal, setConfirmationModal] = useState({ 
+    isOpen: false, 
+    type: '', 
+    id: null, 
+    title: '', 
+    message: '', 
+    isProcessing: false,
+    confirmLabel: 'Konfirmasi',
+    confirmColor: 'red'
+  });
 
   // Define logActivity function
   const logActivity = async (action, details) => {
@@ -442,15 +481,19 @@ const ReportManagement = () => {
   const handleDeleteReport = (reportId) => {
     setConfirmationModal({
       isOpen: true,
-      type: 'single',
+      type: 'deleteReport',
       id: reportId,
       title: 'Hapus Laporan',
-      message: 'Yakin ingin menghapus laporan ini? Tindakan ini tidak dapat dibatalkan.'
+      message: 'Yakin ingin menghapus laporan ini? Tindakan ini tidak dapat dibatalkan.',
+      isProcessing: false,
+      confirmLabel: 'Hapus',
+      confirmColor: 'red'
     });
   };
 
   const confirmDeleteReport = async () => {
     const { id } = confirmationModal;
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
     try {
       const reportDoc = await getDoc(doc(db, 'reports', id));
       if (reportDoc.exists()) {
@@ -470,22 +513,127 @@ const ReportManagement = () => {
       await logActivity('DELETE_REPORT_ERROR', { reportId: id, error: error.message });
       toast.error('Gagal menghapus laporan.');
     } finally {
-      setConfirmationModal({ isOpen: false, type: '', id: null });
+      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' });
     }
   };
 
-  const handleDeleteAllReports = async () => {
+  const handleDeleteComment = (reportId, commentId, newsId) => {
+    if (!commentId || !newsId) {
+      toast.error('ID komentar atau ID berita tidak tersedia.');
+      return;
+    }
     setConfirmationModal({
       isOpen: true,
-      type: 'all',
+      type: 'deleteComment',
+      id: { reportId, commentId, newsId },
+      title: 'Hapus Komentar',
+      message: 'Yakin ingin menghapus komentar yang dilaporkan ini? Tindakan ini tidak dapat dibatalkan dan akan menghapus komentar beserta semua balasannya.',
+      isProcessing: false,
+      confirmLabel: 'Hapus Komentar',
+      confirmColor: 'red'
+    });
+  };
+
+  const confirmDeleteComment = async () => {
+    const { reportId, commentId, newsId } = confirmationModal.id;
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
+    try {
+      // Delete the comment
+      const commentRef = doc(db, `news/${newsId}/comments`, commentId);
+      const commentDoc = await getDoc(commentRef);
+      let commentText = 'N/A';
+      if (!commentDoc.exists()) {
+        throw new Error('Komentar tidak ditemukan.');
+      }
+      commentText = commentDoc.data().text || 'N/A';
+      await deleteDoc(commentRef);
+
+      // Delete all replies to the comment
+      const repliesQuery = query(collection(db, `news/${newsId}/comments`), where('parentId', '==', commentId));
+      const replySnapshot = await getDocs(repliesQuery);
+      const deleteReplies = replySnapshot.docs.map(reply => deleteDoc(reply.ref));
+      await Promise.all(deleteReplies);
+
+      // Delete the report
+      await deleteDoc(doc(db, 'reports', reportId));
+      setReports(prev => prev.filter(report => report.id !== reportId));
+      await logActivity('DELETE_COMMENT_AND_REPORT', {
+        reportId,
+        commentId,
+        newsId,
+        commentText,
+        totalRepliesDeleted: replySnapshot.docs.length
+      });
+      toast.success('Komentar dan laporan berhasil dihapus!');
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+      setError('Gagal menghapus komentar: ' + error.message);
+      await logActivity('DELETE_COMMENT_ERROR', { reportId, commentId, newsId, error: error.message });
+      toast.error('Gagal menghapus komentar: ' + error.message);
+    } finally {
+      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' });
+    }
+  };
+
+  const handleResolveReport = (reportId) => {
+    setConfirmationModal({
+      isOpen: true,
+      type: 'resolveReport',
+      id: reportId,
+      title: 'Tandai Laporan Selesai',
+      message: 'Yakin ingin menandai laporan ini sebagai selesai? Komentar akan tetap ada dan laporan akan ditandai sebagai telah ditangani.',
+      isProcessing: false,
+      confirmLabel: 'Tandai Selesai',
+      confirmColor: 'green'
+    });
+  };
+
+  const confirmResolveReport = async () => {
+    const { id } = confirmationModal;
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
+    try {
+      await updateDoc(doc(db, 'reports', id), {
+        status: 'resolved',
+        resolvedAt: serverTimestamp(),
+        resolvedBy: currentUser.email,
+      });
+      await logActivity('MARK_REPORT_RESOLVED', { reportId: id });
+      toast.success('Laporan ditandai sebagai selesai.');
+    } catch (error) {
+      console.error('Error marking report as resolved:', error);
+      setError('Gagal menandai laporan sebagai selesai.');
+      await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId: id, error: error.message });
+      toast.error('Gagal menandai laporan sebagai selesai.');
+    } finally {
+      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' });
+    }
+  };
+
+  const handleViewNews = (newsSlug) => {
+    if (newsSlug) {
+      navigate(`/berita/${newsSlug}`);
+      logActivity('VIEW_REPORTED_NEWS', { newsSlug });
+    } else {
+      toast.error('Slug berita tidak tersedia.');
+    }
+  };
+
+  const handleDeleteAllReports = () => {
+    setConfirmationModal({
+      isOpen: true,
+      type: 'deleteAll',
       id: null,
       title: 'Hapus Semua Laporan',
-      message: 'Yakin ingin menghapus semua laporan? Tindakan ini tidak dapat dibatalkan dan akan menghapus seluruh riwayat laporan.'
+      message: 'Yakin ingin menghapus semua laporan? Tindakan ini tidak dapat dibatalkan dan akan menghapus seluruh riwayat laporan.',
+      isProcessing: false,
+      confirmLabel: 'Hapus Semua',
+      confirmColor: 'red'
     });
   };
 
   const confirmDeleteAllReports = async () => {
     setIsDeletingAll(true);
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
     try {
       const reportsQuery = query(collection(db, 'reports'));
       const reportsSnapshot = await getDocs(reportsQuery);
@@ -502,32 +650,7 @@ const ReportManagement = () => {
       toast.error('Gagal menghapus semua laporan.');
     } finally {
       setIsDeletingAll(false);
-      setConfirmationModal({ isOpen: false, type: '', id: null });
-    }
-  };
-
-  const handleResolveReport = async (reportId) => {
-    try {
-      await updateDoc(doc(db, 'reports', reportId), {
-        status: 'resolved',
-        resolvedAt: serverTimestamp(),
-        resolvedBy: currentUser.email,
-      });
-      await logActivity('MARK_REPORT_RESOLVED', { reportId });
-      toast.success('Laporan ditandai sebagai selesai.');
-    } catch (error) {
-      console.error('Error marking report as resolved:', error);
-      toast.error('Gagal menandai laporan sebagai selesai.');
-      await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId, error: error.message });
-    }
-  };
-
-  const handleViewNews = (newsSlug) => {
-    if (newsSlug) {
-      navigate(`/berita/${newsSlug}`);
-      logActivity('VIEW_REPORTED_NEWS', { newsSlug });
-    } else {
-      toast.error('Slug berita tidak tersedia.');
+      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' });
     }
   };
 
@@ -696,8 +819,10 @@ const ReportManagement = () => {
                   report={report}
                   expanded={!!expandedReports[report.id]}
                   toggleExpand={() => toggleExpandReport(report.id)}
-                  onDelete={() => handleDeleteReport(report.id)}
-                  onResolve={() => handleViewNews(report.newsSlug)}
+                  onDeleteReport={() => handleDeleteReport(report.id)}
+                  onDeleteComment={() => handleDeleteComment(report.id, report.commentId, report.newsId)}
+                  onResolve={() => handleResolveReport(report.id)}
+                  onViewNews={() => handleViewNews(report.newsSlug)}
                   index={index}
                 />
               ))}
@@ -707,10 +832,18 @@ const ReportManagement = () => {
 
         <ConfirmationModal
           isOpen={confirmationModal.isOpen}
-          onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null })}
-          onConfirm={confirmationModal.type === 'single' ? confirmDeleteReport : confirmDeleteAllReports}
+          onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' })}
+          onConfirm={
+            confirmationModal.type === 'deleteReport' ? confirmDeleteReport :
+            confirmationModal.type === 'deleteComment' ? confirmDeleteComment :
+            confirmationModal.type === 'resolveReport' ? confirmResolveReport :
+            confirmDeleteAllReports
+          }
           title={confirmationModal.title}
           message={confirmationModal.message}
+          isProcessing={confirmationModal.isProcessing}
+          confirmLabel={confirmationModal.confirmLabel}
+          confirmColor={confirmationModal.confirmColor}
         />
       </div>
       

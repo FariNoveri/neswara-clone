@@ -22,7 +22,7 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
 };
 
-// Utility function to parse createdAt in various formats and convert to WITA
+// Utility function to parse createdAt in various formats and convert to WIB
 const parseCreatedAt = (createdAt, docId, collectionName) => {
   try {
     if (!createdAt) {
@@ -47,11 +47,11 @@ const parseCreatedAt = (createdAt, docId, collectionName) => {
       toast.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
       return null;
     }
-    // Convert UTC to WITA (UTC+8)
-    const witaOffset = 8 * 60; // 8 hours in minutes
+    // Convert UTC to WIB (UTC+7)
+    const wibOffset = 7 * 60; // 7 hours in minutes
     const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60 * 1000);
-    const witaDate = new Date(utcDate.getTime() + witaOffset * 60 * 1000);
-    return witaDate;
+    const wibDate = new Date(utcDate.getTime() + wibOffset * 60 * 1000);
+    return wibDate;
   } catch (error) {
     console.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, error);
     toast.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
@@ -102,10 +102,10 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
     const fetchTrendsData = () => {
       setIsLoading(true);
       const today = new Date();
-      // Set to end of day in WITA (UTC+8)
-      const witaOffset = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
-      const todayWita = new Date(today.getTime() + witaOffset);
-      todayWita.setHours(23, 59, 59, 999);
+      // Set to end of day in WIB (UTC+7)
+      const wibOffset = 7 * 60 * 60 * 1000; // 7 hours in milliseconds
+      const todayWib = new Date(today.getTime() + wibOffset);
+      todayWib.setHours(23, 59, 59, 999);
 
       let rangeDays;
       switch (timeRange) {
@@ -118,8 +118,8 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
         default:
           rangeDays = 7;
       }
-      const rangeStart = new Date(todayWita);
-      rangeStart.setDate(todayWita.getDate() - (rangeDays - 1));
+      const rangeStart = new Date(todayWib);
+      rangeStart.setDate(todayWib.getDate() - (rangeDays - 1));
       rangeStart.setHours(0, 0, 0, 0);
 
       const data = [];
@@ -168,7 +168,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             try {
               const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'news') || rangeStart;
               const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWita && newsTrends[dateStr] !== undefined) {
+              if (createdAt >= rangeStart && createdAt <= todayWib && newsTrends[dateStr] !== undefined) {
                 newsTrends[dateStr]++;
                 data.find(d => d.fullDate === dateStr).news++;
                 viewsTrends[dateStr] += doc.data().views || 0;
@@ -215,7 +215,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             try {
               const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'comments') || rangeStart;
               const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWita && commentsTrends[dateStr] !== undefined) {
+              if (createdAt >= rangeStart && createdAt <= todayWib && commentsTrends[dateStr] !== undefined) {
                 commentsTrends[dateStr]++;
                 data.find(d => d.fullDate === dateStr).comments++;
                 commentsCount++;
@@ -263,7 +263,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             try {
               const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'users') || rangeStart;
               const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWita && usersTrends[dateStr] !== undefined) {
+              if (createdAt >= rangeStart && createdAt <= todayWib && usersTrends[dateStr] !== undefined) {
                 usersTrends[dateStr]++;
                 data.find(d => d.fullDate === dateStr).users++;
                 usersCount++;
@@ -308,7 +308,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             try {
               const createdAt = parseCreatedAt(doc.data().timestamp, doc.id, 'reports') || rangeStart;
               const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWita && reportsTrends[dateStr] !== undefined) {
+              if (createdAt >= rangeStart && createdAt <= todayWib && reportsTrends[dateStr] !== undefined) {
                 reportsTrends[dateStr]++;
                 data.find(d => d.fullDate === dateStr).reports++;
                 reportCount++;
@@ -591,7 +591,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="w-12 h-12 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 24 24">
+                <svg className="w-6 h-6 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
               </div>

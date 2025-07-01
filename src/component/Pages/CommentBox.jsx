@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { Reply, Heart, Trash2, MessageCircle } from "lucide-react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle } from "lucide-react";
 import { db } from "../../firebaseconfig";
 import { 
   collection, 
@@ -11,10 +11,390 @@ import {
   where, 
   orderBy, 
   serverTimestamp, 
-  updateDoc 
+  setDoc,
+  getDocs,
+  getDoc
 } from "firebase/firestore";
 import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
+import DOMPurify from 'dompurify';
+
+// Modal Component with smooth animations
+const Modal = ({ isOpen, onClose, children, title }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div 
+        className={`absolute inset-0 bg-black transition-opacity duration-300 ${
+          isOpen ? 'opacity-50' : 'opacity-0'
+        }`}
+        onClick={onClose}
+      ></div>
+      <div className={`relative bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 transform transition-all duration-300 ${
+        isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
+      }`}>
+        <div className="flex items-center justify-between p-6 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-800">{title}</h3>
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-2 rounded-lg transition-colors"
+            title="Tutup"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-6">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Spam Warning Modal
+const SpamWarningModal = ({ isOpen, onClose, remainingTime }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Peringatan Spam">
+    <div className="text-center space-y-4">
+      <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto">
+        <AlertTriangle className="w-8 h-8 text-yellow-600" />
+      </div>
+      <div>
+        <p className="text-slate-700 mb-2">Anda mengirim komentar terlalu cepat!</p>
+        <p className="text-sm text-slate-500">
+          Tunggu {Math.ceil(remainingTime / 1000)} detik lagi sebelum mengirim komentar berikutnya.
+        </p>
+      </div>
+      <button
+        onClick={onClose}
+        className="w-full bg-yellow-500 hover:bg-yellow-600 text-white py-2 px-4 rounded-lg transition-colors"
+      >
+        Mengerti
+      </button>
+    </div>
+  </Modal>
+);
+
+// Delete Confirmation Modal
+const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, isDeleting, commentText }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Konfirmasi Hapus">
+    <div className="space-y-4">
+      <p className="text-slate-700">Apakah Anda yakin ingin menghapus komentar ini?</p>
+      <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200">{commentText || 'Unknown Comment'}</p>
+      <p className="text-sm text-slate-500">Tindakan ini tidak dapat dibatalkan.</p>
+      <div className="flex gap-3">
+        <button
+          onClick={onClose}
+          disabled={isDeleting}
+          className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+        >
+          Batal
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={isDeleting}
+          className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+        >
+          {isDeleting ? "Menghapus..." : "Hapus"}
+        </button>
+      </div>
+    </div>
+  </Modal>
+);
+
+// Report Modal
+const ReportModal = ({ isOpen, onClose, onSubmit, isSubmitting, commentText }) => {
+  const [reportReason, setReportReason] = useState("");
+  const [customReason, setCustomReason] = useState("");
+
+  const reasons = [
+    "Spam atau konten berulang",
+    "Bahasa kasar atau tidak pantas",
+    "Informasi palsu atau menyesatkan",
+    "Konten yang melanggar aturan",
+    "Lainnya"
+  ];
+
+  const handleSubmit = () => {
+    const reason = reportReason === "Lainnya" ? customReason : reportReason;
+    if (reason.trim()) {
+      onSubmit(reason);
+      setReportReason("");
+      setCustomReason("");
+    } else {
+      toast.error("Harap pilih atau masukkan alasan pelaporan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-no-reason'
+      });
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Laporkan Komentar">
+      <div className="space-y-4">
+        <p className="text-slate-700">Mengapa Anda melaporkan komentar ini?</p>
+        <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200">{commentText || 'Unknown Comment'}</p>
+        <div className="space-y-2">
+          {reasons.map((reason) => (
+            <label key={reason} className="flex items-center space-x-3 cursor-pointer">
+              <input
+                type="radio"
+                name="reportReason"
+                value={reason}
+                checked={reportReason === reason}
+                onChange={(e) => setReportReason(e.target.value)}
+                className="text-red-500 focus:ring-red-500"
+              />
+              <span className="text-sm text-slate-700">{reason}</span>
+            </label>
+          ))}
+        </div>
+        {reportReason === "Lainnya" && (
+          <div>
+            <textarea
+              className="w-full p-3 border border-slate-300 rounded-lg focus:border-red-500 focus:ring-2 focus:ring-red-200 text-sm"
+              rows="3"
+              placeholder="Jelaskan alasan Anda..."
+              value={customReason}
+              onChange={(e) => setCustomReason(e.target.value)}
+              maxLength={200}
+            />
+            <span className="text-xs text-slate-500">{customReason.length}/200</span>
+          </div>
+        )}
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+          >
+            Batal
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !reportReason || (reportReason === "Lainnya" && !customReason.trim())}
+            className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isSubmitting ? "Melaporkan..." : "Laporkan"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// Custom hook for avatar rendering
+const useCommentAvatar = (cmt, logSecurityEvent) => {
+  const placeholderRef = useRef(null);
+
+  const handleError = (e) => {
+    e.target.style.display = 'none';
+    if (placeholderRef.current) {
+      placeholderRef.current.style.display = 'none';
+    }
+    e.target.nextSibling.style.display = 'flex';
+    logSecurityEvent('COMMENT_PHOTOURL_ERROR', {
+      commentId: cmt.id,
+      photoURL: cmt.photoURL,
+      error: 'Failed to load profile image'
+    });
+  };
+
+  const handleLoad = (e) => {
+    if (placeholderRef.current) {
+      placeholderRef.current.style.display = 'none';
+    }
+    e.target.style.display = 'block';
+  };
+
+  const sanitizeInput = (input) => {
+    return DOMPurify.sanitize(input, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: []
+    }).trim();
+  };
+
+  return {
+    placeholderRef,
+    renderAvatar: () => (
+      <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-slate-300 group-hover:border-cyan-400 transition-all duration-300">
+        {cmt.photoURL ? (
+          <>
+            <div ref={placeholderRef} className="absolute inset-0 bg-slate-200 animate-pulse" />
+            <img 
+              src={cmt.photoURL} 
+              alt={sanitizeInput(cmt.author || "User")} 
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={handleError}
+              onLoad={handleLoad}
+            />
+          </>
+        ) : null}
+        <span className={`absolute inset-0 flex items-center justify-center bg-gradient-to-br from-cyan-500 to-purple-600 text-white font-bold text-sm ${cmt.photoURL ? 'hidden' : 'flex'}`}>
+          {(sanitizeInput(cmt.author || "U")).charAt(0).toUpperCase()}
+        </span>
+      </div>
+    )
+  };
+};
+
+// Comment Component
+const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo }) => {
+  const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
+  const isOwner = cmt.userId === currentUser?.uid;
+  const canDelete = isAdmin || isOwner;
+  const likes = commentLikes[cmt.id] || { count: 0, userLiked: currentUser ? !!currentUser.uid : false };
+  const isReported = reportedComments[cmt.id] || false;
+  const { renderAvatar } = useCommentAvatar(cmt, logSecurityEvent);
+
+  return (
+    <div key={cmt.id} className={`space-y-4`}>
+      <div
+        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
+        onMouseEnter={() => setFocusedComment(cmt.id)}
+        onMouseLeave={() => setFocusedComment(null)}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-3">
+            {renderAvatar()}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-800">{sanitizeInput(cmt.author || "User")}</span>
+                {isAdmin && cmt.userId === currentUser?.uid && (
+                  <span className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full">Admin</span>
+                )}
+                {isOwner && (
+                  <span className="text-xs bg-slate-400 text-white px-2 py-0.5 rounded-full">(You)</span>
+                )}
+                {cmt.parentId && cmt.replyToAuthor && (
+                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Membalas {sanitizeInput(cmt.replyToAuthor)}</span>
+                )}
+              </div>
+              <span className="text-xs text-slate-500">{formatTimeAgo(cmt.createdAt)}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {currentUser && !isOwner && (
+              <button
+                onClick={() => handleReportClick(cmt.id)}
+                className={`text-orange-500 hover:text-orange-700 hover:bg-orange-50 p-2 rounded-lg transition-colors ${isReported ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title="Laporkan komentar"
+                disabled={isReported}
+              >
+                <Flag className={`w-4 h-4 ${isReported ? 'fill-current' : ''}`} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => handleDeleteClick(cmt.id)}
+                className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                title="Hapus komentar"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="mb-4">
+          <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">{sanitizeInput(cmt.text)}</p>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => handleLikeComment(cmt.id)}
+              className={`flex items-center gap-1 text-sm transition-colors ${likes.userLiked ? 'text-red-500 font-semibold' : 'text-slate-500 hover:text-red-500'}`}
+              disabled={isSubmitting}
+            >
+              <Heart className={`w-4 h-4 ${likes.userLiked ? 'fill-current' : ''}`} />
+              <span>{likes.count}</span>
+            </button>
+            <button
+              onClick={() => handleReplyClick(cmt.id, cmt.author)}
+              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate-400 cursor-not-allowed'}`}
+              disabled={!currentUser}
+            >
+              <Reply className="w-4 h-4" />
+              <span>Balas</span>
+            </button>
+            {cmt.replies && cmt.replies.length > 0 && (
+              <span className="text-xs text-slate-400">{cmt.replies.length} balasan</span>
+            )}
+          </div>
+        </div>
+        {replyTo && replyTo.id === cmt.id && (
+          <div className="mt-4 p-4 bg-slate-50 rounded-lg">
+            <div className="space-y-3">
+              <textarea
+                className="w-full p-3 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
+                rows="3"
+                placeholder={currentUser ? `Balas ${sanitizeInput(cmt.author || "User")}...` : "Silakan masuk untuk membalas komentar"}
+                value={replyComment}
+                onChange={(e) => setReplyComment(e.target.value)}
+                maxLength={500}
+                disabled={!currentUser || isSubmitting}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">{replyComment.length}/500</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setReplyTo(null); setReplyComment(""); }}
+                    className="px-3 py-1 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+                    disabled={isSubmitting}
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={(e) => handleSubmit(e, cmt.id, cmt.author)}
+                    disabled={!currentUser || isSubmitting || replyComment.trim() === ""}
+                    className={`px-4 py-1 rounded-lg text-sm font-medium transition-all ${!currentUser || isSubmitting || replyComment.trim() === "" ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 text-white hover:bg-cyan-700'}`}
+                  >
+                    {isSubmitting ? "Mengirim..." : "Kirim"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      {cmt.replies && cmt.replies.length > 0 && (
+        <div className="space-y-4">
+          {cmt.replies.sort((a, b) => {
+            const timeA = a.createdAt?.toDate?.() || new Date(0);
+            const timeB = b.createdAt?.toDate?.() || new Date(0);
+            return timeA - timeB;
+          }).map(reply => (
+            <Comment
+              key={reply.id}
+              cmt={reply}
+              depth={depth + 1}
+              currentUser={currentUser}
+              commentLikes={commentLikes}
+              reportedComments={reportedComments}
+              isSubmitting={isSubmitting}
+              replyTo={replyTo}
+              setReplyTo={setReplyTo}
+              replyComment={replyComment}
+              setReplyComment={setReplyComment}
+              handleSubmit={handleSubmit}
+              handleLikeComment={handleLikeComment}
+              handleReplyClick={handleReplyClick}
+              handleDeleteClick={handleDeleteClick}
+              handleReportClick={handleReportClick}
+              logSecurityEvent={logSecurityEvent}
+              setFocusedComment={setFocusedComment}
+              focusedComment={focusedComment}
+              sanitizeInput={sanitizeInput}
+              formatTimeAgo={formatTimeAgo}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [comment, setComment] = useState("");
@@ -27,6 +407,36 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [replyTo, setReplyTo] = useState(null);
   const [replyComment, setReplyComment] = useState("");
   const [commentLikes, setCommentLikes] = useState({});
+  const [reportedComments, setReportedComments] = useState({});
+
+  // Modal states
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
+  const [reportModal, setReportModal] = useState({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
+  const [spamWarning, setSpamWarning] = useState({ isOpen: false, remainingTime: 0 });
+
+  // Input sanitization
+  const sanitizeInput = (input) => {
+    return DOMPurify.sanitize(input, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: []
+    }).trim();
+  };
+
+  // Security logging
+  const logSecurityEvent = async (action, details) => {
+    try {
+      await addDoc(collection(db, 'security_logs'), {
+        action,
+        userEmail: currentUser?.email || 'anonymous',
+        details,
+        timestamp: serverTimestamp(),
+        userAgent: navigator.userAgent,
+        ipAddress: 'N/A'
+      });
+    } catch (error) {
+      console.error('Failed to log security event:', error);
+    }
+  };
 
   // Fetch comments and likes in real-time
   const fetchComments = useCallback(() => {
@@ -50,12 +460,41 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       }));
       setComments(commentsData);
       if (onCommentCountChange) onCommentCountChange(commentsData.length);
-      setLoading(false); // Ensure loading is turned off after data is received
+      setLoading(false);
+
+      if (currentUser) {
+        const newReportedComments = {};
+        Promise.all(
+          commentsData.map(async (comment) => {
+            const reportQuery = query(
+              collection(db, `news/${newsId}/comments/${comment.id}/reports`),
+              where('reportedBy', '==', currentUser.uid)
+            );
+            try {
+              const reportSnapshot = await getDocs(reportQuery);
+              newReportedComments[comment.id] = !reportSnapshot.empty;
+            } catch (error) {
+              console.error('Error fetching report status for comment:', comment.id, error);
+              logSecurityEvent('FETCH_REPORT_STATUS_ERROR', { commentId: comment.id, error: error.message });
+            }
+          })
+        ).then(() => {
+          setReportedComments(newReportedComments);
+          console.log('Reported comments updated:', newReportedComments);
+        }).catch((err) => {
+          console.error("Error fetching report status:", err);
+          logSecurityEvent('FETCH_REPORT_STATUS_BATCH_ERROR', { error: err.message });
+        });
+      }
     }, (err) => {
       console.error("Error fetching comments:", err);
       setError("Gagal memuat komentar.");
-      toast.error("Gagal memuat komentar.");
-      setLoading(false); // Turn off loading on error
+      toast.error("Gagal memuat komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'comments-error'
+      });
+      setLoading(false);
     });
 
     // Fetch likes for each comment
@@ -71,11 +510,13 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           likesData[commentDoc.id] = { count, userLiked };
         }, (err) => {
           console.error("Error fetching likes:", err);
+          logSecurityEvent('FETCH_LIKES_ERROR', { commentId: commentDoc.id, error: err.message });
         });
       });
       setCommentLikes(likesData);
     }, (err) => {
       console.error("Error setting up likes listener:", err);
+      logSecurityEvent('SETUP_LIKES_LISTENER_ERROR', { error: err.message });
     });
 
     return () => {
@@ -89,25 +530,50 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     return cleanup;
   }, [fetchComments]);
 
+  const checkSpamLimit = () => {
+    const now = Date.now();
+    const timeDiff = now - lastCommentTime;
+    const requiredDelay = 5000; // 5 seconds
+
+    if (timeDiff < requiredDelay) {
+      const remainingTime = requiredDelay - timeDiff;
+      setSpamWarning({ isOpen: true, remainingTime });
+      logSecurityEvent('SPAM_LIMIT_EXCEEDED', { remainingTime, newsId });
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (e, parentId = null, replyToAuthor = null) => {
     e.preventDefault();
-    const textToSubmit = parentId ? replyComment.trim() : comment.trim();
+    const textToSubmit = sanitizeInput(parentId ? replyComment : comment);
+    
     if (!currentUser) {
       setError("Silakan masuk untuk mengirim komentar.");
+      toast.error("Silakan masuk untuk mengirim komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'submit-no-user'
+      });
+      logSecurityEvent('UNAUTHENTICATED_SUBMIT_ATTEMPT', { newsId, parentId });
       return;
     }
+
+    if (!checkSpamLimit()) {
+      return;
+    }
+
     setIsSubmitting(true);
 
     if (textToSubmit.length < 3 || textToSubmit.length > 500) {
       setError("Komentar harus antara 3 hingga 500 karakter.");
+      toast.error("Komentar harus antara 3 hingga 500 karakter.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'invalid-length'
+      });
       setIsSubmitting(false);
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastCommentTime < 3000) {
-      setError("Tunggu beberapa detik sebelum mengirim komentar lagi.");
-      setIsSubmitting(false);
+      logSecurityEvent('INVALID_COMMENT_LENGTH', { length: textToSubmit.length, newsId });
       return;
     }
 
@@ -115,12 +581,13 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       const commentsRef = collection(db, `news/${newsId}/comments`);
       await addDoc(commentsRef, {
         text: textToSubmit,
-        author: currentUser.displayName || currentUser.email || "User",
+        author: sanitizeInput(currentUser.displayName || currentUser.email || "User"),
         userId: currentUser.uid,
         userEmail: currentUser.email,
+        photoURL: currentUser.photoURL || null,
         createdAt: serverTimestamp(),
         parentId: parentId || null,
-        ...(parentId && { replyToAuthor })
+        ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) })
       });
 
       if (parentId) {
@@ -129,26 +596,43 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       } else {
         setComment("");
       }
-      setLastCommentTime(now);
+      setLastCommentTime(Date.now());
       setError(null);
+      logSecurityEvent('COMMENT_SUBMITTED', { newsId, parentId, textLength: textToSubmit.length });
     } catch (err) {
       console.error("Error submitting comment:", err);
       setError("Gagal mengirim komentar.");
-      toast.error("Gagal mengirim komentar.");
+      toast.error("Gagal mengirim komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'submit-error'
+      });
+      logSecurityEvent('COMMENT_SUBMIT_ERROR', { newsId, parentId, error: err.message });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (commentId) => {
-    if (!currentUser) {
-      setError("Silakan masuk untuk menghapus komentar.");
-      return;
+  const handleDeleteClick = (commentId) => {
+    const comment = comments.find(c => c.id === commentId);
+    if (comment) {
+      setDeleteModal({ isOpen: true, commentId, isDeleting: false, commentText: sanitizeInput(comment.text) });
     }
+  };
+
+  const handleDeleteConfirm = async () => {
+    const { commentId } = deleteModal;
+    if (!currentUser || !commentId) return;
 
     const comment = comments.find(c => c.id === commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
+      toast.error("Komentar tidak ditemukan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'delete-not-found'
+      });
+      logSecurityEvent('DELETE_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -157,24 +641,174 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
 
     if (!isAdmin && !isOwner) {
       setError("Anda tidak memiliki izin untuk menghapus komentar ini.");
+      toast.error("Anda tidak memiliki izin untuk menghapus komentar ini.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'delete-no-permission'
+      });
+      logSecurityEvent('UNAUTHORIZED_DELETE_ATTEMPT', { 
+        commentId, 
+        userId: currentUser.uid, 
+        commentUserId: comment.userId 
+      });
       return;
     }
+
+    setDeleteModal(prev => ({ ...prev, isDeleting: true }));
 
     try {
       await deleteDoc(doc(db, `news/${newsId}/comments`, commentId));
       // Remove nested replies
       const replies = comments.filter(c => c.parentId === commentId);
-      replies.forEach(reply => handleDelete(reply.id));
+      for (const reply of replies) {
+        await deleteDoc(doc(db, `news/${newsId}/comments`, reply.id));
+      }
+      setDeleteModal({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
+      toast.success("Komentar berhasil dihapus.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'delete-success'
+      });
+      logSecurityEvent('COMMENT_DELETED', { 
+        commentId, 
+        isAdmin, 
+        commentText: comment.text 
+      });
     } catch (err) {
       console.error("Error deleting comment:", err);
       setError("Gagal menghapus komentar.");
-      toast.error("Gagal menghapus komentar.");
+      toast.error("Gagal menghapus komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'delete-error'
+      });
+      logSecurityEvent('DELETE_COMMENT_ERROR', { commentId, error: err.message });
+      setDeleteModal(prev => ({ ...prev, isDeleting: false }));
+    }
+  };
+
+  const handleReportClick = (commentId) => {
+    if (!currentUser) {
+      setError("Silakan masuk untuk melaporkan komentar.");
+      toast.error("Silakan masuk untuk melaporkan komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-no-user'
+      });
+      logSecurityEvent('UNAUTHENTICATED_REPORT_ATTEMPT', { commentId });
+      return;
+    }
+
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) {
+      setError("Komentar tidak ditemukan.");
+      toast.error("Komentar tidak ditemukan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-not-found'
+      });
+      logSecurityEvent('REPORT_NONEXISTENT_COMMENT', { commentId });
+      return;
+    }
+
+    if (reportedComments[commentId]) {
+      toast.warn("Anda telah melaporkan komentar ini.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-duplicate'
+      });
+      logSecurityEvent('DUPLICATE_REPORT_ATTEMPT', { commentId });
+      return;
+    }
+
+    setReportModal({ isOpen: true, commentId, isSubmitting: false, commentText: sanitizeInput(comment.text) });
+  };
+
+  const handleReportSubmit = async (reason) => {
+    const { commentId } = reportModal;
+    if (!currentUser || !commentId) return;
+
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) {
+      setError("Komentar tidak ditemukan.");
+      toast.error("Komentar tidak ditemukan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-not-found'
+      });
+      logSecurityEvent('REPORT_NONEXISTENT_COMMENT', { commentId });
+      return;
+    }
+
+    const sanitizedReason = sanitizeInput(reason);
+
+    setReportModal(prev => ({ ...prev, isSubmitting: true }));
+
+    try {
+      // Fetch news document to get title and slug
+      const newsDoc = await getDoc(doc(db, 'news', newsId));
+      const newsData = newsDoc.exists() ? newsDoc.data() : {};
+
+      // Store report in top-level reports collection
+      const reportsRef = collection(db, 'reports');
+      await addDoc(reportsRef, {
+        reportedBy: currentUser.uid,
+        reporterEmail: currentUser.email,
+        reason: sanitizedReason,
+        commentText: sanitizeInput(comment.text),
+        commentId: commentId,
+        newsId: newsId,
+        title: newsData.judul || newsData.title || 'Unknown Title',
+        newsSlug: newsData.slug || '',
+        status: 'pending',
+        timestamp: serverTimestamp()
+      });
+
+      // Optionally, keep the comment-specific report for tracking
+      const commentReportsRef = collection(db, `news/${newsId}/comments/${commentId}/reports`);
+      await addDoc(commentReportsRef, {
+        reportedBy: currentUser.uid,
+        reporterEmail: currentUser.email,
+        reason: sanitizedReason,
+        commentText: sanitizeInput(comment.text),
+        timestamp: serverTimestamp()
+      });
+      
+      setReportedComments(prev => ({ ...prev, [commentId]: true }));
+      setReportModal({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
+      toast.success("Laporan berhasil dikirim. Terima kasih!", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-success'
+      });
+      logSecurityEvent('REPORT_SUBMITTED', { 
+        commentId, 
+        reason: sanitizedReason, 
+        commentText: comment.text,
+        newsId
+      });
+    } catch (err) {
+      console.error("Error reporting comment:", err);
+      setError("Gagal mengirim laporan.");
+      toast.error("Gagal mengirim laporan.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'report-error'
+      });
+      logSecurityEvent('REPORT_SUBMIT_ERROR', { commentId, newsId, error: err.message });
+      setReportModal(prev => ({ ...prev, isSubmitting: false }));
     }
   };
 
   const handleLikeComment = async (commentId) => {
     if (!currentUser) {
       setError("Silakan masuk untuk menyukai komentar.");
+      toast.error("Silakan masuk untuk menyukai komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'like-no-user'
+      });
+      logSecurityEvent('UNAUTHENTICATED_LIKE_ATTEMPT', { commentId });
       return;
     }
 
@@ -184,14 +818,35 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     try {
       if (likes.userLiked) {
         await deleteDoc(likeRef);
+        logSecurityEvent('LIKE_REMOVED', { commentId });
       } else {
         await setDoc(likeRef, { userId: currentUser.uid, timestamp: serverTimestamp() });
+        logSecurityEvent('LIKE_ADDED', { commentId });
       }
     } catch (err) {
       console.error("Error liking comment:", err);
       setError("Gagal menyukai komentar.");
-      toast.error("Gagal menyukai komentar.");
+      toast.error("Gagal menyukai komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'like-error'
+      });
+      logSecurityEvent('LIKE_ERROR', { commentId, error: err.message });
     }
+  };
+
+  const handleReplyClick = (commentId, author) => {
+    if (!currentUser) {
+      setError("Silakan masuk untuk membalas komentar.");
+      toast.error("Silakan masuk untuk membalas komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'reply-no-user'
+      });
+      logSecurityEvent('UNAUTHENTICATED_REPLY_ATTEMPT', { commentId });
+      return;
+    }
+    setReplyTo(replyTo?.id === commentId ? null : { id: commentId, author: author || "User" });
   };
 
   const formatTimeAgo = (date) => {
@@ -232,126 +887,53 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     return rootComments;
   };
 
-  const renderComment = (cmt, depth = 0) => {
-    const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
-    const isOwner = cmt.userId === currentUser?.uid;
-    const canDelete = isAdmin || isOwner;
-    const likes = commentLikes[cmt.id] || { count: 0, userLiked: currentUser ? !!currentUser.uid : false };
-
-    return (
-      <div key={cmt.id} className={`space-y-4`}>
-        <div
-          className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
-          onMouseEnter={() => setFocusedComment(cmt.id)}
-          onMouseLeave={() => setFocusedComment(null)}
-        >
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                {(cmt.author || "U").charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-slate-800">{cmt.author || "User"}</span>
-                  {isAdmin && cmt.userId === currentUser?.uid && (
-                    <span className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full">Admin</span>
-                  )}
-                  {cmt.parentId && cmt.replyToAuthor && (
-                    <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Membalas {cmt.replyToAuthor}</span>
-                  )}
-                </div>
-                <span className="text-xs text-slate-500">{formatTimeAgo(cmt.createdAt)}</span>
-              </div>
-            </div>
-            {canDelete && (
-              <button
-                onClick={() => handleDelete(cmt.id)}
-                className="opacity-0 group-hover:opacity-100 transition-all duration-300 text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg"
-                title="Hapus komentar"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          <div className="mb-4">
-            <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">{cmt.text}</p>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => handleLikeComment(cmt.id)}
-                className={`flex items-center gap-1 text-sm transition-colors ${likes.userLiked ? 'text-red-500 font-semibold' : 'text-slate-500 hover:text-red-500'}`}
-                disabled={isSubmitting}
-              >
-                <Heart className={`w-4 h-4 ${likes.userLiked ? 'fill-current' : ''}`} />
-                <span>{likes.count}</span>
-              </button>
-              <button
-                onClick={() => setReplyTo(replyTo?.id === cmt.id ? null : { id: cmt.id, author: cmt.author || "User" })}
-                className="flex items-center gap-1 text-sm text-slate-500 hover:text-cyan-600 transition-colors"
-              >
-                <Reply className="w-4 h-4" />
-                <span>Balas</span>
-              </button>
-              {cmt.replies && cmt.replies.length > 0 && (
-                <span className="text-xs text-slate-400">{cmt.replies.length} balasan</span>
-              )}
-            </div>
-          </div>
-          {replyTo && replyTo.id === cmt.id && (
-            <div className="mt-4 p-4 bg-slate-50 rounded-lg">
-              <div className="space-y-3">
-                <textarea
-                  className="w-full p-3 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
-                  rows="3"
-                  placeholder={`Balas ${cmt.author || "User"}...`}
-                  value={replyComment}
-                  onChange={(e) => setReplyComment(e.target.value)}
-                  maxLength={500}
-                  disabled={isSubmitting}
-                />
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">{replyComment.length}/500</span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => { setReplyTo(null); setReplyComment(""); }}
-                      className="px-3 py-1 text-sm text-slate-600 hover:text-slate-800 transition-colors"
-                      disabled={isSubmitting}
-                    >
-                      Batal
-                    </button>
-                    <button
-                      onClick={(e) => handleSubmit(e, cmt.id, cmt.author)}
-                      disabled={isSubmitting || replyComment.trim() === ""}
-                      className={`px-4 py-1 rounded-lg text-sm font-medium transition-all ${isSubmitting || replyComment.trim() === "" ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 text-white hover:bg-cyan-700'}`}
-                    >
-                      {isSubmitting ? "Mengirim..." : "Kirim"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        {cmt.replies && cmt.replies.length > 0 && (
-          <div className="space-y-4">
-            {cmt.replies.sort((a, b) => {
-              const timeA = a.createdAt?.toDate?.() || new Date(0);
-              const timeB = b.createdAt?.toDate?.() || new Date(0);
-              return timeA - timeB;
-            }).map(reply => renderComment(reply, depth + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const organizedComments = organizeComments(comments);
   const canComment = !!currentUser;
 
   return (
     <div className="space-y-6">
+      <style>
+        {`
+          .toastify {
+            z-index: 100001 !important;
+            position: fixed !important;
+            top: 10px !important;
+            width: 320px !important;
+            font-family: Arial, sans-serif !important;
+          }
+          .Toastify__toast--success {
+            background: #06b6d4 !important;
+            color: white !important;
+          }
+          .Toastify__toast--error {
+            background: #ef4444 !important;
+            color: white !important;
+          }
+          .Toastify__toast--warn {
+            background: #f59e0b !important;
+            color: white !important;
+          }
+        `}
+      </style>
+      <SpamWarningModal 
+        isOpen={spamWarning.isOpen}
+        onClose={() => setSpamWarning({ isOpen: false, remainingTime: 0 })}
+        remainingTime={spamWarning.remainingTime}
+      />
+      <DeleteConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, commentId: null, isDeleting: false, commentText: '' })}
+        onConfirm={handleDeleteConfirm}
+        isDeleting={deleteModal.isDeleting}
+        commentText={deleteModal.commentText}
+      />
+      <ReportModal
+        isOpen={reportModal.isOpen}
+        onClose={() => setReportModal({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' })}
+        onSubmit={handleReportSubmit}
+        isSubmitting={reportModal.isSubmitting}
+        commentText={reportModal.commentText}
+      />
       <div className="flex items-center gap-3">
         <MessageCircle className="w-6 h-6 text-cyan-600" />
         <h3 className="text-xl font-bold text-slate-800">Komentar ({comments.length})</h3>
@@ -359,8 +941,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
         <h4 className="font-bold text-blue-800 mb-2">Rules Berkomentar</h4>
         <div className="text-sm text-blue-700 space-y-1">
-          <p>Harap komentar yang baik aja</p>
-          <p>jangan spam, kalau spam bakalan kena sanksi</p>
+          <p>Harap gunakan bahasa yang sopan</p>
+          <p>Jangan spam, tunggu 5 detik antara komentar</p>
+          <p>Gunakan fitur laporkan untuk konten yang tidak pantas</p>
         </div>
       </div>
       {error && (
@@ -371,7 +954,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           <textarea
             className="w-full p-4 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 text-slate-800 resize-none transition-all"
             rows="4"
-            placeholder="Tulis komentar Anda..."
+            placeholder={canComment ? "Tulis komentar Anda..." : "Silakan masuk untuk mengirim komentar"}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             disabled={!canComment || isSubmitting}
@@ -401,7 +984,31 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
             <p className="text-slate-500 text-sm mt-1">Jadilah yang pertama untuk berkomentar!</p>
           </div>
         ) : (
-          organizedComments.map(comment => renderComment(comment))
+          organizedComments.map(comment => (
+            <Comment
+              key={comment.id}
+              cmt={comment}
+              depth={0}
+              currentUser={currentUser}
+              commentLikes={commentLikes}
+              reportedComments={reportedComments}
+              isSubmitting={isSubmitting}
+              replyTo={replyTo}
+              setReplyTo={setReplyTo}
+              replyComment={replyComment}
+              setReplyComment={setReplyComment}
+              handleSubmit={handleSubmit}
+              handleLikeComment={handleLikeComment}
+              handleReplyClick={handleReplyClick}
+              handleDeleteClick={handleDeleteClick}
+              handleReportClick={handleReportClick}
+              logSecurityEvent={logSecurityEvent}
+              setFocusedComment={setFocusedComment}
+              focusedComment={focusedComment}
+              sanitizeInput={sanitizeInput}
+              formatTimeAgo={formatTimeAgo}
+            />
+          ))
         )}
       </div>
     </div>

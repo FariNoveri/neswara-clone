@@ -4,7 +4,7 @@ import { db } from "../../firebaseconfig";
 import { doc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, onSnapshot, setDoc } from "firebase/firestore";
 import LikeButton from "./LikeButton";
 import CommentBox from "./CommentBox";
-import ReportModal from "./ReportModal"; // Adjusted import path
+import ReportModal from "./ReportModal";
 import { useAuth } from "../auth/useAuth";
 import { ArrowLeft, Eye, User, Calendar, Share2, Bookmark, MessageCircle, Flag } from "lucide-react";
 import { toast } from "react-toastify";
@@ -59,8 +59,42 @@ const NewsDetail = () => {
   const initialFetchRef = useRef(false);
 
   useEffect(() => {
+    const ensureUserDocument = async (user) => {
+      if (!user) return false;
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            email: user.email || "anonymous",
+            isAdmin: ADMIN_EMAILS.includes(user.email) || false,
+            createdAt: serverTimestamp(),
+          });
+          console.log("Created user document for:", user.uid);
+          // Wait briefly to ensure Firestore syncs the document
+          await new Promise(resolve => setTimeout(resolve, 500));
+          // Verify document creation
+          const verifySnap = await getDoc(userRef);
+          if (!verifySnap.exists()) {
+            throw new Error("Failed to verify user document creation");
+          }
+          return true;
+        }
+        return true;
+      } catch (err) {
+        console.error("Error creating/verifying user document:", err);
+        await addDoc(collection(db, "logs"), {
+          action: "USER_DOCUMENT_ERROR",
+          userEmail: user.email || "anonymous",
+          details: { uid: user.uid, error: err.message },
+          timestamp: serverTimestamp(),
+        });
+        return false;
+      }
+    };
+
     const fetchNews = async () => {
-      console.log("FetchNews called with slug:", slug);
+      console.log("FetchNews called with slug:", slug, "currentUser:", currentUser?.uid);
       if (!slug || slug.trim() === "") {
         console.error("Invalid or empty slug:", slug);
         setError("Slug berita tidak valid.");
@@ -92,6 +126,15 @@ const NewsDetail = () => {
       setLoading(true);
       setError(null);
       try {
+        // Ensure user document exists before attempting views update
+        let userDocCreated = true;
+        if (currentUser) {
+          userDocCreated = await ensureUserDocument(currentUser);
+          if (!userDocCreated) {
+            console.warn("Skipping views update due to user document creation failure");
+          }
+        }
+
         const q = query(collection(db, "news"), where("slug", "==", slug.trim()));
         const snapshot = await getDocs(q);
         let newsData = null;
@@ -126,7 +169,7 @@ const NewsDetail = () => {
             console.log(`Initial fetch detected slug mismatch: redirecting from ${slug} to ${newsData.slug}`);
             navigate(`/berita/${newsData.slug}`, { replace: true });
             if (currentUser) {
-              addDoc(collection(db, "logs"), {
+              await addDoc(collection(db, "logs"), {
                 action: "INITIAL_SLUG_REDIRECT",
                 userEmail: currentUser?.email || "anonymous",
                 details: { newsId: newsData.id, oldSlug: slug, newSlug: newsData.slug },
@@ -136,13 +179,25 @@ const NewsDetail = () => {
             return;
           }
 
-          if (currentUser && newsData.id) {
+          // Update views for authenticated users with verified user document
+          if (currentUser && newsData.id && userDocCreated) {
             try {
               const docRef = doc(db, "news", newsData.id);
               await updateDoc(docRef, { views: increment(1) });
+              console.log("Views incremented for news:", newsData.id);
             } catch (updateErr) {
-              console.error("Error updating views:", updateErr);
-              toast.error("Gagal memperbarui jumlah tampilan.");
+              console.warn("Error updating views (non-critical):", updateErr);
+              toast.warn("Gagal memperbarui jumlah tampilan.", {
+                position: 'top-center',
+                autoClose: 3000,
+                toastId: 'views-error'
+              });
+              await addDoc(collection(db, "logs"), {
+                action: "VIEWS_UPDATE_ERROR",
+                userEmail: currentUser?.email || "anonymous",
+                details: { newsId: newsData.id, slug, error: updateErr.message },
+                timestamp: serverTimestamp(),
+              });
             }
           }
         } else {
@@ -161,11 +216,27 @@ const NewsDetail = () => {
             slug: "",
             likeCount: 0
           });
+          if (currentUser) {
+            await addDoc(collection(db, "logs"), {
+              action: "NEWS_NOT_FOUND",
+              userEmail: currentUser?.email || "anonymous",
+              details: { slug, error: "No news found for slug" },
+              timestamp: serverTimestamp(),
+            });
+          }
         }
       } catch (err) {
         console.error("Error fetching news:", err);
         setError("Gagal memuat berita: " + err.message);
         toast.error("Gagal memuat berita.");
+        if (currentUser) {
+          await addDoc(collection(db, "logs"), {
+            action: "FETCH_NEWS_ERROR",
+            userEmail: currentUser?.email || "anonymous",
+            details: { slug, error: err.message },
+            timestamp: serverTimestamp(),
+          });
+        }
         setNews({
           id: "default",
           title: "Kesalahan Memuat Berita",
@@ -357,7 +428,7 @@ const NewsDetail = () => {
         console.error("Error sharing:", err);
         toast.error("Gagal membagikan berita.");
         if (currentUser) {
-          addDoc(collection(db, "logs"), {
+          await addDoc(collection(db, "logs"), {
             action: "SHARE_NEWS_ERROR",
             userEmail: currentUser?.email || "anonymous",
             details: { newsId, slug, error: err.message },
