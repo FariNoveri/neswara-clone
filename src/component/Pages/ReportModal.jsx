@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Flag, X } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebaseconfig';
 import { toast } from 'react-toastify';
 
@@ -39,6 +39,20 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
 
     setIsSubmitting(true);
     try {
+      // Check for existing report by the same user for this news article
+      const q = query(
+        collection(db, 'reports'),
+        where('newsId', '==', newsId),
+        where('userId', '==', currentUser.uid)
+      );
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        toast.warn('Anda sudah melaporkan berita ini.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Submit new report
       await addDoc(collection(db, 'reports'), {
         newsId,
         userId: currentUser.uid,
@@ -47,6 +61,7 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
         customReason: selectedReason === 'other' ? customReason.trim() : '',
         title: newsTitle || 'Unknown Title',
         timestamp: serverTimestamp(),
+        status: 'pending', // Added for ReportManagement to track status
       });
       await addDoc(collection(db, 'logs'), {
         action: 'REPORT_NEWS',

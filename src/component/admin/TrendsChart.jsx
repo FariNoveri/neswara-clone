@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
-import { collection, getDocs, query, where, collectionGroup } from 'firebase/firestore';
+import { collection, query, collectionGroup, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebaseconfig';
 import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,12 +18,10 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
   const [isLoading, setIsLoading] = useState(true);
   const [selectedMetric, setSelectedMetric] = useState('all');
   const [chartData, setChartData] = useState([]);
-  // Initialize timeRange from localStorage or default to '7days'
   const [timeRange, setTimeRange] = useState(() => {
     return localStorage.getItem('trendsChartTimeRange') || '7days';
   });
 
-  // Save timeRange to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('trendsChartTimeRange', timeRange);
   }, [timeRange]);
@@ -37,160 +35,243 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
         users: {},
         reports: {}
       });
+      setChartData([]);
       setIsLoading(false);
       return;
     }
 
-    const fetchTrendsData = async () => {
+    const fetchTrendsData = () => {
       setIsLoading(true);
-      try {
-        const today = new Date();
-        let rangeDays;
-        switch (timeRange) {
-          case '30days':
-            rangeDays = 30;
-            break;
-          case '365days':
-            rangeDays = 365;
-            break;
-          default:
-            rangeDays = 7;
-        }
-        const rangeStart = new Date(today);
-        rangeStart.setDate(today.getDate() - (rangeDays - 1));
-        rangeStart.setHours(0, 0, 0, 0);
+      const today = new Date();
+      let rangeDays;
+      switch (timeRange) {
+        case '30days':
+          rangeDays = 30;
+          break;
+        case '365days':
+          rangeDays = 365;
+          break;
+        default:
+          rangeDays = 7;
+      }
+      const rangeStart = new Date(today);
+      rangeStart.setDate(today.getDate() - (rangeDays - 1));
+      rangeStart.setHours(0, 0, 0, 0);
 
-        const data = [];
-        const newsTrends = {};
-        const commentsTrends = {};
-        const viewsTrends = {};
-        const usersTrends = {};
-        const reportsTrends = {};
+      const data = [];
+      const newsTrends = {};
+      const commentsTrends = {};
+      const viewsTrends = {};
+      const usersTrends = {};
+      const reportsTrends = {};
 
-        // Generate date range
-        for (let i = 0; i < rangeDays; i++) {
-          const date = new Date(rangeStart);
-          date.setDate(rangeStart.getDate() + i);
-          const dateStr = date.toLocaleDateString('id-ID');
-          const shortDate = rangeDays <= 30 
-            ? date.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })
-            : date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
-          newsTrends[dateStr] = 0;
-          commentsTrends[dateStr] = 0;
-          viewsTrends[dateStr] = 0;
-          usersTrends[dateStr] = 0;
-          reportsTrends[dateStr] = 0;
-          data.push({
-            date: shortDate,
-            fullDate: dateStr,
-            news: 0,
-            comments: 0,
-            views: 0,
-            users: 0,
-            reports: 0
+      for (let i = 0; i < rangeDays; i++) {
+        const date = new Date(rangeStart);
+        date.setDate(rangeStart.getDate() + i);
+        const dateStr = date.toLocaleDateString('id-ID');
+        const shortDate = rangeDays <= 30
+          ? date.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })
+          : date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
+        newsTrends[dateStr] = 0;
+        commentsTrends[dateStr] = 0;
+        viewsTrends[dateStr] = 0;
+        usersTrends[dateStr] = 0;
+        reportsTrends[dateStr] = 0;
+        data.push({
+          date: shortDate,
+          fullDate: dateStr,
+          news: 0,
+          comments: 0,
+          views: 0,
+          users: 0,
+          reports: 0
+        });
+      }
+
+      // Fetch news
+      const newsQuery = query(collection(db, 'news'));
+      const unsubscribeNews = onSnapshot(newsQuery, (snapshot) => {
+        try {
+          Object.keys(newsTrends).forEach(dateStr => {
+            newsTrends[dateStr] = 0;
+            viewsTrends[dateStr] = 0;
+            data.find(d => d.fullDate === dateStr).news = 0;
+            data.find(d => d.fullDate === dateStr).views = 0;
           });
-        }
 
-        // Fetch news
-        const newsQuery = query(
-          collection(db, 'news'),
-          where('createdAt', '>=', rangeStart),
-          where('createdAt', '<=', today)
-        );
-        const newsSnapshot = await getDocs(newsQuery);
-        newsSnapshot.forEach(doc => {
-          const createdAt = doc.data().createdAt?.toDate();
-          if (createdAt) {
+          let newsCount = 0;
+          snapshot.forEach(doc => {
+            const createdAt = doc.data().createdAt?.toDate() || new Date();
             const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (newsTrends[dateStr] !== undefined) {
+            if (createdAt >= rangeStart && createdAt <= today && newsTrends[dateStr] !== undefined) {
               newsTrends[dateStr]++;
               data.find(d => d.fullDate === dateStr).news++;
               viewsTrends[dateStr] += doc.data().views || 0;
               data.find(d => d.fullDate === dateStr).views += doc.data().views || 0;
+              newsCount++;
             }
-          }
-        });
+          });
 
-        // Fetch comments
-        const commentsQuery = query(
-          collectionGroup(db, 'comments'),
-          where('createdAt', '>=', rangeStart),
-          where('createdAt', '<=', today)
-        );
-        const commentsSnapshot = await getDocs(commentsQuery);
-        commentsSnapshot.forEach(doc => {
-          const createdAt = doc.data().createdAt?.toDate();
-          if (createdAt) {
+          setTrends(prev => ({ ...prev, news: { ...newsTrends }, views: { ...viewsTrends } }));
+          setChartData([...data]);
+          console.log('News snapshot:', { newsCount, data: data.map(d => ({ date: d.fullDate, news: d.news, views: d.views })) });
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_NEWS_SUCCESS', { timeRange, newsCount });
+          }
+        } catch (error) {
+          console.error('Error fetching news trends:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_NEWS_ERROR', { error: error.message, timeRange });
+          }
+          toast.error('Gagal memuat tren berita.');
+        }
+      }, (error) => {
+        console.error('Error in news snapshot:', error);
+        if (typeof logActivity === 'function') {
+          logActivity('FETCH_TRENDS_NEWS_SNAPSHOT_ERROR', { error: error.message, timeRange });
+        }
+        toast.error('Gagal memuat pembaruan tren berita.');
+      });
+
+      // Fetch comments
+      const commentsQuery = query(collectionGroup(db, 'comments'));
+      const unsubscribeComments = onSnapshot(commentsQuery, (snapshot) => {
+        try {
+          Object.keys(commentsTrends).forEach(dateStr => {
+            commentsTrends[dateStr] = 0;
+            data.find(d => d.fullDate === dateStr).comments = 0;
+          });
+
+          let commentsCount = 0;
+          snapshot.forEach(doc => {
+            const createdAt = doc.data().createdAt?.toDate() || new Date();
             const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (commentsTrends[dateStr] !== undefined) {
+            if (createdAt >= rangeStart && createdAt <= today && commentsTrends[dateStr] !== undefined) {
               commentsTrends[dateStr]++;
               data.find(d => d.fullDate === dateStr).comments++;
+              commentsCount++;
             }
-          }
-        });
+          });
 
-        // Fetch users
-        const usersQuery = query(
-          collection(db, 'users'),
-          where('createdAt', '>=', rangeStart),
-          where('createdAt', '<=', today)
-        );
-        const usersSnapshot = await getDocs(usersQuery);
-        usersSnapshot.forEach(doc => {
-          const createdAt = doc.data().createdAt?.toDate();
-          if (createdAt) {
+          setTrends(prev => ({ ...prev, comments: { ...commentsTrends } }));
+          setChartData([...data]);
+          console.log('Comments snapshot:', { commentsCount, data: data.map(d => ({ date: d.fullDate, comments: d.comments })) });
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_COMMENTS_SUCCESS', { timeRange, commentsCount });
+          }
+        } catch (error) {
+          console.error('Error fetching comments trends:', error);
+          if (error.message.includes('index')) {
+            console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+          }
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_COMMENTS_ERROR', { error: error.message, timeRange });
+          }
+          toast.error('Gagal memuat tren komentar.');
+        }
+      }, (error) => {
+        console.error('Error in comments snapshot:', error);
+        if (typeof logActivity === 'function') {
+          logActivity('FETCH_TRENDS_COMMENTS_SNAPSHOT_ERROR', { error: error.message, timeRange });
+        }
+        toast.error('Gagal memuat pembaruan tren komentar.');
+      });
+
+      // Fetch users
+      const usersQuery = query(collection(db, 'users'));
+      const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
+        try {
+          Object.keys(usersTrends).forEach(dateStr => {
+            usersTrends[dateStr] = 0;
+            data.find(d => d.fullDate === dateStr).users = 0;
+          });
+
+          let usersCount = 0;
+          snapshot.forEach(doc => {
+            const createdAt = doc.data().createdAt?.toDate() || new Date();
             const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (usersTrends[dateStr] !== undefined) {
+            if (createdAt >= rangeStart && createdAt <= today && usersTrends[dateStr] !== undefined) {
               usersTrends[dateStr]++;
               data.find(d => d.fullDate === dateStr).users++;
+              usersCount++;
             }
-          }
-        });
+          });
 
-        // Fetch reports
-        const reportsQuery = query(
-          collection(db, 'reports'),
-          where('createdAt', '>=', rangeStart),
-          where('createdAt', '<=', today)
-        );
-        const reportsSnapshot = await getDocs(reportsQuery);
-        reportsSnapshot.forEach(doc => {
-          const createdAt = doc.data().createdAt?.toDate();
-          if (createdAt) {
+          setTrends(prev => ({ ...prev, users: { ...usersTrends } }));
+          setChartData([...data]);
+          console.log('Users snapshot:', { usersCount, data: data.map(d => ({ date: d.fullDate, users: d.users })) });
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_USERS_SUCCESS', { timeRange, usersCount });
+          }
+        } catch (error) {
+          console.error('Error fetching users trends:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_USERS_ERROR', { error: error.message, timeRange });
+          }
+          toast.error('Gagal memuat tren pengguna.');
+        }
+      }, (error) => {
+        console.error('Error in users snapshot:', error);
+        if (typeof logActivity === 'function') {
+          logActivity('FETCH_TRENDS_USERS_SNAPSHOT_ERROR', { error: error.message, timeRange });
+        }
+        toast.error('Gagal memuat pembaruan tren pengguna.');
+      });
+
+      // Fetch reports
+      const reportsQuery = query(collection(db, 'reports'));
+      const unsubscribeReports = onSnapshot(reportsQuery, (snapshot) => {
+        try {
+          Object.keys(reportsTrends).forEach(dateStr => {
+            reportsTrends[dateStr] = 0;
+            data.find(d => d.fullDate === dateStr).reports = 0;
+          });
+
+          let reportCount = 0;
+          snapshot.forEach(doc => {
+            const createdAt = doc.data().createdAt?.toDate() || new Date();
             const dateStr = createdAt.toLocaleDateString('id-ID');
-            if (reportsTrends[dateStr] !== undefined) {
+            if (createdAt >= rangeStart && createdAt <= today && reportsTrends[dateStr] !== undefined) {
               reportsTrends[dateStr]++;
               data.find(d => d.fullDate === dateStr).reports++;
+              reportCount++;
             }
-          }
-        });
+          });
 
-        setTrends({
-          news: newsTrends,
-          comments: commentsTrends,
-          views: viewsTrends,
-          users: usersTrends,
-          reports: reportsTrends
-        });
-        setChartData(data);
-        if (typeof logActivity === 'function') {
-          await logActivity('FETCH_TRENDS_SUCCESS', { metrics: ['news', 'comments', 'views', 'users', 'reports'], timeRange });
+          setTrends(prev => ({ ...prev, reports: { ...reportsTrends } }));
+          setChartData([...data]);
+          console.log('Reports snapshot:', { reportCount, data: data.map(d => ({ date: d.fullDate, reports: d.reports })) });
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_REPORTS_SUCCESS', { timeRange, reportCount });
+          }
+        } catch (error) {
+          console.error('Error fetching reports trends:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('FETCH_TRENDS_REPORTS_ERROR', { error: error.message, timeRange });
+          }
+          toast.error('Gagal memuat tren laporan.');
         }
-      } catch (error) {
-        console.error('Error fetching trends data:', error);
+      }, (error) => {
+        console.error('Error in reports snapshot:', error);
         if (typeof logActivity === 'function') {
-          await logActivity('FETCH_TRENDS_ERROR', { error: error.message, timeRange });
-        } else {
-          console.warn('logActivity is not a function, skipping error logging');
+          logActivity('FETCH_TRENDS_REPORTS_SNAPSHOT_ERROR', { error: error.message, timeRange });
         }
-        toast.error('Gagal memuat data tren.');
-        setChartData([]);
-      } finally {
-        setIsLoading(false);
-      }
+        toast.error('Gagal memuat pembaruan tren laporan.');
+      });
+
+      setIsLoading(false);
+
+      return () => {
+        console.log('Cleaning up TrendsChart listeners');
+        unsubscribeNews();
+        unsubscribeComments();
+        unsubscribeUsers();
+        unsubscribeReports();
+      };
     };
 
-    fetchTrendsData();
+    const unsubscribe = fetchTrendsData();
+    return unsubscribe;
   }, [isAuthorized, activeTab, logActivity, timeRange]);
 
   const metrics = [

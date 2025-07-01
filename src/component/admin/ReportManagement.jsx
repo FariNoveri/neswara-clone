@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebaseconfig';
-import { collection, query, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { Flag, Search, X, Filter, Calendar, Clock, User, Trash2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { useAuth } from '../auth/useAuth';
+import { Flag, Search, X, Filter, Calendar, Clock, User, Trash2, AlertCircle, ChevronDown, ChevronUp, Eye } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { ADMIN_EMAILS } from '../config/Constants';
 
 // Custom date formatting function
 const formatDate = (date) => {
@@ -78,7 +81,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
             Batal
           </button>
           <button
-            onConfirm={onConfirm}
+            onClick={onConfirm}
             className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
           >
             Hapus
@@ -90,9 +93,9 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
 };
 
 // Report Item Component
-const ReportItem = ({ report, expanded, toggleExpand, onDelete, index, logActivity }) => {
+const ReportItem = ({ report, expanded, toggleExpand, onDelete, onResolve, index }) => {
   const getStatusColor = () => {
-    return 'bg-red-50 border-red-200'; // Reports are associated with negative actions
+    return report.status === 'resolved' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
   };
 
   return (
@@ -105,7 +108,7 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, index, logActivi
       <div className="flex items-start justify-between">
         <div className="flex items-start space-x-4 flex-1">
           <div className={`w-12 h-12 rounded-xl flex items-center justify-center border-2 ${getStatusColor()}`}>
-            <Flag className="w-5 h-5 text-red-500" />
+            <Flag className={`w-5 h-5 ${report.status === 'resolved' ? 'text-green-500' : 'text-red-500'}`} />
           </div>
           
           <div className="flex-1 min-w-0">
@@ -113,29 +116,40 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, index, logActivi
               <h3 className="text-lg font-semibold text-gray-900 truncate">
                 Laporan: {report.reason || 'N/A'}
               </h3>
-              <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                Laporan
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                report.status === 'resolved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+              }`}>
+                {report.status === 'resolved' ? 'Selesai' : 'Menunggu'}
               </span>
             </div>
             
             <p className="text-gray-700 mb-3 leading-relaxed">
-              Konten: {report.reportedContent || 'N/A'}
+              Konten: <span className="cursor-pointer text-blue-600 hover:underline" onClick={() => onResolve(report.newsSlug)}>
+                {report.title || 'N/A'}
+              </span>
             </p>
             
             <div className="flex items-center space-x-6 text-sm text-gray-500">
               <div className="flex items-center space-x-2">
                 <User className="w-4 h-4" />
-                <span>{report.reporterEmail || 'Email tidak tersedia'}</span>
+                <span>{report.userEmail || 'Email tidak tersedia'}</span>
               </div>
               <div className="flex items-center space-x-2">
                 <Clock className="w-4 h-4" />
-                <span>{formatTimestamp(report.createdAt)}</span>
+                <span>{formatTimestamp(report.timestamp)}</span>
               </div>
             </div>
           </div>
         </div>
         
         <div className="flex items-center space-x-2 ml-4">
+          <button
+            onClick={() => onResolve(report.newsSlug)}
+            className="p-2 hover:bg-cyan-50 rounded-lg transition-all duration-200 group"
+            title="Lihat berita"
+          >
+            <Eye className="w-5 h-5 text-gray-400 group-hover:text-cyan-600 transition-colors" />
+          </button>
           <button
             onClick={toggleExpand}
             className="p-2 hover:bg-gray-100 rounded-lg transition-all duration-200 group"
@@ -147,7 +161,6 @@ const ReportItem = ({ report, expanded, toggleExpand, onDelete, index, logActivi
               <ChevronDown className="w-5 h-5 text-gray-600 group-hover:text-indigo-600 transition-colors" />
             )}
           </button>
-          
           <button
             onClick={onDelete}
             className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
@@ -252,13 +265,13 @@ const ReportDetails = ({ details }) => {
   const getFieldIcon = (key) => {
     const iconMap = {
       reason: '📢',
-      reportedContent: '📜',
-      reporterEmail: '📧',
-      createdAt: '🕒',
+      title: '📜',
+      userEmail: '📧',
+      timestamp: '🕒',
       userId: '👤',
-      contentId: '📄',
-      type: '🏷️',
-      status: '⚙️'
+      newsId: '📄',
+      status: '⚙️',
+      customReason: '✍️',
     };
     return iconMap[key] || '📋';
   };
@@ -266,13 +279,13 @@ const ReportDetails = ({ details }) => {
   const getFieldLabel = (key) => {
     const labelMap = {
       reason: 'Alasan Laporan',
-      reportedContent: 'Konten yang Dilaporkan',
-      reporterEmail: 'Email Pelapor',
-      createdAt: 'Waktu Laporan',
+      title: 'Judul Berita',
+      userEmail: 'Email Pelapor',
+      timestamp: 'Waktu Laporan',
       userId: 'ID Pengguna',
-      contentId: 'ID Konten',
-      type: 'Tipe Laporan',
-      status: 'Status'
+      newsId: 'ID Berita',
+      status: 'Status',
+      customReason: 'Alasan Kustom',
     };
     return labelMap[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
   };
@@ -328,7 +341,9 @@ const ReportDetails = ({ details }) => {
   );
 };
 
-const ReportManagement = ({ logActivity }) => {
+const ReportManagement = () => {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const [reports, setReports] = useState([]);
   const [expandedReports, setExpandedReports] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -339,27 +354,83 @@ const ReportManagement = ({ logActivity }) => {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, type: '', id: null });
 
-  useEffect(() => {
-    const fetchReports = async () => {
-      setLoading(true);
-      try {
-        const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-        const reportData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setReports(reportData);
-      } catch (error) {
-        console.error('Error fetching reports:', error);
-        setError('Gagal memuat laporan.');
-        toast.error('Gagal memuat laporan.');
-      }
-      setLoading(false);
-    };
+  // Define logActivity function
+  const logActivity = async (action, details) => {
+    if (!currentUser) return;
+    try {
+      await addDoc(collection(db, 'logs'), {
+        action,
+        userEmail: currentUser.email || 'anonymous',
+        details,
+        timestamp: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error logging activity:', error);
+      toast.error('Gagal mencatat aktivitas.');
+    }
+  };
 
-    fetchReports();
-  }, [logActivity]);
+  useEffect(() => {
+    // Restrict access to admins
+    if (!currentUser || !ADMIN_EMAILS.includes(currentUser.email)) {
+      toast.warn('Akses ditolak. Hanya admin yang dapat mengakses halaman ini.');
+      navigate('/news');
+      return;
+    }
+
+    // Real-time report fetching
+    setLoading(true);
+    const q = query(collection(db, 'reports'), orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        try {
+          const reportData = await Promise.all(
+            snapshot.docs.map(async (reportDoc) => {
+              const report = { id: reportDoc.id, ...reportDoc.data() };
+              let newsData = {};
+              if (report.newsId) {
+                try {
+                  const newsDoc = await getDoc(doc(db, 'news', report.newsId));
+                  newsData = newsDoc.exists() ? newsDoc.data() : {};
+                } catch (error) {
+                  console.warn(`Failed to fetch news for newsId ${report.newsId}:`, error);
+                  await logActivity('FETCH_NEWS_ERROR', {
+                    newsId: report.newsId,
+                    error: error.message,
+                  });
+                }
+              }
+              return {
+                ...report,
+                newsSlug: newsData.slug || '',
+                title: report.title || newsData.judul || newsData.title || 'Unknown Title',
+                userEmail: report.userEmail || 'anonymous',
+                timestamp: report.timestamp || null,
+              };
+            })
+          );
+          setReports(reportData);
+          setLoading(false);
+        } catch (error) {
+          console.error('Error fetching reports:', error);
+          setError('Gagal memuat laporan.');
+          toast.error('Gagal memuat laporan.');
+          await logActivity('FETCH_REPORTS_ERROR', { error: error.message });
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error('Error in reports onSnapshot:', error);
+        setError('Gagal memuat laporan: ' + error.message);
+        toast.error('Gagal memuat laporan.');
+        logActivity('REPORTS_ONSNAPSHOT_ERROR', { error: error.message });
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser, navigate]);
 
   const toggleExpandReport = (reportId) => {
     setExpandedReports(prev => ({
@@ -386,7 +457,11 @@ const ReportManagement = ({ logActivity }) => {
         const reportData = reportDoc.data();
         await deleteDoc(doc(db, 'reports', id));
         setReports(prev => prev.filter(report => report.id !== id));
-        await logActivity('DELETE_REPORT', { reportId: id, reportedContent: reportData.reportedContent || 'N/A' });
+        await logActivity('DELETE_REPORT', { 
+          reportId: id, 
+          reportedContent: reportData.title || 'N/A',
+          reason: reportData.reason || 'N/A',
+        });
         toast.success('Laporan berhasil dihapus!');
       }
     } catch (error) {
@@ -431,6 +506,31 @@ const ReportManagement = ({ logActivity }) => {
     }
   };
 
+  const handleResolveReport = async (reportId) => {
+    try {
+      await updateDoc(doc(db, 'reports', reportId), {
+        status: 'resolved',
+        resolvedAt: serverTimestamp(),
+        resolvedBy: currentUser.email,
+      });
+      await logActivity('MARK_REPORT_RESOLVED', { reportId });
+      toast.success('Laporan ditandai sebagai selesai.');
+    } catch (error) {
+      console.error('Error marking report as resolved:', error);
+      toast.error('Gagal menandai laporan sebagai selesai.');
+      await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId, error: error.message });
+    }
+  };
+
+  const handleViewNews = (newsSlug) => {
+    if (newsSlug) {
+      navigate(`/berita/${newsSlug}`);
+      logActivity('VIEW_REPORTED_NEWS', { newsSlug });
+    } else {
+      toast.error('Slug berita tidak tersedia.');
+    }
+  };
+
   const filteredReports = useMemo(() => {
     let result = reports;
 
@@ -439,13 +539,15 @@ const ReportManagement = ({ logActivity }) => {
       const lowerQuery = searchQuery.toLowerCase();
       result = result.filter(report => {
         const reason = report.reason?.toLowerCase() || '';
-        const reportedContent = report.reportedContent?.toLowerCase() || '';
-        const reporterEmail = report.reporterEmail?.toLowerCase() || '';
-        const timestampStr = formatTimestamp(report.createdAt).toLowerCase();
+        const title = report.title?.toLowerCase() || '';
+        const userEmail = report.userEmail?.toLowerCase() || '';
+        const customReason = report.customReason?.toLowerCase() || '';
+        const timestampStr = formatTimestamp(report.timestamp).toLowerCase();
         return (
           reason.includes(lowerQuery) ||
-          reportedContent.includes(lowerQuery) ||
-          reporterEmail.includes(lowerQuery) ||
+          title.includes(lowerQuery) ||
+          userEmail.includes(lowerQuery) ||
+          customReason.includes(lowerQuery) ||
           timestampStr.includes(lowerQuery)
         );
       });
@@ -454,8 +556,8 @@ const ReportManagement = ({ logActivity }) => {
     // Apply date range filter
     if (dateFrom || dateTo) {
       result = result.filter(report => {
-        if (!report.createdAt) return false;
-        const reportDate = report.createdAt.toDate();
+        if (!report.timestamp) return false;
+        const reportDate = report.timestamp.toDate();
         const from = dateFrom ? new Date(dateFrom) : null;
         const to = dateTo ? new Date(dateTo + 'T23:59:59') : null;
         return (!from || reportDate >= from) && (!to || reportDate <= to);
@@ -525,7 +627,7 @@ const ReportManagement = ({ logActivity }) => {
               <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 transition-colors duration-200 group-focus-within:text-indigo-600" />
               <input
                 type="text"
-                placeholder="Cari laporan (alasan, konten, email)..."
+                placeholder="Cari laporan (alasan, judul, email)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full transition-all duration-200 bg-white text-gray-900 placeholder-gray-500"
@@ -595,8 +697,8 @@ const ReportManagement = ({ logActivity }) => {
                   expanded={!!expandedReports[report.id]}
                   toggleExpand={() => toggleExpandReport(report.id)}
                   onDelete={() => handleDeleteReport(report.id)}
+                  onResolve={() => handleViewNews(report.newsSlug)}
                   index={index}
-                  logActivity={logActivity}
                 />
               ))}
             </div>

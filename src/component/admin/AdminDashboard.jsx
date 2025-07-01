@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth, db } from '../../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   collection,
   getDocs,
@@ -15,7 +15,8 @@ import {
   collectionGroup,
   where,
   getDoc,
-  addDoc
+  addDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import { createNews } from '../config/createNews.js';
 import {
@@ -181,7 +182,7 @@ const AdminDashboard = () => {
       };
       checkAuthorization();
 
-      const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
         if (currentUser && currentUser.uid === user.uid) {
           if (currentUser.photoURL !== user.photoURL) {
             logActivity('PROFILE_UPDATE', { type: 'photo', newValue: currentUser.photoURL || null });
@@ -207,7 +208,7 @@ const AdminDashboard = () => {
       window.addEventListener('newsEdited', handleNewsEdited);
 
       return () => {
-        unsubscribe();
+        unsubscribeAuth();
         window.removeEventListener('newsEdited', handleNewsEdited);
       };
     } else if (!loading && !user) {
@@ -241,165 +242,232 @@ const AdminDashboard = () => {
     }
   };
 
-  const fetchNews = async () => {
+  const fetchNews = () => {
     setNewsLoading(true);
-    try {
-      const q = query(collection(db, 'news'), orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-      let newsData = await Promise.all(snapshot.docs.map(async (doc) => {
-        const newsItem = { id: doc.id, ...doc.data() };
-        const commentsQuery = query(collection(db, 'news', doc.id, 'comments'));
-        const commentsSnapshot = await getDocs(commentsQuery);
-        newsItem.komentar = commentsSnapshot.size;
-        return newsItem;
-      }));
+    const q = query(collection(db, 'news'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      try {
+        let newsData = await Promise.all(snapshot.docs.map(async (doc) => {
+          const newsItem = { id: doc.id, ...doc.data() };
+          const commentsQuery = query(collection(db, 'news', doc.id, 'comments'));
+          const commentsSnapshot = await getDocs(commentsQuery);
+          newsItem.komentar = commentsSnapshot.size;
+          return newsItem;
+        }));
 
-      const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
-      const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
-      const totalNews = newsData.length;
+        const totalViews = newsData.reduce((sum, item) => sum + (item.views || 0), 0);
+        const totalComments = newsData.reduce((sum, item) => sum + (item.komentar || 0), 0);
+        const totalNews = newsData.length;
 
-      setStats(prev => ({
-        ...prev,
-        totalNews,
-        totalViews,
-        totalComments
-      }));
+        const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
+        setCategories(['', ...uniqueCategories]);
 
-      const uniqueCategories = [...new Set(newsData.map(item => item.kategori || ''))];
-      setCategories(['', ...uniqueCategories]);
+        if (filterTitle) {
+          newsData = newsData.filter(item =>
+            item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
+          );
+        }
+        if (filterCategory) {
+          newsData = newsData.filter(item =>
+            item.kategori?.toLowerCase() === filterCategory.toLowerCase()
+          );
+        }
+        if (filterAuthor) {
+          newsData = newsData.filter(item =>
+            item.author?.toLowerCase().includes(filterAuthor.toLowerCase())
+          );
+        }
+        if (filterDate === 'last7days') {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          newsData = newsData.filter(item => item.createdAt?.toDate() >= sevenDaysAgo);
+        } else if (filterDate === 'last30days') {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          newsData = newsData.filter(item => item.createdAt?.toDate() >= thirtyDaysAgo);
+        } else if (filterDate === 'custom' && filterCustomDate) {
+          const customDate = new Date(filterCustomDate);
+          newsData = newsData.filter(item => {
+            const itemDate = item.createdAt?.toDate();
+            return itemDate && itemDate.toDateString() === customDate.toDateString();
+          });
+        }
 
-      if (filterTitle) {
-        newsData = newsData.filter(item =>
-          item.judul?.toLowerCase().includes(filterTitle.toLowerCase())
-        );
+        switch (filterSortBy) {
+          case 'views-desc':
+            newsData.sort((a, b) => (b.views || 0) - (a.views || 0));
+            break;
+          case 'comments-desc':
+            newsData.sort((a, b) => (b.komentar || 0) - (a.komentar || 0));
+            break;
+          default:
+            break;
+        }
+
+        setNews(newsData);
+        setStats(prev => ({
+          ...prev,
+          totalNews,
+          totalViews,
+          totalComments
+        }));
+      } catch (error) {
+        console.error('Error fetching news:', error);
+        await logActivity('FETCH_NEWS_ERROR', { error: error.message });
+        toast.error('Gagal memuat berita.');
+      } finally {
+        setNewsLoading(false);
       }
-      if (filterCategory) {
-        newsData = newsData.filter(item =>
-          item.kategori?.toLowerCase() === filterCategory.toLowerCase()
-        );
-      }
-      if (filterAuthor) {
-        newsData = newsData.filter(item =>
-          item.author?.toLowerCase().includes(filterAuthor.toLowerCase())
-        );
-      }
-      if (filterDate === 'last7days') {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        newsData = newsData.filter(item => item.createdAt?.toDate() >= sevenDaysAgo);
-      } else if (filterDate === 'last30days') {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        newsData = newsData.filter(item => item.createdAt?.toDate() >= thirtyDaysAgo);
-      } else if (filterDate === 'custom' && filterCustomDate) {
-        const customDate = new Date(filterCustomDate);
-        newsData = newsData.filter(item => {
-          const itemDate = item.createdAt?.toDate();
-          return itemDate && itemDate.toDateString() === customDate.toDateString();
-        });
-      }
+    }, (error) => {
+      console.error('Error in news snapshot:', error);
+      logActivity('FETCH_NEWS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan berita.');
+      setNewsLoading(false);
+    });
 
-      switch (filterSortBy) {
-        case 'views-desc':
-          newsData.sort((a, b) => (b.views || 0) - (a.views || 0));
-          break;
-        case 'comments-desc':
-          newsData.sort((a, b) => (b.komentar || 0) - (a.komentar || 0));
-          break;
-        default:
-          break;
-      }
-
-      setNews(newsData);
-    } catch (error) {
-      console.error('Error fetching news:', error);
-      await logActivity('FETCH_NEWS_ERROR', { error: error.message });
-      toast.error('Gagal memuat berita.');
-    }
-    setNewsLoading(false);
+    return unsubscribe;
   };
 
-  const fetchUsers = async () => {
-    try {
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      const totalUsers = usersSnapshot.size;
-      setStats(prev => ({
-        ...prev,
-        totalUsers
-      }));
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      await logActivity('FETCH_USERS_ERROR', { error: error.message });
-      toast.error('Gagal memuat data pengguna.');
-    }
-  };
-
-  const fetchComments = async () => {
-    try {
-      const q = query(collectionGroup(db, 'comments'), orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
-      setStats(prev => ({
-        ...prev,
-        totalComments: snapshot.size
-      }));
-    } catch (error) {
-      console.error('Error fetching comments:', error.message);
-      if (error.message.includes('index')) {
-        console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+  const fetchUsers = () => {
+    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+      try {
+        const totalUsers = snapshot.size;
+        setStats(prev => ({
+          ...prev,
+          totalUsers
+        }));
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        logActivity('FETCH_USERS_ERROR', { error: error.message });
+        toast.error('Gagal memuat data pengguna.');
       }
-      await logActivity('FETCH_COMMENTS_ERROR', { error: error.message });
-      toast.error('Gagal memuat komentar.');
-    }
+    }, (error) => {
+      console.error('Error in users snapshot:', error);
+      logActivity('FETCH_USERS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan pengguna.');
+    });
+
+    return unsubscribe;
   };
 
-  const fetchNotifications = async () => {
-    try {
-      const notificationsSnapshot = await getDocs(collection(db, 'notifications'));
-      const totalNotifications = notificationsSnapshot.size;
-      setStats(prev => ({
-        ...prev,
-        totalNotifications
-      }));
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-      await logActivity('FETCH_NOTIFICATIONS_ERROR', { error: error.message });
-      toast.error('Gagal memuat notifikasi.');
-    }
+  const fetchComments = () => {
+    const q = query(collectionGroup(db, 'comments'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      try {
+        const totalComments = snapshot.size;
+        setStats(prev => ({
+          ...prev,
+          totalComments
+        }));
+      } catch (error) {
+        console.error('Error fetching comments:', error.message);
+        if (error.message.includes('index')) {
+          console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+        }
+        logActivity('FETCH_COMMENTS_ERROR', { error: error.message });
+        toast.error('Gagal memuat komentar.');
+      }
+    }, (error) => {
+      console.error('Error in comments snapshot:', error);
+      logActivity('FETCH_COMMENTS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan komentar.');
+    });
+
+    return unsubscribe;
   };
 
-  const fetchBreakingNews = async () => {
-    try {
-      const breakingNewsSnapshot = await getDocs(collection(db, 'breakingNews'));
-      const totalBreakingNews = breakingNewsSnapshot.size;
-      setStats(prev => ({
-        ...prev,
-        totalBreakingNews
-      }));
-    } catch (error) {
-      console.error('Error fetching breaking news:', error);
-      await logActivity('FETCH_BREAKING_NEWS_ERROR', { error: error.message });
-      toast.error('Gagal memuat breaking news.');
-    }
+  const fetchNotifications = () => {
+    const unsubscribe = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+      try {
+        const totalNotifications = snapshot.size;
+        setStats(prev => ({
+          ...prev,
+          totalNotifications
+        }));
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
+        logActivity('FETCH_NOTIFICATIONS_ERROR', { error: error.message });
+        toast.error('Gagal memuat notifikasi.');
+      }
+    }, (error) => {
+      console.error('Error in notifications snapshot:', error);
+      logActivity('FETCH_NOTIFICATIONS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan notifikasi.');
+    });
+
+    return unsubscribe;
+  };
+
+  const fetchBreakingNews = () => {
+    const unsubscribe = onSnapshot(collection(db, 'breakingNews'), (snapshot) => {
+      try {
+        const totalBreakingNews = snapshot.size;
+        setStats(prev => ({
+          ...prev,
+          totalBreakingNews
+        }));
+      } catch (error) {
+        console.error('Error fetching breaking news:', error);
+        logActivity('FETCH_BREAKING_NEWS_ERROR', { error: error.message });
+        toast.error('Gagal memuat breaking news.');
+      }
+    }, (error) => {
+      console.error('Error in breaking news snapshot:', error);
+      logActivity('FETCH_BREAKING_NEWS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan breaking news.');
+    });
+
+    return unsubscribe;
+  };
+
+  const fetchReports = () => {
+    const unsubscribe = onSnapshot(collection(db, 'reports'), (snapshot) => {
+      try {
+        const totalReports = snapshot.size;
+        setStats(prev => ({
+          ...prev,
+          totalReports
+        }));
+      } catch (error) {
+        console.error('Error fetching reports:', error);
+        logActivity('FETCH_REPORTS_ERROR', { error: error.message });
+        toast.error('Gagal memuat laporan.');
+      }
+    }, (error) => {
+      console.error('Error in reports snapshot:', error);
+      logActivity('FETCH_REPORTS_SNAPSHOT_ERROR', { error: error.message });
+      toast.error('Gagal memuat pembaruan laporan.');
+    });
+
+    return unsubscribe;
   };
 
   const handleViewsUpdated = async () => {
     console.log('Views updated, refreshing data...');
-    await fetchNews();
-    await fetchUsers();
-    await fetchComments();
-    await fetchNotifications();
-    await fetchBreakingNews();
     await logActivity('VIEWS_UPDATED', { totalViews: stats.totalViews || null });
+    // No need to manually refresh since onSnapshot handles real-time updates
   };
 
   useEffect(() => {
+    let unsubscribeNews, unsubscribeUsers, unsubscribeComments, unsubscribeNotifications, unsubscribeBreakingNews, unsubscribeReports;
+
     if (isAuthorized) {
-      fetchNews();
-      fetchUsers();
-      fetchComments();
-      fetchNotifications();
-      fetchBreakingNews();
+      unsubscribeNews = fetchNews();
+      unsubscribeUsers = fetchUsers();
+      unsubscribeComments = fetchComments();
+      unsubscribeNotifications = fetchNotifications();
+      unsubscribeBreakingNews = fetchBreakingNews();
+      unsubscribeReports = fetchReports();
     }
+
+    return () => {
+      if (unsubscribeNews) unsubscribeNews();
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeComments) unsubscribeComments();
+      if (unsubscribeNotifications) unsubscribeNotifications();
+      if (unsubscribeBreakingNews) unsubscribeBreakingNews();
+      if (unsubscribeReports) unsubscribeReports();
+    };
   }, [isAuthorized, filterTitle, filterCategory, filterAuthor, filterDate, filterCustomDate, filterSortBy]);
 
   const handleSubmit = async (formData) => {
@@ -450,7 +518,6 @@ const AdminDashboard = () => {
       }
 
       resetForm();
-      await fetchNews();
       setShowModal(false);
       return newsId;
     } catch (error) {
@@ -495,7 +562,6 @@ const AdminDashboard = () => {
           }
           await logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || 'N/A' });
           toast.success('Berita berhasil dihapus.');
-          await fetchNews();
         }
       }
     } catch (error) {
@@ -521,6 +587,16 @@ const AdminDashboard = () => {
       slug: newsItem.slug || ''
     });
     setShowModal(true);
+  };
+
+  const handleViewNews = (slug, judul) => {
+    if (slug) {
+      navigate(`/berita/${slug}`);
+      logActivity('VIEW_NEWS', { slug, title: judul });
+    } else {
+      toast.error('Slug berita tidak tersedia.');
+      logActivity('VIEW_NEWS_ERROR', { title: judul, error: 'Missing slug' });
+    }
   };
 
   const resetForm = () => {
@@ -886,7 +962,12 @@ const AdminDashboard = () => {
                                       />
                                     )}
                                     <div>
-                                      <div className="text-sm font-medium text-gray-900 max-w-xs truncate">{item.judul}</div>
+                                      <div 
+                                        className="text-sm font-medium text-blue-600 hover:underline cursor-pointer max-w-xs truncate"
+                                        onClick={() => handleViewNews(item.slug, item.judul)}
+                                      >
+                                        {item.judul}
+                                      </div>
                                       <div className="text-sm text-gray-500 max-w-xs truncate">{item.ringkasan}</div>
                                       {item.gambarDeskripsi && (
                                         <div className="text-xs text-gray-400 italic">{item.gambarDeskripsi}</div>
@@ -916,14 +997,23 @@ const AdminDashboard = () => {
                                 <td className="px-6 py-4 text-sm font-medium">
                                   <div className="flex items-center space-x-3">
                                     <button
+                                      onClick={() => handleViewNews(item.slug, item.judul)}
+                                      className="text-cyan-600 hover:text-cyan-900 transition-all duration-200 hover:scale-110"
+                                      title="Lihat Berita"
+                                    >
+                                      <Eye className="h-5 w-5" />
+                                    </button>
+                                    <button
                                       onClick={() => handleEdit(item)}
                                       className="text-indigo-600 hover:text-indigo-900 transition-all duration-200 hover:scale-110"
+                                      title="Edit Berita"
                                     >
                                       <Edit3 className="h-5 w-5" />
                                     </button>
                                     <button
                                       onClick={() => handleDeleteNews(item.id)}
                                       className="text-red-600 hover:text-red-900 transition-all duration-200 hover:scale-110"
+                                      title="Hapus Berita"
                                     >
                                       <Trash2 className="h-5 w-5" />
                                     </button>
