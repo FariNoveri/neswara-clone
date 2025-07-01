@@ -566,21 +566,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }).trim();
   };
 
-  // Security logging
-  const logSecurityEvent = async (action, details) => {
-    try {
-      await addDoc(collection(db, 'security_logs'), {
-        action,
-        userEmail: currentUser?.email || 'anonymous',
-        details,
-        timestamp: serverTimestamp(),
-        userAgent: navigator.userAgent,
-        ipAddress: 'N/A'
-      });
-    } catch (error) {
-      console.error('Failed to log security event:', error);
-    }
-  };
 
   // Fetch comments and likes in real-time
   const fetchComments = useCallback(() => {

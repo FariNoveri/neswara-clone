@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, getDocs, query, orderBy, doc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, getDoc, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
-import { Trash2, AlertCircle, Search, X, Filter, Calendar, MessageSquare } from 'lucide-react'; // Tambahkan impor ikon di sini
+import { Trash2, AlertCircle, Search, X, Filter, Calendar, MessageSquare, Edit2, Eye } from 'lucide-react';
+import DOMPurify from 'dompurify';
 
 const CommentManagement = ({ logActivity }) => {
   const [comments, setComments] = useState([]);
@@ -14,6 +15,7 @@ const CommentManagement = ({ logActivity }) => {
     dateTo: ''
   });
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, newsId: '', commentId: '' });
+  const [originalCommentModal, setOriginalCommentModal] = useState({ isOpen: false, originalText: '', commentId: '' });
 
   useEffect(() => {
     const fetchComments = async () => {
@@ -40,7 +42,14 @@ const CommentManagement = ({ logActivity }) => {
                 displayName = userDoc.data().displayName || displayName;
               }
             }
-            return { ...commentData, displayName, newsSlug: newsData.slug || newsDoc.id };
+            return { 
+              ...commentData, 
+              displayName, 
+              newsSlug: newsData.slug || newsDoc.id,
+              isEdited: commentData.isEdited || false,
+              replyToAuthor: commentData.replyToAuthor || null,
+              originalText: commentData.originalText || null
+            };
           }));
           allComments = [...allComments, ...commentsData];
         }
@@ -62,7 +71,9 @@ const CommentManagement = ({ logActivity }) => {
     if (filters.searchText) {
       filtered = filtered.filter(comment =>
         (comment.displayName || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-        (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase())
+        (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
+        (comment.replyToAuthor || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
+        (comment.originalText || '').toLowerCase().includes(filters.searchText.toLowerCase())
       );
     }
 
@@ -107,7 +118,15 @@ const CommentManagement = ({ logActivity }) => {
       if (commentDoc.exists()) {
         const commentData = commentDoc.data();
         await deleteDoc(doc(db, "news", newsId, "comments", commentId));
-        logActivity('COMMENT_DELETE', { newsId, commentId, text: commentData.text, displayName: commentData.displayName });
+        logActivity('COMMENT_DELETE', { 
+          newsId, 
+          commentId, 
+          text: commentData.text, 
+          displayName: commentData.displayName,
+          isEdited: commentData.isEdited || false,
+          replyToAuthor: commentData.replyToAuthor || null,
+          originalText: commentData.originalText || null
+        });
         const updatedComments = comments.filter(comment => comment.id !== commentId);
         setComments(updatedComments);
         setFilteredComments(updatedComments.filter(comment => {
@@ -115,7 +134,9 @@ const CommentManagement = ({ logActivity }) => {
           if (filters.searchText) {
             include = include && (
               (comment.displayName || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-              (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase())
+              (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
+              (comment.replyToAuthor || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
+              (comment.originalText || '').toLowerCase().includes(filters.searchText.toLowerCase())
             );
           }
           if (filters.dateFrom && comment.createdAt) {
@@ -137,6 +158,22 @@ const CommentManagement = ({ logActivity }) => {
     } finally {
       setDeleteModal({ isOpen: false, newsId: '', commentId: '' });
     }
+  };
+
+  const handleShowOriginalClick = (commentId, originalText) => {
+    if (!originalText) {
+      console.warn("Original comment text not available for comment:", commentId);
+      return;
+    }
+    setOriginalCommentModal({ isOpen: true, originalText, commentId });
+    logActivity('VIEW_ORIGINAL_COMMENT', { commentId });
+  };
+
+  const sanitizeInput = (input) => {
+    return DOMPurify.sanitize(input, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: []
+    }).trim();
   };
 
   const DeleteModal = ({ isOpen, onClose, onConfirm }) => {
@@ -179,6 +216,42 @@ const CommentManagement = ({ logActivity }) => {
     );
   };
 
+  const OriginalCommentModal = ({ isOpen, onClose, originalText }) => {
+    if (!isOpen) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+        <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl transform animate-scaleIn">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                <Eye className="w-6 h-6 text-blue-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Komentar Asli</h3>
+            </div>
+            <button 
+              onClick={onClose} 
+              className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-gray-600 bg-gray-50 p-4 rounded-lg border border-gray-200 mb-8 leading-relaxed">
+            {sanitizeInput(originalText || 'Komentar asli tidak tersedia.')}
+          </p>
+          <div className="flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
       <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 text-white">
@@ -209,7 +282,7 @@ const CommentManagement = ({ logActivity }) => {
                 type="text"
                 value={filters.searchText}
                 onChange={(e) => handleFilterChange('searchText', e.target.value)}
-                placeholder="Cari nama pengguna atau komentar..."
+                placeholder="Cari nama pengguna, komentar, balasan, atau teks asli..."
                 className="pl-12 pr-4 py-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-full transition-all duration-200 bg-white text-gray-900 placeholder-gray-500"
               />
             </div>
@@ -263,6 +336,9 @@ const CommentManagement = ({ logActivity }) => {
                     Komentar
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Tanggal
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -276,7 +352,7 @@ const CommentManagement = ({ logActivity }) => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center">
+                    <td colSpan="6" className="px-6 py-12 text-center">
                       <div className="flex justify-center">
                         <div className="relative">
                           <div className="w-12 h-12 border-4 border-indigo-200 rounded-full animate-spin"></div>
@@ -287,7 +363,7 @@ const CommentManagement = ({ logActivity }) => {
                   </tr>
                 ) : filteredComments.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
                       {comments.length === 0 ? 'Tidak ada komentar ditemukan' : 'Tidak ada komentar yang sesuai dengan filter'}
                     </td>
                   </tr>
@@ -296,6 +372,32 @@ const CommentManagement = ({ logActivity }) => {
                     <tr key={comment.id} className={`hover:bg-gray-50 transition-all duration-300 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} transform hover:scale-[1.01] animate-fadeInUp`} style={{ animationDelay: `${index * 0.1}s` }}>
                       <td className="px-6 py-4 text-sm text-gray-900">{comment.displayName || ''}</td>
                       <td className="px-6 py-4 text-sm text-gray-500">{comment.text}</td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        <div className="flex flex-col space-y-1">
+                          <span className={`flex items-center ${comment.isEdited ? 'text-blue-600' : 'text-gray-400'}`}>
+                            <Edit2 className="w-4 h-4 mr-1" />
+                            {comment.isEdited ? 'Edited' : 'Not Edited'}
+                            {comment.isEdited && (
+                              <button
+                                onClick={() => handleShowOriginalClick(comment.id, comment.originalText)}
+                                className="ml-2 text-xs text-blue-500 hover:text-blue-700 hover:underline"
+                                title="Lihat komentar asli"
+                              >
+                                Lihat Asli
+                              </button>
+                            )}
+                          </span>
+                          <span>
+                            {comment.parentId ? (
+                              <span className="text-cyan-600">
+                                Balasan ke {sanitizeInput(comment.replyToAuthor || 'Unknown')}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">Tanpa Balasan</span>
+                            )}
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
                         {comment.createdAt?.toDate().toLocaleDateString() || 'N/A'}
                       </td>
@@ -323,6 +425,11 @@ const CommentManagement = ({ logActivity }) => {
           isOpen={deleteModal.isOpen}
           onClose={() => setDeleteModal({ isOpen: false, newsId: '', commentId: '' })}
           onConfirm={confirmDelete}
+        />
+        <OriginalCommentModal
+          isOpen={originalCommentModal.isOpen}
+          onClose={() => setOriginalCommentModal({ isOpen: false, originalText: '', commentId: '' })}
+          originalText={originalCommentModal.originalText}
         />
       </div>
     </div>
