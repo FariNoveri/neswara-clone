@@ -318,7 +318,7 @@ const useCommentAvatar = (cmt, logSecurityEvent) => {
 };
 
 // Comment Component
-const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments, toggleTooltip, visibleTooltips, toggleAllTooltips, areAllTooltipsHidden }) => {
+const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments }) => {
   const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
   const isOwner = cmt.userId === currentUser?.uid;
   const canDelete = isAdmin || isOwner;
@@ -333,13 +333,6 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
   useEffect(() => {
     commentRefs.current[cmt.id] = commentRef;
   }, [cmt.id, commentRefs]);
-
-  // Calculate reply counts per user
-  const replyCounts = cmt.replies?.reduce((acc, reply) => {
-    const author = sanitizeInput(reply.author || "User");
-    acc[author] = (acc[author] || 0) + 1;
-    return acc;
-  }, {}) || {};
 
   // Determine reply indicator with specific user check
   const replyIndicator = cmt.parentId ? (
@@ -445,45 +438,6 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               <Reply className="w-4 h-4" />
               <span>Balas</span>
             </button>
-            {cmt.replies?.length > 0 && (
-              <div className="relative">
-                <button
-                  onClick={() => toggleTooltip(cmt.id)}
-                  className="flex items-center gap-1 text-sm text-slate-500 hover:text-cyan-600"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>{areAllTooltipsHidden ? "Show Total Balasan" : "Total Balasan"}</span>
-                </button>
-                {visibleTooltips[cmt.id] && !areAllTooltipsHidden && (
-                  <div className="absolute right-0 bottom-full mb-2 p-3 bg-slate-800 text-white rounded-lg shadow-lg z-10 w-48 transition-all duration-200 animate-tooltipFadeIn">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-semibold">Jumlah Balasan</span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => toggleAllTooltips()}
-                          className="text-xs bg-slate-600 hover:bg-slate-700 text-white px-2 py-0.5 rounded-full"
-                          title="Sembunyikan Semua"
-                        >
-                          Hide
-                        </button>
-                        <button
-                          onClick={() => toggleTooltip(cmt.id)}
-                          className="text-xs bg-slate-600 hover:bg-slate-700 text-white px-2 py-0.5 rounded-full"
-                          title="Tutup"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-sm">
-                      {Object.entries(replyCounts).map(([author, count]) => (
-                        <div key={author}>{author}: {count}x</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
         {replyTo && replyTo.id === cmt.id && (
@@ -557,10 +511,6 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               formatTimeAgo={formatTimeAgo}
               commentRefs={commentRefs}
               comments={comments}
-              toggleTooltip={toggleTooltip}
-              visibleTooltips={visibleTooltips}
-              toggleAllTooltips={toggleAllTooltips}
-              areAllTooltipsHidden={areAllTooltipsHidden}
             />
           ))}
         </div>
@@ -591,53 +541,29 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     isSubmitting: false,
     commentText: ''
   });
-  const [visibleTooltips, setVisibleTooltips] = useState(() => {
-    try {
-      const saved = localStorage.getItem(`tooltipState_${newsId}`);
-      return saved ? JSON.parse(saved) : {};
-    } catch (err) {
-      console.error("Error loading tooltip state from localStorage:", err);
-      return {};
-    }
-  });
-  const [areAllTooltipsHidden, setAreAllTooltipsHidden] = useState(() => {
-    try {
-      const saved = localStorage.getItem(`tooltipHiddenState_${newsId}`);
-      return saved ? JSON.parse(saved) : false;
-    } catch (err) {
-      console.error("Error loading tooltip hidden state from localStorage:", err);
-      return false;
-    }
-  });
   const commentRefs = useRef({});
 
-  // Save tooltip states to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(`tooltipState_${newsId}`, JSON.stringify(visibleTooltips));
-    } catch (err) {
-      console.error("Error saving tooltip state to localStorage:", err);
-    }
-  }, [visibleTooltips, newsId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(`tooltipHiddenState_${newsId}`, JSON.stringify(areAllTooltipsHidden));
-    } catch (err) {
-      console.error("Error saving tooltip hidden state to localStorage:", err);
-    }
-  }, [areAllTooltipsHidden, newsId]);
-
   // Input sanitization
-  const sanitizeInput = (input) => {
+  const sanitizeInput = useCallback((input) => {
     return DOMPurify.sanitize(input, {
       ALLOWED_TAGS: [],
       ALLOWED_ATTR: []
     }).trim();
-  };
+  }, []);
+
+  // Function to count all comments including replies
+  const countAllComments = useCallback((comments) => {
+    let total = comments.length;
+    comments.forEach(comment => {
+      if (comment.replies && comment.replies.length > 0) {
+        total += countAllComments(comment.replies);
+      }
+    });
+    return total;
+  }, []);
 
   // Security logging
-  const logSecurityEvent = async (action, details) => {
+  const logSecurityEvent = useCallback(async (action, details) => {
     try {
       await addDoc(collection(db, 'security_logs'), {
         action,
@@ -650,36 +576,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     } catch (error) {
       console.error('Failed to log security event:', error);
     }
-  };
-
-  // Function to count all comments including replies
-  const countAllComments = (comments) => {
-    let total = comments.length;
-    comments.forEach(comment => {
-      if (comment.replies && comment.replies.length > 0) {
-        total += countAllComments(comment.replies);
-      }
-    });
-    return total;
-  };
-
-  // Toggle individual tooltip visibility
-  const toggleTooltip = (commentId) => {
-    setVisibleTooltips(prev => ({
-      ...prev,
-      [commentId]: !prev[commentId]
-    }));
-    // Only set areAllTooltipsHidden to false if no other tooltips are visible
-    if (areAllTooltipsHidden) {
-      setAreAllTooltipsHidden(false);
-    }
-  };
-
-  // Hide all tooltips
-  const toggleAllTooltips = () => {
-    setVisibleTooltips({});
-    setAreAllTooltipsHidden(true);
-  };
+  }, [currentUser]);
 
   // Fetch comments and likes in real-time
   const fetchComments = useCallback(() => {
@@ -694,15 +591,49 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       collection(db, `news/${newsId}/comments`),
       orderBy("createdAt", "desc")
     );
-    const unsubscribeComments = onSnapshot(commentsQuery, (snapshot) => {
+    const unsubscribeComments = onSnapshot(commentsQuery, async (snapshot) => {
       console.log("fetchComments: Snapshot received, docs length:", snapshot.docs.length);
-      const commentsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt,
-        replies: doc.data().replies || [] // Default to empty array if replies is undefined
-      }));
-      
+      const commentsData = [];
+      const userIds = [...new Set(snapshot.docs.map(doc => doc.data().userId).filter(id => id))];
+
+      // Batch fetch user display names
+      let userMap = {};
+      if (userIds.length > 0) {
+        try {
+          const chunks = [];
+          for (let i = 0; i < userIds.length; i += 10) {
+            chunks.push(userIds.slice(i, i + 10));
+          }
+          const userDocs = [];
+          for (const chunk of chunks) {
+            const usersQuery = query(collection(db, "users"), where("uid", "in", chunk));
+            const querySnapshot = await getDocs(usersQuery);
+            querySnapshot.forEach(doc => {
+              userDocs.push({ id: doc.id, ...doc.data() });
+            });
+          }
+          userMap = Object.fromEntries(userDocs.map(doc => [doc.id, doc.displayName || doc.email || "User"]));
+        } catch (err) {
+          console.error("Error fetching user display names:", err);
+          logSecurityEvent('FETCH_USER_DISPLAY_NAMES_ERROR', { error: err.message });
+        }
+      }
+
+      snapshot.docs.forEach(doc => {
+        const commentData = doc.data();
+        const authorName = commentData.userId && userMap[commentData.userId]
+          ? sanitizeInput(userMap[commentData.userId])
+          : sanitizeInput(commentData.author || "User");
+
+        commentsData.push({
+          id: doc.id,
+          ...commentData,
+          author: authorName,
+          createdAt: commentData.createdAt,
+          replies: commentData.replies || []
+        });
+      });
+
       // Build nested replies structure
       const commentMap = {};
       commentsData.forEach(comment => {
@@ -715,14 +646,14 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       });
 
       const rootComments = commentsData.filter(comment => !comment.parentId);
-      console.log("Root comments after structuring:", rootComments); // Debug root comments
+      console.log("Root comments after structuring:", rootComments);
       setComments(rootComments);
       if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
       setLoading(false);
 
       if (currentUser) {
         const newReportedComments = {};
-        Promise.all(
+        await Promise.all(
           commentsData.map(async (comment) => {
             const reportQuery = query(
               collection(db, `news/${newsId}/comments/${comment.id}/reports`),
@@ -736,13 +667,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               logSecurityEvent('FETCH_REPORT_STATUS_ERROR', { commentId: comment.id, error: error.message });
             }
           })
-        ).then(() => {
-          setReportedComments(newReportedComments);
-          console.log('Reported comments updated:', newReportedComments);
-        }).catch((err) => {
-          console.error("Error fetching report status:", err);
-          logSecurityEvent('FETCH_REPORT_STATUS_BATCH_ERROR', { error: err.message });
-        });
+        );
+        setReportedComments(newReportedComments);
+        console.log('Reported comments updated:', newReportedComments);
       }
     }, (err) => {
       console.error("Error fetching comments:", err);
@@ -781,14 +708,14 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       unsubscribeComments();
       unsubscribeLikes();
     };
-  }, [newsId, currentUser, onCommentCountChange]);
+  }, [newsId, currentUser, onCommentCountChange, sanitizeInput, logSecurityEvent, countAllComments]);
 
   useEffect(() => {
     const cleanup = fetchComments();
     return cleanup;
   }, [fetchComments]);
 
-  const checkSpamLimit = () => {
+  const checkSpamLimit = useCallback(() => {
     const now = Date.now();
     const timeDiff = now - lastCommentTime;
     const requiredDelay = 5000; // 5 seconds
@@ -800,9 +727,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       return false;
     }
     return true;
-  };
+  }, [lastCommentTime, logSecurityEvent, newsId]);
 
-  const handleSubmit = async (e, parentId = null, replyToAuthor = null) => {
+  const handleSubmit = useCallback(async (e, parentId = null, replyToAuthor = null) => {
     e.preventDefault();
     const textToSubmit = sanitizeInput(parentId ? replyComment : comment);
     
@@ -831,14 +758,17 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         toastId: 'invalid-length'
       });
       logSecurityEvent('INVALID_COMMENT_LENGTH', { length: textToSubmit.length, newsId });
+      setIsSubmitting(false);
       return;
     }
 
     try {
       const commentsRef = collection(db, `news/${newsId}/comments`);
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+      const authorName = userDoc.exists() ? sanitizeInput(userDoc.data().displayName || currentUser.email || "User") : sanitizeInput(currentUser.displayName || currentUser.email || "User");
       await addDoc(commentsRef, {
         text: textToSubmit,
-        author: sanitizeInput(currentUser.displayName || currentUser.email || "User"),
+        author: authorName,
         userId: currentUser.uid,
         userEmail: currentUser.email,
         photoURL: currentUser.photoURL || null,
@@ -856,6 +786,11 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       }
       setLastCommentTime(Date.now());
       setError(null);
+      toast.success("Komentar berhasil dikirim.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'submit-success'
+      });
       logSecurityEvent('COMMENT_SUBMITTED', { newsId, parentId, textLength: textToSubmit.length });
     } catch (err) {
       console.error("Error submitting comment:", err);
@@ -869,9 +804,20 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [currentUser, newsId, comment, replyComment, checkSpamLimit, sanitizeInput, logSecurityEvent]);
 
-  const handleEditClick = (commentId, commentText) => {
+  const findCommentById = useCallback((comments, id) => {
+    for (const comment of comments) {
+      if (comment.id === id) return comment;
+      if (comment.replies && comment.replies.length > 0) {
+        const found = findCommentById(comment.replies, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }, []);
+
+  const handleEditClick = useCallback((commentId, commentText) => {
     if (!currentUser) {
       setError("Silakan masuk untuk mengedit komentar.");
       toast.error("Silakan masuk untuk mengedit komentar.", {
@@ -883,7 +829,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       return;
     }
 
-    const comment = comments.find(c => c.id === commentId);
+    const comment = findCommentById(comments, commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
       toast.error("Komentar tidak ditemukan.", {
@@ -904,7 +850,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       toast.error("Anda tidak memiliki izin untuk mengedit komentar ini.", {
         position: 'top-center',
         autoClose: 3000,
-        DOT
+        toastId: 'edit-no-permission'
       });
       logSecurityEvent('UNAUTHORIZED_EDIT_ATTEMPT', { commentId, userId: currentUser.uid, commentUserId: comment.userId });
       return;
@@ -922,13 +868,13 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }
 
     setEditModal({ isOpen: true, commentId, isSubmitting: false, commentText });
-  };
+  }, [currentUser, comments, logSecurityEvent, sanitizeInput]);
 
-  const handleEditSubmit = async (editedText) => {
+  const handleEditSubmit = useCallback(async (editedText) => {
     const { commentId } = editModal;
     if (!currentUser || !commentId) return;
 
-    const comment = comments.find(c => c.id === commentId);
+    const comment = findCommentById(comments, commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
       toast.error("Komentar tidak ditemukan.", {
@@ -979,9 +925,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       logSecurityEvent('EDIT_COMMENT_ERROR', { commentId, error: err.message });
       setEditModal(prev => ({ ...prev, isSubmitting: false }));
     }
-  };
+  }, [currentUser, newsId, editModal, comments, sanitizeInput, logSecurityEvent]);
 
-  const handleShowOriginalClick = (commentId, originalText) => {
+  const handleShowOriginalClick = useCallback((commentId, originalText) => {
     if (!originalText) {
       toast.warn("Komentar asli tidak tersedia.", {
         position: 'top-center',
@@ -991,20 +937,20 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       return;
     }
     setOriginalCommentModal({ isOpen: true, originalText });
-  };
+  }, []);
 
-  const handleDeleteClick = (commentId) => {
-    const comment = comments.find(c => c.id === commentId);
+  const handleDeleteClick = useCallback((commentId) => {
+    const comment = findCommentById(comments, commentId);
     if (comment) {
       setDeleteModal({ isOpen: true, commentId, isDeleting: false, commentText: sanitizeInput(comment.text) });
     }
-  };
+  }, [comments, sanitizeInput]);
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = useCallback(async () => {
     const { commentId } = deleteModal;
     if (!currentUser || !commentId) return;
 
-    const comment = comments.find(c => c.id === commentId);
+    const comment = findCommentById(comments, commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
       toast.error("Komentar tidak ditemukan.", {
@@ -1037,12 +983,18 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     setDeleteModal(prev => ({ ...prev, isDeleting: true }));
 
     try {
+      const deleteNestedComments = async (commentId) => {
+        const comment = findCommentById(comments, commentId);
+        if (comment && comment.replies && comment.replies.length > 0) {
+          for (const reply of comment.replies) {
+            await deleteNestedComments(reply.id);
+            await deleteDoc(doc(db, `news/${newsId}/comments`, reply.id));
+          }
+        }
+      };
+
+      await deleteNestedComments(commentId);
       await deleteDoc(doc(db, `news/${newsId}/comments`, commentId));
-      // Remove nested replies
-      const replies = comments.filter(c => c.parentId === commentId);
-      for (const reply of replies) {
-        await deleteDoc(doc(db, `news/${newsId}/comments`, reply.id));
-      }
       setDeleteModal({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
       toast.success("Komentar berhasil dihapus.", {
         position: 'top-center',
@@ -1065,9 +1017,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       logSecurityEvent('DELETE_COMMENT_ERROR', { commentId, error: err.message });
       setDeleteModal(prev => ({ ...prev, isDeleting: false }));
     }
-  };
+  }, [currentUser, newsId, deleteModal, comments, logSecurityEvent, sanitizeInput]);
 
-  const handleReportClick = (commentId) => {
+  const handleReportClick = useCallback((commentId) => {
     if (!currentUser) {
       setError("Silakan masuk untuk melaporkan komentar.");
       toast.error("Silakan masuk untuk melaporkan komentar.", {
@@ -1079,7 +1031,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       return;
     }
 
-    const comment = comments.find(c => c.id === commentId);
+    const comment = findCommentById(comments, commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
       toast.error("Komentar tidak ditemukan.", {
@@ -1102,13 +1054,13 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }
 
     setReportModal({ isOpen: true, commentId, isSubmitting: false, commentText: sanitizeInput(comment.text) });
-  };
+  }, [currentUser, comments, reportedComments, logSecurityEvent, sanitizeInput]);
 
-  const handleReportSubmit = async (reason) => {
+  const handleReportSubmit = useCallback(async (reason) => {
     const { commentId } = reportModal;
     if (!currentUser || !commentId) return;
 
-    const comment = comments.find(c => c.id === commentId);
+    const comment = findCommentById(comments, commentId);
     if (!comment) {
       setError("Komentar tidak ditemukan.");
       toast.error("Komentar tidak ditemukan.", {
@@ -1125,11 +1077,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     setReportModal(prev => ({ ...prev, isSubmitting: true }));
 
     try {
-      // Fetch news document to get title and slug
       const newsDoc = await getDoc(doc(db, 'news', newsId));
       const newsData = newsDoc.exists() ? newsDoc.data() : {};
 
-      // Store report in top-level reports collection
       const reportsRef = collection(db, 'reports');
       await addDoc(reportsRef, {
         reportedBy: currentUser.uid,
@@ -1144,7 +1094,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         timestamp: serverTimestamp()
       });
 
-      // Optionally, keep the comment-specific report for tracking
       const commentReportsRef = collection(db, `news/${newsId}/comments/${commentId}/reports`);
       await addDoc(commentReportsRef, {
         reportedBy: currentUser.uid,
@@ -1178,9 +1127,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       logSecurityEvent('REPORT_SUBMIT_ERROR', { commentId, newsId, error: err.message });
       setReportModal(prev => ({ ...prev, isSubmitting: false }));
     }
-  };
+  }, [currentUser, newsId, reportModal, comments, sanitizeInput, logSecurityEvent]);
 
-  const handleLikeComment = async (commentId) => {
+  const handleLikeComment = useCallback(async (commentId) => {
     if (!currentUser) {
       setError("Silakan masuk untuk menyukai komentar.");
       toast.error("Silakan masuk untuk menyukai komentar.", {
@@ -1213,9 +1162,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       });
       logSecurityEvent('LIKE_ERROR', { commentId, error: err.message });
     }
-  };
+  }, [currentUser, newsId, commentLikes, logSecurityEvent]);
 
-  const handleReplyClick = (commentId, author) => {
+  const handleReplyClick = useCallback((commentId, author) => {
     if (!currentUser) {
       setError("Silakan masuk untuk membalas komentar.");
       toast.error("Silakan masuk untuk membalas komentar.", {
@@ -1227,9 +1176,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       return;
     }
     setReplyTo(replyTo?.id === commentId ? null : { id: commentId, author: author || "User" });
-  };
+  }, [currentUser, replyTo, logSecurityEvent]);
 
-  const formatTimeAgo = (date) => {
+  const formatTimeAgo = useCallback((date) => {
     if (!date || !date.toDate) return "Baru saja";
     const now = new Date();
     const diff = now - date.toDate();
@@ -1240,9 +1189,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     if (minutes < 60) return `${minutes} menit lalu`;
     if (hours < 24) return `${hours} jam lalu`;
     return `${days} hari lalu`;
-  };
+  }, []);
 
-  const organizeComments = (comments) => {
+  const organizeComments = useCallback((comments) => {
     const commentMap = {};
     const rootComments = [];
 
@@ -1265,7 +1214,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     });
 
     return rootComments;
-  };
+  }, []);
 
   const organizedComments = organizeComments(comments);
   const canComment = !!currentUser;
@@ -1306,32 +1255,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               transform: scale(1);
               opacity: 1;
             }
-          }
-          @keyframes tooltipFadeIn {
-            from {
-              opacity: 0;
-              transform: scale(0.95);
-            }
-            to {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-          @keyframes tooltipFadeOut {
-            from {
-              opacity: 1;
-              transform: scale(1);
-            }
-            to {
-              opacity: 0;
-              transform: scale(0.95);
-            }
-          }
-          .animate-tooltipFadeIn {
-            animation: tooltipFadeIn 0.2s ease-out forwards;
-          }
-          .animate-tooltipFadeOut {
-            animation: tooltipFadeOut 0.2s ease-out forwards;
           }
         `}
       </style>
@@ -1443,10 +1366,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               formatTimeAgo={formatTimeAgo}
               commentRefs={commentRefs}
               comments={comments}
-              toggleTooltip={toggleTooltip}
-              visibleTooltips={visibleTooltips}
-              toggleAllTooltips={toggleAllTooltips}
-              areAllTooltipsHidden={areAllTooltipsHidden}
             />
           ))
         )}

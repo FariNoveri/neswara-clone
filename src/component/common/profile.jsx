@@ -13,15 +13,14 @@ import {
   FaExclamationTriangle,
   FaSignOutAlt,
   FaTrash,
-  FaHeart,
-  FaBookmark,
   FaGoogle,
   FaFacebook,
   FaInfoCircle,
   FaCog,
   FaShieldAlt,
   FaChartBar,
-  FaUsers
+  FaHeart,
+  FaBookmark
 } from "react-icons/fa";
 import {
   auth,
@@ -44,7 +43,10 @@ import {
   updateDoc,
   addDoc,
   collection,
-  onSnapshot
+  onSnapshot,
+  query,
+  where,
+  getDocs
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { deleteDoc } from "firebase/firestore";
@@ -94,9 +96,20 @@ const validateImageFile = (file, callback) => {
   img.src = objectUrl;
 };
 
+// Generate name suggestions
+const generateNameSuggestions = (baseName) => {
+  const suggestions = [];
+  suggestions.push(`${baseName}_${Math.floor(Math.random() * 100)}`);
+  suggestions.push(`${baseName}${Math.floor(Math.random() * 1000)}`);
+  suggestions.push(`${baseName}_user`);
+  suggestions.push(`${baseName}${Math.random().toString(36).substring(2, 8)}`);
+  suggestions.push(`${baseName}_x`);
+  return suggestions.map(sanitizeInput);
+};
+
 const Profile = () => {
   const [user, setUser] = useState(null);
-  const [userRole, setUserRole] = useState('user'); // Default role
+  const [userRole, setUserRole] = useState('user');
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -105,7 +118,6 @@ const Profile = () => {
   const [pendingEmail, setPendingEmail] = useState("");
   const [emailVerificationSent, setEmailVerificationSent] = useState(false);
   const [isSocialLogin, setIsSocialLogin] = useState(false);
-
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -116,6 +128,9 @@ const Profile = () => {
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [lastUploadTime, setLastUploadTime] = useState(null);
+  const [nameSuggestions, setNameSuggestions] = useState([]);
+  const [editCount, setEditCount] = useState(0);
+  const [editLimitReached, setEditLimitReached] = useState(false);
 
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -172,98 +187,173 @@ const Profile = () => {
     }
   };
 
-const checkAdminStatus = async (userId) => {
-  try {
-    const userDoc = await getDoc(doc(db, "users", userId));
-    if (userDoc.exists()) {
-      const userData = userDoc.data();
-      const isAdminValue = userData.isAdmin === true; // Gunakan isAdmin sebagai boolean
-      setUserRole(isAdminValue ? 'admin' : 'user'); // Sesuaikan userRole berdasarkan isAdmin
-      setIsAdmin(isAdminValue);
-      console.log(`User ${userId} role checked: isAdmin=${isAdminValue}, userRole=${isAdminValue ? 'admin' : 'user'}`);
-      return isAdminValue;
-    } else {
-      // Inisialisasi dokumen untuk pengguna baru dengan isAdmin: false
-      await setDoc(doc(db, "users", userId), {
-        displayName: sanitizeInput(user?.displayName || ""),
-        email: sanitizeInput(user?.email || ""),
-        photoURL: user?.photoURL || "",
-        isAdmin: false, // Default ke non-admin
-        updatedAt: new Date().toISOString(),
-      });
-      setUserRole('user');
-      setIsAdmin(false);
-      console.log(`New user ${userId} initialized with isAdmin: false`);
+  const checkAdminStatus = async (userId) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const isAdminValue = userData.isAdmin === true;
+        setUserRole(isAdminValue ? 'admin' : 'user');
+        setIsAdmin(isAdminValue);
+        return isAdminValue;
+      } else {
+        await setDoc(doc(db, "users", userId), {
+          displayName: sanitizeInput(user?.displayName || ""),
+          email: sanitizeInput(user?.email || ""),
+          photoURL: user?.photoURL || "",
+          isAdmin: false,
+          updatedAt: new Date().toISOString(),
+        });
+        setUserRole('user');
+        setIsAdmin(false);
+        return false;
+      }
+    } catch (error) {
+      console.error("Error checking admin status:", error);
       return false;
     }
-  } catch (error) {
-    console.error("Error checking admin status:", error);
-    return false;
-  }
-};
+  };
 
-useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      setUser(user);
-      setDisplayName(sanitizeInput(user.displayName || ""));
-      setEmail(sanitizeInput(user.email || ""));
-      setProfileImageURL(user.photoURL || "");
+  // Check edit count for the current day
+  const checkEditLimit = async (userId) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const editsQuery = query(
+        collection(db, "profile_edits"),
+        where("userId", "==", userId),
+        where("date", "==", today)
+      );
+      const editsSnapshot = await getDocs(editsQuery);
+      const count = editsSnapshot.size;
+      setEditCount(count);
+      setEditLimitReached(count >= 5); // Set limit reached only if count is 5 or more
+      return count < 5; // Return true if edits are still allowed
+    } catch (error) {
+      console.error("Error checking edit limit:", error);
+      setError("Failed to check edit limit: " + error.message);
+      return false;
+    }
+  };
 
-      const loginMethod = getLoginMethod(user);
-      setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
+  // Log profile edit
+  const logProfileEdit = async (userId, type) => {
+    try {
+      // Check edit limit before logging new edit
+      const canEdit = await checkEditLimit(userId);
+      if (!canEdit) {
+        setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
+        setEditLimitReached(true);
+        return false;
+      }
 
-      const userRef = doc(db, "users", user.uid);
-      const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const userData = docSnap.data();
-          setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
-          setEmail(sanitizeInput(userData.email || user.email || ""));
-          setProfileImageURL(userData.photoURL || user.photoURL || "");
-          setPendingEmail(userData.pendingEmail || "");
-          setEmailVerificationSent(!!userData.pendingEmail);
-          const isAdminValue = userData.isAdmin === true;
-          setUserRole(isAdminValue ? 'admin' : 'user');
-          setIsAdmin(isAdminValue);
-          console.log(`Updated profile for ${user.uid}: displayName=${userData.displayName}, email=${userData.email}`);
-        } else {
-          checkAdminStatus(user.uid);
-        }
-      }, (error) => {
-        console.error("Error with real-time listener:", error);
-        checkAdminStatus(user.uid);
+      const today = new Date().toISOString().split('T')[0];
+      await addDoc(collection(db, "profile_edits"), {
+        userId,
+        type,
+        date: today,
+        timestamp: new Date()
       });
 
-      resetTimeout();
-
-      window.addEventListener('mousemove', handleUserActivity);
-      window.addEventListener('keydown', handleUserActivity);
-      window.addEventListener('click', handleUserActivity);
-    } else {
-      navigate('/');
+      // Re-check edit count after logging
+      const newCount = await checkEditLimit(userId);
+      setEditCount(prev => prev + 1);
+      setEditLimitReached(newCount >= 5);
+      return true;
+    } catch (error) {
+      console.error("Error logging profile edit:", error);
+      setError("Failed to log profile edit: " + error.message);
+      return false;
     }
-    setLoading(false);
-    return () => {
-      unsubscribeUser();
-      unsubscribe();
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+  };
+
+  // Check if display name is unique
+  const checkDisplayNameUnique = async (name) => {
+    try {
+      const usersQuery = query(
+        collection(db, "users"),
+        where("displayName", "==", name)
+      );
+      const querySnapshot = await getDocs(usersQuery);
+      return querySnapshot.empty;
+    } catch (error) {
+      console.error("Error checking display name uniqueness:", error);
+      setError("Failed to check display name uniqueness: " + error.message);
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setUser(user);
+        setDisplayName(sanitizeInput(user.displayName || ""));
+        setEmail(sanitizeInput(user.email || ""));
+        setProfileImageURL(user.photoURL || "");
+
+        const loginMethod = getLoginMethod(user);
+        setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
+
+        await checkEditLimit(user.uid); // Check edit limit on load
+
+        const userRef = doc(db, "users", user.uid);
+        const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const userData = docSnap.data();
+            setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
+            setEmail(sanitizeInput(userData.email || user.email || ""));
+            setProfileImageURL(userData.photoURL || user.photoURL || "");
+            setPendingEmail(userData.pendingEmail || "");
+            setEmailVerificationSent(!!userData.pendingEmail);
+            const isAdminValue = userData.isAdmin === true;
+            setUserRole(isAdminValue ? 'admin' : 'user');
+            setIsAdmin(isAdminValue);
+          } else {
+            checkAdminStatus(user.uid);
+          }
+        }, (error) => {
+          console.error("Error with real-time listener:", error);
+          checkAdminStatus(user.uid);
+        });
+
+        resetTimeout();
+
+        window.addEventListener('mousemove', handleUserActivity);
+        window.addEventListener('keydown', handleUserActivity);
+        window.addEventListener('click', handleUserActivity);
+      } else {
+        navigate('/');
       }
-      window.removeEventListener('mousemove', handleUserActivity);
-      window.removeEventListener('keydown', handleUserActivity);
-      window.removeEventListener('click', handleUserActivity);
-    };
+      setLoading(false);
+      return () => {
+        if (unsubscribeUser) unsubscribeUser();
+        unsubscribe();
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+        window.removeEventListener('mousemove', handleUserActivity);
+        window.removeEventListener('keydown', handleUserActivity);
+        window.removeEventListener('click', handleUserActivity);
+      };
+    }, [navigate]);
   }, [navigate]);
-}, [navigate]);
 
   const clearMessages = () => {
     setError("");
     setSuccess("");
+    setNameSuggestions([]);
   };
 
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // Check edit limit before proceeding
+    const canEdit = await checkEditLimit(user.uid);
+    if (!canEdit) {
+      setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
+      setEditLimitReached(true);
+      return;
+    }
 
     const now = Date.now();
     if (lastUploadTime && now - lastUploadTime < 30 * 1000) {
@@ -308,16 +398,13 @@ useEffect(() => {
           { merge: true }
         );
 
-        await addDoc(collection(db, "logs"), {
-          action: "PROFILE_UPDATE",
-          userEmail: user.email,
-          details: { type: "photoURL", oldValue: profileImageURL || "No previous image", newValue: publicUrl, isAdmin },
-          timestamp: new Date()
-        });
-
-        setProfileImageURL(publicUrl);
-        setSuccess("Profile image updated successfully!");
-        setLastUploadTime(now);
+        // Log edit only if successful
+        const logged = await logProfileEdit(user.uid, "photoURL");
+        if (logged) {
+          setProfileImageURL(publicUrl);
+          setSuccess("Profile image updated successfully!");
+          setLastUploadTime(now);
+        }
       } catch (error) {
         console.error("Error uploading image:", error);
         setError("Error uploading image: " + error.message);
@@ -331,6 +418,14 @@ useEffect(() => {
     e.preventDefault();
     clearMessages();
 
+    // Check edit limit before proceeding
+    const canEdit = await checkEditLimit(user.uid);
+    if (!canEdit) {
+      setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
+      setEditLimitReached(true);
+      return;
+    }
+
     const sanitizedDisplayName = sanitizeInput(displayName);
     const sanitizedEmail = sanitizeInput(email);
 
@@ -343,14 +438,24 @@ useEffect(() => {
       const originalDisplayName = user.displayName || "";
       const originalEmail = user.email;
 
+      // Check display name uniqueness
       if (sanitizedDisplayName !== originalDisplayName) {
+        const isUnique = await checkDisplayNameUnique(sanitizedDisplayName);
+        if (!isUnique) {
+          const suggestions = generateNameSuggestions(sanitizedDisplayName);
+          setNameSuggestions(suggestions);
+          setError(`Display name "${sanitizedDisplayName}" is already taken. Try one of these: ${suggestions.join(', ')}`);
+          return;
+        }
+      }
+
+      let editCountIncrement = 0;
+
+      if (sanitizedDisplayName !== originalDisplayName) {
+        const logged = await logProfileEdit(user.uid, "displayName");
+        if (!logged) return; // Stop if edit limit is reached
         await updateProfile(user, { displayName: sanitizedDisplayName });
-        await addDoc(collection(db, "logs"), {
-          action: "PROFILE_UPDATE",
-          userEmail: user.email,
-          details: { type: "displayName", oldValue: originalDisplayName, newValue: sanitizedDisplayName, isAdmin },
-          timestamp: new Date()
-        });
+        editCountIncrement++;
       }
 
       if (sanitizedEmail !== originalEmail) {
@@ -364,6 +469,8 @@ useEffect(() => {
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
 
+        const logged = await logProfileEdit(user.uid, "email");
+        if (!logged) return; // Stop if edit limit is reached
         await updateEmail(user, sanitizedEmail);
         await sendEmailVerification(user);
 
@@ -376,13 +483,7 @@ useEffect(() => {
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        await addDoc(collection(db, "logs"), {
-          action: "PROFILE_UPDATE",
-          userEmail: user.email,
-          details: { type: "email", oldValue: originalEmail, newValue: sanitizedEmail, isAdmin },
-          timestamp: new Date()
-        });
-
+        editCountIncrement++;
         setEmailVerificationSent(true);
         setSuccess("A verification email has been sent to your new email address. Please verify it to complete the email change.");
       } else {
@@ -416,17 +517,15 @@ useEffect(() => {
         const credential = EmailAuthProvider.credential(user.email, currentPassword);
         await reauthenticateWithCredential(user, credential);
 
+        const logged = await logProfileEdit(user.uid, "password");
+        if (!logged) return; // Stop if edit limit is reached
         await updatePassword(user, newPassword);
-
-        await addDoc(collection(db, "logs"), {
-          action: "PROFILE_UPDATE",
-          userEmail: user.email,
-          details: { type: "password", isAdmin },
-          timestamp: new Date()
-        });
+        editCountIncrement++;
       }
 
-      setSuccess("Profile updated successfully!");
+      if (editCountIncrement > 0) {
+        setSuccess("Profile updated successfully!");
+      }
       setIsEditing(false);
       setCurrentPassword("");
       setNewPassword("");
@@ -454,6 +553,7 @@ useEffect(() => {
     setNewPassword("");
     setConfirmPassword("");
     setEmailVerificationSent(false);
+    setdubbing.setNameSuggestions([]);
     clearMessages();
   };
 
@@ -488,6 +588,12 @@ useEffect(() => {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleSelectSuggestion = (suggestion) => {
+    setDisplayName(suggestion);
+    setNameSuggestions([]);
+    setError("");
   };
 
   if (loading) {
@@ -528,11 +634,35 @@ useEffect(() => {
           </div>
         </div>
 
+        {editLimitReached && (
+          <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
+            <div className="flex items-center">
+              <FaExclamationTriangle className="mr-3 text-red-400" />
+              You have reached the daily limit of 5 profile edits. Please try again tomorrow.
+            </div>
+          </div>
+        )}
         {error && (
           <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-center">
               <div className="w-2 h-2 bg-red-400 rounded-full mr-3"></div>
               {error}
+              {nameSuggestions.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-sm text-red-200/80">Suggested names:</p>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {nameSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleSelectSuggestion(suggestion)}
+                        className="px-3 py-1 bg-purple-500/20 text-purple-200 rounded-full hover:bg-purple-500/30 transition-all duration-200"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -604,7 +734,7 @@ useEffect(() => {
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="absolute -bottom-2 -right-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white p-3 rounded-full hover:scale-110 transition-all duration-300 shadow-lg hover:shadow-xl group-hover:animate-bounce"
-                    disabled={uploading}
+                    disabled={uploading || editLimitReached}
                   >
                     {uploading ? (
                       <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
@@ -666,6 +796,12 @@ useEffect(() => {
                     {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString() : 'N/A'}
                   </span>
                 </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/60">Profile Edits Today</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${editCount >= 5 ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                    {editCount}/5
+                  </span>
+                </div>
                 
                 <div className="pt-4 border-t border-white/10 space-y-3">
                   {isAdmin && (
@@ -712,6 +848,7 @@ useEffect(() => {
                   <button
                     onClick={() => setIsEditing(true)}
                     className="group flex items-center px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
+                    disabled={editLimitReached}
                   >
                     <FaEdit className="mr-2 group-hover:animate-bounce" />
                     Edit Profile
@@ -721,6 +858,7 @@ useEffect(() => {
                     <button
                       onClick={handleSaveProfile}
                       className="group flex items-center px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
+                      disabled={editLimitReached}
                     >
                       <FaSave className="mr-2 group-hover:animate-bounce" />
                       Save Changes
@@ -746,7 +884,7 @@ useEffect(() => {
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    disabled={!isEditing}
+                    disabled={!isEditing || editLimitReached}
                     className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter your display name"
                     required
@@ -762,7 +900,7 @@ useEffect(() => {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    disabled={!isEditing}
+                    disabled={!isEditing || editLimitReached}
                     className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter your email address"
                     required
@@ -791,11 +929,13 @@ useEffect(() => {
                           onChange={(e) => setCurrentPassword(e.target.value)}
                           className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
                           placeholder="Enter current password"
+                          disabled={editLimitReached}
                         />
                         <button
                           type="button"
                           onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                          disabled={editLimitReached}
                         >
                           {showCurrentPassword ? <FaEyeSlash /> : <FaEye />}
                         </button>
@@ -812,11 +952,13 @@ useEffect(() => {
                           className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
                           placeholder="Enter new password (min 6 characters)"
                           minLength="6"
+                          disabled={editLimitReached}
                         />
                         <button
                           type="button"
                           onClick={() => setShowNewPassword(!showNewPassword)}
                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                          disabled={editLimitReached}
                         >
                           {showNewPassword ? <FaEyeSlash /> : <FaEye />}
                         </button>
@@ -833,11 +975,13 @@ useEffect(() => {
                           className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
                           placeholder="Confirm new password"
                           minLength="6"
+                          disabled={editLimitReached}
                         />
                         <button
                           type="button"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-200"
+                          disabled={editLimitReached}
                         >
                           {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
                         </button>
@@ -908,8 +1052,6 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-
-  
           </div>
         </div>
       </div>
