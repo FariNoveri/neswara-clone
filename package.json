@@ -47,6 +47,7 @@
     "react-responsive": "^10.0.1",
     "react-router-dom": "^7.6.3",
     "react-toastify": "^11.0.5",
+    "react-window": "^1.8.11",
     "styled-jsx": "^5.1.7",
     "swiper": "^11.2.5",
     "typescript": "^5.8.3",

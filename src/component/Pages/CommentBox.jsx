@@ -318,7 +318,7 @@ const useCommentAvatar = (cmt, logSecurityEvent) => {
 };
 
 // Comment Component
-const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, highlightedComment, setHighlightedComment, sanitizeInput, formatTimeAgo, commentRefs }) => {
+const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments, toggleTooltip, visibleTooltips, toggleAllTooltips, areAllTooltipsHidden }) => {
   const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
   const isOwner = cmt.userId === currentUser?.uid;
   const canDelete = isAdmin || isOwner;
@@ -334,14 +334,19 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
     commentRefs.current[cmt.id] = commentRef;
   }, [cmt.id, commentRefs]);
 
-  const handleReplyBadgeClick = () => {
-    if (cmt.parentId && commentRefs.current[cmt.parentId]) {
-      commentRefs.current[cmt.parentId].current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setHighlightedComment(cmt.parentId);
-      setTimeout(() => setHighlightedComment(null), 2000); // Clear highlight after 2s
-      logSecurityEvent('REPLY_BADGE_CLICK', { commentId: cmt.id, parentId: cmt.parentId });
-    }
-  };
+  // Calculate reply counts per user
+  const replyCounts = cmt.replies?.reduce((acc, reply) => {
+    const author = sanitizeInput(reply.author || "User");
+    acc[author] = (acc[author] || 0) + 1;
+    return acc;
+  }, {}) || {};
+
+  // Determine reply indicator with specific user check
+  const replyIndicator = cmt.parentId ? (
+    cmt.replyToAuthor === (currentUser?.displayName || currentUser?.email) 
+      ? "membalas komentar Anda" 
+      : `membalas komentar ${sanitizeInput(cmt.replyToAuthor || "user12345")}`
+  ) : null;
 
   return (
     <div key={cmt.id} className={`space-y-4`} ref={commentRef}>
@@ -350,7 +355,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
         onClose={() => setIsAdminModalOpen(false)}
       />
       <div
-        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''} ${cmt.id === highlightedComment ? 'bg-cyan-50 border-cyan-600 animate-highlight' : ''}`}
+        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
         onMouseEnter={() => setFocusedComment(cmt.id)}
         onMouseLeave={() => setFocusedComment(null)}
       >
@@ -360,6 +365,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-slate-800">{sanitizeInput(cmt.author || "User")}</span>
+                {replyIndicator && <span className="text-xs text-slate-500">({replyIndicator})</span>}
                 {ADMIN_EMAILS.includes(cmt.userEmail) && (
                   <button
                     onClick={() => setIsAdminModalOpen(true)}
@@ -371,15 +377,6 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
                 )}
                 {isOwner && (
                   <span className="text-xs bg-slate-400 text-white px-2 py-0.5 rounded-full">(You)</span>
-                )}
-                {cmt.parentId && cmt.replyToAuthor && (
-                  <button
-                    onClick={handleReplyBadgeClick}
-                    className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full hover:bg-slate-200 transition-colors"
-                    aria-label={`Lihat komentar yang dibalas oleh ${sanitizeInput(cmt.replyToAuthor)}`}
-                  >
-                    Membalas {sanitizeInput(cmt.replyToAuthor)}
-                  </button>
                 )}
               </div>
               <span className="text-xs text-slate-500">{formatTimeAgo(cmt.createdAt)}</span>
@@ -448,8 +445,44 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               <Reply className="w-4 h-4" />
               <span>Balas</span>
             </button>
-            {cmt.replies && cmt.replies.length > 0 && (
-              <span className="text-xs text-slate-400">{cmt.replies.length} balasan</span>
+            {cmt.replies?.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => toggleTooltip(cmt.id)}
+                  className="flex items-center gap-1 text-sm text-slate-500 hover:text-cyan-600"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>{areAllTooltipsHidden ? "Show Total Balasan" : "Total Balasan"}</span>
+                </button>
+                {visibleTooltips[cmt.id] && !areAllTooltipsHidden && (
+                  <div className="absolute right-0 bottom-full mb-2 p-3 bg-slate-800 text-white rounded-lg shadow-lg z-10 w-48 transition-all duration-200 animate-tooltipFadeIn">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-semibold">Jumlah Balasan</span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => toggleAllTooltips()}
+                          className="text-xs bg-slate-600 hover:bg-slate-700 text-white px-2 py-0.5 rounded-full"
+                          title="Sembunyikan Semua"
+                        >
+                          Hide
+                        </button>
+                        <button
+                          onClick={() => toggleTooltip(cmt.id)}
+                          className="text-xs bg-slate-600 hover:bg-slate-700 text-white px-2 py-0.5 rounded-full"
+                          title="Tutup"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      {Object.entries(replyCounts).map(([author, count]) => (
+                        <div key={author}>{author}: {count}x</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -500,7 +533,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
           }).map(reply => (
             <Comment
               key={reply.id}
-              cmt={reply}
+              cmt={{ ...reply, replies: reply.replies || [] }}
               depth={depth + 1}
               currentUser={currentUser}
               commentLikes={commentLikes}
@@ -520,11 +553,14 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               logSecurityEvent={logSecurityEvent}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
-              highlightedComment={highlightedComment}
-              setHighlightedComment={setHighlightedComment}
               sanitizeInput={sanitizeInput}
               formatTimeAgo={formatTimeAgo}
               commentRefs={commentRefs}
+              comments={comments}
+              toggleTooltip={toggleTooltip}
+              visibleTooltips={visibleTooltips}
+              toggleAllTooltips={toggleAllTooltips}
+              areAllTooltipsHidden={areAllTooltipsHidden}
             />
           ))}
         </div>
@@ -545,7 +581,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [replyComment, setReplyComment] = useState("");
   const [commentLikes, setCommentLikes] = useState({});
   const [reportedComments, setReportedComments] = useState({});
-  const [highlightedComment, setHighlightedComment] = useState(null);
   const [editModal, setEditModal] = useState({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
   const [originalCommentModal, setOriginalCommentModal] = useState({ isOpen: false, originalText: '' });
   const [spamWarning, setSpamWarning] = useState({ isOpen: false, remainingTime: 0 });
@@ -556,7 +591,42 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     isSubmitting: false,
     commentText: ''
   });
+  const [visibleTooltips, setVisibleTooltips] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`tooltipState_${newsId}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch (err) {
+      console.error("Error loading tooltip state from localStorage:", err);
+      return {};
+    }
+  });
+  const [areAllTooltipsHidden, setAreAllTooltipsHidden] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`tooltipHiddenState_${newsId}`);
+      return saved ? JSON.parse(saved) : false;
+    } catch (err) {
+      console.error("Error loading tooltip hidden state from localStorage:", err);
+      return false;
+    }
+  });
   const commentRefs = useRef({});
+
+  // Save tooltip states to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(`tooltipState_${newsId}`, JSON.stringify(visibleTooltips));
+    } catch (err) {
+      console.error("Error saving tooltip state to localStorage:", err);
+    }
+  }, [visibleTooltips, newsId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`tooltipHiddenState_${newsId}`, JSON.stringify(areAllTooltipsHidden));
+    } catch (err) {
+      console.error("Error saving tooltip hidden state to localStorage:", err);
+    }
+  }, [areAllTooltipsHidden, newsId]);
 
   // Input sanitization
   const sanitizeInput = (input) => {
@@ -566,6 +636,50 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }).trim();
   };
 
+  // Security logging
+  const logSecurityEvent = async (action, details) => {
+    try {
+      await addDoc(collection(db, 'security_logs'), {
+        action,
+        userEmail: currentUser?.email || 'anonymous',
+        details,
+        timestamp: serverTimestamp(),
+        userAgent: navigator.userAgent,
+        ipAddress: 'N/A'
+      });
+    } catch (error) {
+      console.error('Failed to log security event:', error);
+    }
+  };
+
+  // Function to count all comments including replies
+  const countAllComments = (comments) => {
+    let total = comments.length;
+    comments.forEach(comment => {
+      if (comment.replies && comment.replies.length > 0) {
+        total += countAllComments(comment.replies);
+      }
+    });
+    return total;
+  };
+
+  // Toggle individual tooltip visibility
+  const toggleTooltip = (commentId) => {
+    setVisibleTooltips(prev => ({
+      ...prev,
+      [commentId]: !prev[commentId]
+    }));
+    // Only set areAllTooltipsHidden to false if no other tooltips are visible
+    if (areAllTooltipsHidden) {
+      setAreAllTooltipsHidden(false);
+    }
+  };
+
+  // Hide all tooltips
+  const toggleAllTooltips = () => {
+    setVisibleTooltips({});
+    setAreAllTooltipsHidden(true);
+  };
 
   // Fetch comments and likes in real-time
   const fetchComments = useCallback(() => {
@@ -585,10 +699,25 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       const commentsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        createdAt: doc.data().createdAt
+        createdAt: doc.data().createdAt,
+        replies: doc.data().replies || [] // Default to empty array if replies is undefined
       }));
-      setComments(commentsData);
-      if (onCommentCountChange) onCommentCountChange(commentsData.length);
+      
+      // Build nested replies structure
+      const commentMap = {};
+      commentsData.forEach(comment => {
+        commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
+      });
+      commentsData.forEach(comment => {
+        if (comment.parentId && commentMap[comment.parentId]) {
+          commentMap[comment.parentId].replies.push(commentMap[comment.id]);
+        }
+      });
+
+      const rootComments = commentsData.filter(comment => !comment.parentId);
+      console.log("Root comments after structuring:", rootComments); // Debug root comments
+      setComments(rootComments);
+      if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
       setLoading(false);
 
       if (currentUser) {
@@ -623,7 +752,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         autoClose: 3000,
         toastId: 'comments-error'
       });
-      setLoading(false);
+      logSecurityEvent('FETCH_COMMENTS_ERROR', { error: err.message });
     });
 
     // Fetch likes for each comment
@@ -701,7 +830,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         autoClose: 3000,
         toastId: 'invalid-length'
       });
-      setIsSubmitting(false);
       logSecurityEvent('INVALID_COMMENT_LENGTH', { length: textToSubmit.length, newsId });
       return;
     }
@@ -776,7 +904,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       toast.error("Anda tidak memiliki izin untuk mengedit komentar ini.", {
         position: 'top-center',
         autoClose: 3000,
-        toastId: 'edit-no-permission'
+        DOT
       });
       logSecurityEvent('UNAUTHORIZED_EDIT_ATTEMPT', { commentId, userId: currentUser.uid, commentUserId: comment.userId });
       return;
@@ -860,11 +988,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         autoClose: 3000,
         toastId: 'original-not-found'
       });
-      logSecurityEvent('ORIGINAL_COMMENT_NOT_FOUND', { commentId });
       return;
     }
     setOriginalCommentModal({ isOpen: true, originalText });
-    logSecurityEvent('VIEW_ORIGINAL_COMMENT', { commentId });
   };
 
   const handleDeleteClick = (commentId) => {
@@ -1121,7 +1247,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     const rootComments = [];
 
     comments.forEach(comment => {
-      commentMap[comment.id] = { ...comment, replies: [] };
+      commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
     });
 
     comments.forEach(comment => {
@@ -1167,6 +1293,10 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
             background: #f59e0b !important;
             color: white !important;
           }
+          .Toastify__toast--info {
+            background: #3b82f6 !important;
+            color: white !important;
+          }
           @keyframes scaleIn {
             from {
               transform: scale(0.95);
@@ -1177,19 +1307,31 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               opacity: 1;
             }
           }
-          @keyframes highlight {
-            0% {
-              background-color: rgba(207, 250, 254, 0);
-              border-color: #e2e8f0;
+          @keyframes tooltipFadeIn {
+            from {
+              opacity: 0;
+              transform: scale(0.95);
             }
-            50% {
-              background-color: #cffafe;
-              border-color: #0891b2;
+            to {
+              opacity: 1;
+              transform: scale(1);
             }
-            100% {
-              background-color: rgba(207, 250, 254, 0);
-              border-color: #e2e8f0;
+          }
+          @keyframes tooltipFadeOut {
+            from {
+              opacity: 1;
+              transform: scale(1);
             }
+            to {
+              opacity: 0;
+              transform: scale(0.95);
+            }
+          }
+          .animate-tooltipFadeIn {
+            animation: tooltipFadeIn 0.2s ease-out forwards;
+          }
+          .animate-tooltipFadeOut {
+            animation: tooltipFadeOut 0.2s ease-out forwards;
           }
         `}
       </style>
@@ -1226,7 +1368,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       />
       <div className="flex items-center gap-3">
         <MessageCircle className="w-6 h-6 text-cyan-600" />
-        <h3 className="text-xl font-bold text-slate-800">Komentar ({comments.length})</h3>
+        <h3 className="text-xl font-bold text-slate-800">Komentar ({countAllComments(comments)})</h3>
       </div>
       <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
         <h4 className="font-bold text-blue-800 mb-2">Rules Berkomentar</h4>
@@ -1277,7 +1419,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           organizedComments.map(comment => (
             <Comment
               key={comment.id}
-              cmt={comment}
+              cmt={{ ...comment, replies: comment.replies || [] }}
               depth={0}
               currentUser={currentUser}
               commentLikes={commentLikes}
@@ -1297,11 +1439,14 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               logSecurityEvent={logSecurityEvent}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
-              highlightedComment={highlightedComment}
-              setHighlightedComment={setHighlightedComment}
               sanitizeInput={sanitizeInput}
               formatTimeAgo={formatTimeAgo}
               commentRefs={commentRefs}
+              comments={comments}
+              toggleTooltip={toggleTooltip}
+              visibleTooltips={visibleTooltips}
+              toggleAllTooltips={toggleAllTooltips}
+              areAllTooltipsHidden={areAllTooltipsHidden}
             />
           ))
         )}

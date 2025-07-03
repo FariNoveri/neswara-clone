@@ -166,7 +166,6 @@ const CommentManagement = ({ logActivity }) => {
       return;
     }
     setOriginalCommentModal({ isOpen: true, originalText, commentId });
-    logActivity('VIEW_ORIGINAL_COMMENT', { commentId });
   };
 
   const sanitizeInput = (input) => {

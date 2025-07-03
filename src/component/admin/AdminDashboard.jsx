@@ -163,7 +163,6 @@ const AdminDashboard = () => {
             const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
             if (isAdmin) {
               setIsAuthorized(true);
-              await logActivity('ADMIN_LOGIN', { userEmail: user.email });
             } else {
               setIsAuthorized(false);
               setShowUnauthorizedModal(true);

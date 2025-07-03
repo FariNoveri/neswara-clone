@@ -24,8 +24,6 @@ const formatDate = (date) => {
 
 // Constants untuk excluded actions
 const EXCLUDED_ACTIONS = [
-  'ADMIN_LOGIN',
-  'ADMIN_LOGOUT',
   'UNAUTHORIZED_LOGOUT',
   'USER_LOGIN',
   'USER_LOGOUT'
