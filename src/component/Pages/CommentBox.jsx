@@ -329,12 +329,10 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const commentRef = useRef(null);
 
-  // Register this comment's ref
   useEffect(() => {
     commentRefs.current[cmt.id] = commentRef;
   }, [cmt.id, commentRefs]);
 
-  // Determine reply indicator with specific user check
   const replyIndicator = cmt.parentId ? (
     cmt.replyToAuthor === (currentUser?.displayName || currentUser?.email) 
       ? "membalas komentar Anda" 
@@ -543,7 +541,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   });
   const commentRefs = useRef({});
 
-  // Input sanitization
   const sanitizeInput = useCallback((input) => {
     return DOMPurify.sanitize(input, {
       ALLOWED_TAGS: [],
@@ -551,7 +548,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }).trim();
   }, []);
 
-  // Function to count all comments including replies
   const countAllComments = useCallback((comments) => {
     let total = comments.length;
     comments.forEach(comment => {
@@ -562,7 +558,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     return total;
   }, []);
 
-  // Security logging
   const logSecurityEvent = useCallback(async (action, details) => {
     try {
       await addDoc(collection(db, 'security_logs'), {
@@ -578,142 +573,147 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     }
   }, [currentUser]);
 
-  // Fetch comments and likes in real-time
-  const fetchComments = useCallback(() => {
-    if (!newsId) {
-      console.warn("fetchComments: newsId is undefined or null");
-      setLoading(false);
-      return () => {};
-    }
-    console.log("fetchComments: Subscribing to newsId:", newsId);
+  useEffect(() => {
+    let unsubscribeComments = () => {};
+    let unsubscribeLikes = () => {};
 
-    const commentsQuery = query(
-      collection(db, `news/${newsId}/comments`),
-      orderBy("createdAt", "desc")
-    );
-    const unsubscribeComments = onSnapshot(commentsQuery, async (snapshot) => {
-      console.log("fetchComments: Snapshot received, docs length:", snapshot.docs.length);
-      const commentsData = [];
-      const userIds = [...new Set(snapshot.docs.map(doc => doc.data().userId).filter(id => id))];
-
-      // Batch fetch user display names
-      let userMap = {};
-      if (userIds.length > 0) {
-        try {
-          const chunks = [];
-          for (let i = 0; i < userIds.length; i += 10) {
-            chunks.push(userIds.slice(i, i + 10));
-          }
-          const userDocs = [];
-          for (const chunk of chunks) {
-            const usersQuery = query(collection(db, "users"), where("uid", "in", chunk));
-            const querySnapshot = await getDocs(usersQuery);
-            querySnapshot.forEach(doc => {
-              userDocs.push({ id: doc.id, ...doc.data() });
-            });
-          }
-          userMap = Object.fromEntries(userDocs.map(doc => [doc.id, doc.displayName || doc.email || "User"]));
-        } catch (err) {
-          console.error("Error fetching user display names:", err);
-          logSecurityEvent('FETCH_USER_DISPLAY_NAMES_ERROR', { error: err.message });
-        }
+    const fetchCommentsData = async () => {
+      if (!newsId) {
+        console.warn("fetchComments: newsId is undefined or null");
+        setLoading(false);
+        return;
       }
+      console.log("fetchComments: Subscribing to newsId:", newsId);
 
-      snapshot.docs.forEach(doc => {
-        const commentData = doc.data();
-        const authorName = commentData.userId && userMap[commentData.userId]
-          ? sanitizeInput(userMap[commentData.userId])
-          : sanitizeInput(commentData.author || "User");
+      const commentsQuery = query(
+        collection(db, `news/${newsId}/comments`),
+        orderBy("createdAt", "desc")
+      );
+      unsubscribeComments = onSnapshot(commentsQuery, async (snapshot) => {
+        console.log("fetchComments: Snapshot received, docs length:", snapshot.docs.length);
+        const commentsData = [];
+        const userIds = [...new Set(snapshot.docs.map(doc => doc.data().userId).filter(id => id))];
 
-        commentsData.push({
-          id: doc.id,
-          ...commentData,
-          author: authorName,
-          createdAt: commentData.createdAt,
-          replies: commentData.replies || []
-        });
-      });
-
-      // Build nested replies structure
-      const commentMap = {};
-      commentsData.forEach(comment => {
-        commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
-      });
-      commentsData.forEach(comment => {
-        if (comment.parentId && commentMap[comment.parentId]) {
-          commentMap[comment.parentId].replies.push(commentMap[comment.id]);
-        }
-      });
-
-      const rootComments = commentsData.filter(comment => !comment.parentId);
-      console.log("Root comments after structuring:", rootComments);
-      setComments(rootComments);
-      if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
-      setLoading(false);
-
-      if (currentUser) {
-        const newReportedComments = {};
-        await Promise.all(
-          commentsData.map(async (comment) => {
-            const reportQuery = query(
-              collection(db, `news/${newsId}/comments/${comment.id}/reports`),
-              where('reportedBy', '==', currentUser.uid)
-            );
-            try {
-              const reportSnapshot = await getDocs(reportQuery);
-              newReportedComments[comment.id] = !reportSnapshot.empty;
-            } catch (error) {
-              console.error('Error fetching report status for comment:', comment.id, error);
-              logSecurityEvent('FETCH_REPORT_STATUS_ERROR', { commentId: comment.id, error: error.message });
+        let userMap = {};
+        if (userIds.length > 0) {
+          try {
+            const chunks = [];
+            for (let i = 0; i < userIds.length; i += 10) {
+              chunks.push(userIds.slice(i, i + 10));
             }
-          })
-        );
-        setReportedComments(newReportedComments);
-        console.log('Reported comments updated:', newReportedComments);
-      }
-    }, (err) => {
-      console.error("Error fetching comments:", err);
-      setError("Gagal memuat komentar.");
-      toast.error("Gagal memuat komentar.", {
-        position: 'top-center',
-        autoClose: 3000,
-        toastId: 'comments-error'
-      });
-      logSecurityEvent('FETCH_COMMENTS_ERROR', { error: err.message });
-    });
+            for (const chunk of chunks) {
+              const usersQuery = query(collection(db, "users"), where("uid", "in", chunk));
+              const querySnapshot = await getDocs(usersQuery);
+              querySnapshot.forEach(doc => {
+                const userData = doc.data();
+                userMap[doc.id] = {
+                  displayName: sanitizeInput(userData.displayName || userData.email || "User"),
+                  photoURL: userData.photoURL || null
+                };
+              });
+            }
+          } catch (err) {
+            console.error("Error fetching user data:", err);
+            logSecurityEvent('FETCH_USER_DATA_ERROR', { error: err.message });
+          }
+        }
 
-    // Fetch likes for each comment
-    const unsubscribeLikes = onSnapshot(commentsQuery, (snapshot) => {
-      const likesData = {};
-      snapshot.docs.forEach(commentDoc => {
-        const likesQuery = query(
-          collection(db, `news/${newsId}/comments/${commentDoc.id}/likes`)
-        );
-        onSnapshot(likesQuery, (likesSnapshot) => {
-          const count = likesSnapshot.size;
-          const userLiked = currentUser ? !!likesSnapshot.docs.find(doc => doc.data().userId === currentUser.uid) : false;
-          likesData[commentDoc.id] = { count, userLiked };
-        }, (err) => {
-          console.error("Error fetching likes:", err);
-          logSecurityEvent('FETCH_LIKES_ERROR', { commentId: commentDoc.id, error: err.message });
+        snapshot.docs.forEach(doc => {
+          const commentData = doc.data();
+          const userData = userMap[commentData.userId] || null;
+          const authorName = userData ? userData.displayName : (commentData.author || "User");
+          const photoURL = userData ? userData.photoURL : (commentData.photoURL || null);
+
+          commentsData.push({
+            id: doc.id,
+            ...commentData,
+            author: sanitizeInput(authorName),
+            photoURL: photoURL,
+            createdAt: commentData.createdAt,
+            replies: commentData.replies || []
+          });
         });
+
+        const commentMap = {};
+        commentsData.forEach(comment => {
+          commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
+        });
+        commentsData.forEach(comment => {
+          if (comment.parentId && commentMap[comment.parentId]) {
+            commentMap[comment.parentId].replies.push(commentMap[comment.id]);
+          }
+        });
+
+        const rootComments = commentsData.filter(comment => !comment.parentId);
+        console.log("Root comments after structuring:", rootComments);
+        setComments(rootComments);
+        if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
+        setLoading(false);
+
+        if (currentUser) {
+          const newReportedComments = {};
+          await Promise.all(
+            commentsData.map(async (comment) => {
+              const reportQuery = query(
+                collection(db, `news/${newsId}/comments/${comment.id}/reports`),
+                where('reportedBy', '==', currentUser.uid)
+              );
+              try {
+                const reportSnapshot = await getDocs(reportQuery);
+                newReportedComments[comment.id] = !reportSnapshot.empty;
+              } catch (error) {
+                console.error('Error fetching report status for comment:', comment.id, error);
+                logSecurityEvent('FETCH_REPORT_STATUS_ERROR', { commentId: comment.id, error: error.message });
+              }
+            })
+          );
+          setReportedComments(newReportedComments);
+          console.log('Reported comments updated:', newReportedComments);
+        }
+      }, (err) => {
+        console.error("Error fetching comments:", err);
+        setError("Gagal memuat komentar.");
+        toast.error("Gagal memuat komentar.", {
+          position: 'top-center',
+          autoClose: 3000,
+          toastId: 'comments-error'
+        });
+        logSecurityEvent('FETCH_COMMENTS_ERROR', { error: err.message });
       });
-      setCommentLikes(likesData);
-    }, (err) => {
-      console.error("Error setting up likes listener:", err);
-      logSecurityEvent('SETUP_LIKES_LISTENER_ERROR', { error: err.message });
-    });
+
+      const commentsQueryLikes = query(
+        collection(db, `news/${newsId}/comments`),
+        orderBy("createdAt", "desc")
+      );
+      unsubscribeLikes = onSnapshot(commentsQueryLikes, (snapshot) => {
+        const likesData = {};
+        snapshot.docs.forEach(commentDoc => {
+          const likesQuery = query(
+            collection(db, `news/${newsId}/comments/${commentDoc.id}/likes`)
+          );
+          onSnapshot(likesQuery, (likesSnapshot) => {
+            const count = likesSnapshot.size;
+            const userLiked = currentUser ? !!likesSnapshot.docs.find(doc => doc.data().userId === currentUser.uid) : false;
+            likesData[commentDoc.id] = { count, userLiked };
+          }, (err) => {
+            console.error("Error fetching likes:", err);
+            logSecurityEvent('FETCH_LIKES_ERROR', { commentId: commentDoc.id, error: err.message });
+          });
+        });
+        setCommentLikes(likesData);
+      }, (err) => {
+        console.error("Error setting up likes listener:", err);
+        logSecurityEvent('SETUP_LIKES_LISTENER_ERROR', { error: err.message });
+      });
+    };
+
+    fetchCommentsData();
 
     return () => {
       unsubscribeComments();
       unsubscribeLikes();
     };
   }, [newsId, currentUser, onCommentCountChange, sanitizeInput, logSecurityEvent, countAllComments]);
-
-  useEffect(() => {
-    const cleanup = fetchComments();
-    return cleanup;
-  }, [fetchComments]);
 
   const checkSpamLimit = useCallback(() => {
     const now = Date.now();
@@ -765,13 +765,16 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     try {
       const commentsRef = collection(db, `news/${newsId}/comments`);
       const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-      const authorName = userDoc.exists() ? sanitizeInput(userDoc.data().displayName || currentUser.email || "User") : sanitizeInput(currentUser.displayName || currentUser.email || "User");
+      const userData = userDoc.exists() ? userDoc.data() : {};
+      const authorName = sanitizeInput(userData.displayName || currentUser.email || "User");
+      const photoURL = userData.photoURL || currentUser.photoURL || null;
+
       await addDoc(commentsRef, {
         text: textToSubmit,
         author: authorName,
         userId: currentUser.uid,
         userEmail: currentUser.email,
-        photoURL: currentUser.photoURL || null,
+        photoURL: photoURL,
         createdAt: serverTimestamp(),
         parentId: parentId || null,
         ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) }),
@@ -1318,7 +1321,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500">{comment.length}/500</span>
             <button
-              onClick={handleSubmit}
+              onClick={(e) => handleSubmit(e)}
               disabled={!canComment || comment.trim() === "" || isSubmitting}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${!canComment || comment.trim() === "" || isSubmitting ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 text-white hover:bg-cyan-700'}`}
             >

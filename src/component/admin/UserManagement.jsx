@@ -127,6 +127,10 @@ const UserManagement = ({ adminEmails }) => {
   };
 
   const fetchProfileEdits = async () => {
+    if (!isAdmin) {
+      setProfileEdits({});
+      return () => {};
+    }
     try {
       const today = new Date().toISOString().split('T')[0];
       const editsQuery = query(
@@ -143,10 +147,21 @@ const UserManagement = ({ adminEmails }) => {
           editsData[data.userId].push({ ...data, id: doc.id });
         });
         setProfileEdits(editsData);
+      }, (error) => {
+        console.error('Error in profile edits snapshot listener:', error);
+        if (error.code === 'permission-denied') {
+          showPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk mengakses riwayat edit.', 'error');
+        } else {
+          showPopup('Error', 'Gagal memuat riwayat edit: ' + error.message, 'error');
+        }
+        setProfileEdits({});
       });
       return () => unsubscribe();
     } catch (error) {
-      console.error('Error fetching profile edits:', error);
+      console.error('Error setting up profile edits listener:', error);
+      showPopup('Error', 'Gagal mengatur listener riwayat edit: ' + error.message, 'error');
+      setProfileEdits({});
+      return () => {};
     }
   };
 
@@ -225,7 +240,7 @@ const UserManagement = ({ adminEmails }) => {
               setIsAdmin(true);
             }
           } else {
-              setIsAdmin(userData.isAdmin === true);
+            setIsAdmin(userData.isAdmin === true);
           }
           setIsInitialLoad(false);
         } else {
@@ -416,21 +431,27 @@ const UserManagement = ({ adminEmails }) => {
     
     try {
       const userRef = doc(db, 'users', editUserId);
+      const originalDisplayName = user.displayName || '';
+      const newDisplayName = editForm.displayName || '';
       if (user.source.inFirestore) {
         await updateDoc(userRef, {
           email: editForm.email,
-          displayName: editForm.displayName,
+          displayName: newDisplayName,
           updatedAt: new Date().toISOString().split('T')[0],
         });
       } else {
         await setDoc(userRef, {
           email: editForm.email,
-          displayName: editForm.displayName,
+          displayName: newDisplayName,
           isAdmin: false,
           emailVerified: user.emailVerified || false,
           updatedAt: new Date().toISOString().split('T')[0],
           createdAt: new Date().toISOString().split('T')[0],
         });
+      }
+      
+      if (originalDisplayName !== newDisplayName) {
+        await logProfileEdit(user.id, 'displayName', originalDisplayName, newDisplayName);
       }
       
       const updatedDoc = await getDoc(userRef);
@@ -524,6 +545,31 @@ const UserManagement = ({ adminEmails }) => {
     return user.isAdmin ? 'Admin' : 'User';
   };
 
+  // Log profile edit function to match Profile.jsx
+  const logProfileEdit = async (userId, type, beforeName = null, newName = null) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const logData = {
+        userId,
+        type,
+        date: today,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (type === 'displayName' && beforeName && newName) {
+        logData.beforeName = beforeName;
+        logData.newName = newName;
+      }
+
+      await addDoc(collection(db, 'profile_edits'), logData);
+      return true;
+    } catch (error) {
+      console.error('Error logging profile edit:', error);
+      showPopup('Error', 'Gagal mencatat perubahan: ' + error.message, 'error');
+      return false;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
       <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 text-white">
@@ -541,7 +587,7 @@ const UserManagement = ({ adminEmails }) => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10">
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 mb-8 animate-slideUp">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             <input
               type="text"
@@ -560,7 +606,7 @@ const UserManagement = ({ adminEmails }) => {
             <select
               value={filterRole}
               onChange={(e) => handleFilterChange('role', e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 appearance-auto"
             >
               <option value="all">Semua Role</option>
               <option value="admin">Admin</option>
@@ -569,7 +615,7 @@ const UserManagement = ({ adminEmails }) => {
             <select
               value={filterEmailVerified}
               onChange={(e) => handleFilterChange('emailVerified', e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 appearance-auto"
             >
               <option value="all">Semua Status</option>
               <option value="verified">Email Verified</option>
@@ -578,7 +624,7 @@ const UserManagement = ({ adminEmails }) => {
             <select
               value={filterSource}
               onChange={(e) => handleFilterChange('source', e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 appearance-auto"
             >
               <option value="all">Semua Sumber</option>
               <option value="both">Tersinkronisasi</option>
@@ -589,7 +635,7 @@ const UserManagement = ({ adminEmails }) => {
             <select
               value={filterDate}
               onChange={(e) => handleFilterChange('date', e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white text-gray-900 appearance-auto"
             >
               <option value="all">Semua Tanggal</option>
               <option value="last7days">7 Hari Terakhir</option>
@@ -607,7 +653,7 @@ const UserManagement = ({ adminEmails }) => {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8 mb-8 animate-slideUp">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 mb-8 animate-slideUp">
           <h3 className="text-xl font-bold text-gray-900 mb-4">Status Sinkronisasi</h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
             <div>
@@ -634,25 +680,23 @@ const UserManagement = ({ adminEmails }) => {
             <table className="min-w-full divide-y divide-gray-100">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Status</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sumber Data</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Riwayat Edit</th>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sumber Data</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Riwayat Edit</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
                     <td colSpan="8" className="px-6 py-12 text-center">
-                      <div className="flex justify-center">
-                        <div className="relative">
-                          <div className="w-12 h-12 border-4 border-indigo-200 rounded-full animate-spin"></div>
-                          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
-                        </div>
+                      <div className="flex justify-center items-center">
+                        <div className="w-10 h-10 border-4 border-indigo-200 rounded-full animate-spin"></div>
+                        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute"></div>
                       </div>
                     </td>
                   </tr>
@@ -673,7 +717,7 @@ const UserManagement = ({ adminEmails }) => {
                     const userEdits = profileEdits[user.id] || [];
                     return (
                       <tr key={user.id} className={`hover:bg-gray-50 transition-all duration-300 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} transform hover:scale-[1.01] animate-fadeInUp`} style={{ animationDelay: `${index * 0.1}s` }}>
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
                           {editUserId === user.id ? (
                             <input
                               type="text"
@@ -685,7 +729,7 @@ const UserManagement = ({ adminEmails }) => {
                             user.email || 'N/A'
                           )}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">
+                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
                           {editUserId === user.id ? (
                             <input
                               type="text"
@@ -723,23 +767,43 @@ const UserManagement = ({ adminEmails }) => {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {user.updatedAt ? new Date(user.updatedAt).toLocaleDateString() : 'N/A'}
+                          {user.updatedAt || 'N/A'}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-500">
+                        <td className="px-6 py-4 text-sm text-gray-500 max-w-md">
                           {userEdits.length > 0 ? (
-                            <ul className="list-disc list-inside">
-                              {userEdits.map((edit, idx) => (
-                                <li key={idx} className="text-sm">
-                                  {edit.type} - {new Date(edit.timestamp.toDate()).toLocaleString()}
-                                </li>
-                              ))}
-                            </ul>
+                            <div className="max-h-32 overflow-y-auto">
+                              <ul className="list-disc list-inside space-y-1">
+                                {userEdits.map((edit, idx) => {
+                                  let editDescription = '';
+                                  if (edit.type === 'displayName' && edit.beforeName && edit.newName) {
+                                    editDescription = `${edit.beforeName} → ${edit.newName}`;
+                                  } else {
+                                    editDescription = edit.type || 'Unknown edit';
+                                  }
+                                  let formattedDate = 'N/A';
+                                  if (edit.timestamp) {
+                                    if (typeof edit.timestamp.toDate === 'function') {
+                                      formattedDate = new Date(edit.timestamp.toDate()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                                    } else if (typeof edit.timestamp === 'string') {
+                                      formattedDate = new Date(edit.timestamp).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                                    } else if (edit.timestamp instanceof Date) {
+                                      formattedDate = edit.timestamp.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                                    }
+                                  }
+                                  return (
+                                    <li key={idx} className="text-sm break-words">
+                                      {editDescription} - {formattedDate}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
                           ) : (
                             'No edits today'
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm">
-                          <div className="flex items-center space-x-3">
+                          <div className="flex items-center space-x-2">
                             {editUserId === user.id ? (
                               <>
                                 <button
@@ -849,22 +913,65 @@ export default UserManagement;
     animation: fadeIn 0.3s ease-out;
   }
 
-  /* Penyesuaian untuk kolom Role */
+  /* Table responsiveness */
+  @media (max-width: 768px) {
+    table {
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    th, td {
+      min-width: 120px;
+    }
+
+    .grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-3.xl\:grid-cols-4 {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  /* Column adjustments */
+  td:nth-child(1), td:nth-child(2) {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   td:nth-child(3) {
-    min-width: 150px; /* Increased minimum width to accommodate select dropdown */
-    padding-right: 16px; /* Ensure enough padding */
+    min-width: 150px;
+    padding-right: 16px;
   }
 
   td:nth-child(3) span {
-    white-space: nowrap; /* Prevent text wrapping */
+    white-space: nowrap;
   }
 
-  /* Penyesuaian untuk elemen select di mode edit */
   td:nth-child(3) select {
     width: 100%;
-    min-width: 120px; /* Ensure dropdown has enough width */
-    padding: 8px; /* Consistent padding */
-    box-sizing: border-box; /* Ensure padding is included in width calculation */
-    appearance: auto; /* Ensure default browser styling for dropdown arrow */
+    min-width: 120px;
+    padding: 8px;
+    box-sizing: border-box;
+    appearance: auto;
+  }
+
+  td:nth-child(7) {
+    max-width: 300px;
+    overflow-x: hidden;
+  }
+
+  /* Action column */
+  td:nth-child(8) {
+    white-space: nowrap;
+  }
+
+  /* Loading spinner */
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 `}</style>

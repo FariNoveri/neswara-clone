@@ -398,10 +398,10 @@ const CommentManagement = ({ logActivity }) => {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
-                        {comment.createdAt?.toDate().toLocaleDateString() || 'N/A'}
+                        {comment.createdAt?.toDate().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) || 'N/A'}
                       </td>
                       <td className="px-6 py-4 text-sm text-blue-500 hover:underline">
-                        <Link to={`/berita/${comment.newsSlug}`}>Lihat Berita</Link>
+                        <Link to={`/berita/${comment.newsSlug}`}>{comment.newsSlug}</Link>
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <button
@@ -436,3 +436,58 @@ const CommentManagement = ({ logActivity }) => {
 };
 
 export default CommentManagement;
+
+<style jsx>{`
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  
+  @keyframes scaleIn {
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  
+  @keyframes slideRight {
+    from { transform: translateX(-20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  .animate-slideUp {
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  .animate-scaleIn {
+    animation: scaleIn 0.3s ease-out;
+  }
+  
+  .animate-slideRight {
+    animation: slideRight 0.3s ease-out;
+  }
+  
+  .animate-fadeInUp {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  /* Table responsiveness */
+  @media (max-width: 768px) {
+    table {
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    th, td {
+      min-width: 120px;
+    }
+  }
+`}</style>

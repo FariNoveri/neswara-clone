@@ -955,12 +955,7 @@ const Profile = () => {
                     {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString() : 'N/A'}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Profile Edits Today</span>
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${editCount >= 5 ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}`}>
-                    {editCountLoading ? 'Loading...' : `${editCount}/5`}
-                  </span>
-                </div>
+
                 
                 <div className="pt-4 border-t border-white/10 space-y-3">
                   {isAdmin && (

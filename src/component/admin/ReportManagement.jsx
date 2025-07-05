@@ -52,7 +52,9 @@ const formatTimestamp = (timestamp) => {
 };
 
 // Confirmation Modal Component
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProcessing, confirmLabel = 'Konfirmasi', confirmColor = 'red' }) => {
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProcessing, confirmLabel = 'Konfirmasi', confirmColor = 'red', options = null }) => {
+  const [selectedOption, setSelectedOption] = useState(null);
+
   if (!isOpen) return null;
 
   return (
@@ -73,7 +75,25 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProce
             <X className="w-6 h-6" />
           </button>
         </div>
-        <p className="text-gray-600 mb-8 leading-relaxed">{message}</p>
+        <p className="text-gray-600 mb-4 leading-relaxed">{message}</p>
+        {options && (
+          <div className="mb-6">
+            {options.map((option, index) => (
+              <button
+                key={index}
+                onClick={() => setSelectedOption(option.value)}
+                className={`w-full mb-2 px-4 py-2 rounded-lg text-center transition-all duration-200 ${
+                  selectedOption === option.value
+                    ? 'bg-green-100 text-green-800 font-semibold'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+                disabled={isProcessing}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex justify-end space-x-4">
           <button
             onClick={onClose}
@@ -83,9 +103,9 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProce
             Batal
           </button>
           <button
-            onClick={onConfirm}
+            onClick={() => onConfirm(selectedOption)}
             className={`px-6 py-3 bg-gradient-to-r from-${confirmColor}-500 to-${confirmColor}-600 text-white rounded-xl hover:from-${confirmColor}-600 hover:to-${confirmColor}-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg disabled:opacity-50`}
-            disabled={isProcessing}
+            disabled={isProcessing || (options && !selectedOption)}
           >
             {isProcessing ? 'Memproses...' : confirmLabel}
           </button>
@@ -99,6 +119,13 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProce
 const ReportItem = ({ report, expanded, toggleExpand, onDeleteReport, onDeleteComment, onResolve, onViewNews, index }) => {
   const getStatusColor = () => {
     return report.status === 'resolved' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+  };
+
+  const getActionText = () => {
+    if (report.status === 'resolved' && report.resolutionAction) {
+      return report.resolutionAction === 'deleted' ? ' - Dihapus' : ' - Dibiarkan';
+    }
+    return '';
   };
 
   return (
@@ -122,7 +149,7 @@ const ReportItem = ({ report, expanded, toggleExpand, onDeleteReport, onDeleteCo
               <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                 report.status === 'resolved' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
               }`}>
-                {report.status === 'resolved' ? 'Selesai' : 'Menunggu'}
+                {report.status === 'resolved' ? 'Selesai' : 'Menunggu'}{getActionText()}
               </span>
             </div>
             
@@ -390,7 +417,8 @@ const ReportManagement = () => {
     message: '', 
     isProcessing: false,
     confirmLabel: 'Konfirmasi',
-    confirmColor: 'red'
+    confirmColor: 'red',
+    options: null
   });
 
   // Define logActivity function
@@ -581,31 +609,64 @@ const ReportManagement = () => {
       type: 'resolveReport',
       id: reportId,
       title: 'Tandai Laporan Selesai',
-      message: 'Yakin ingin menandai laporan ini sebagai selesai? Komentar akan tetap ada dan laporan akan ditandai sebagai telah ditangani.',
+      message: 'Pilih tindakan untuk laporan ini:',
       isProcessing: false,
-      confirmLabel: 'Tandai Selesai',
-      confirmColor: 'green'
+      confirmLabel: 'Konfirmasi',
+      confirmColor: 'green',
+      options: [
+        { label: 'Biarkan (Komentar tetap ada)', value: 'keep' },
+        { label: 'Hapus (Hapus komentar dan balasannya)', value: 'delete' }
+      ]
     });
   };
 
-  const confirmResolveReport = async () => {
+  const confirmResolveReport = async (action) => {
     const { id } = confirmationModal;
     setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
     try {
-      await updateDoc(doc(db, 'reports', id), {
-        status: 'resolved',
-        resolvedAt: serverTimestamp(),
-        resolvedBy: currentUser.email,
-      });
-      await logActivity('MARK_REPORT_RESOLVED', { reportId: id });
-      toast.success('Laporan ditandai sebagai selesai.');
+      if (action === 'delete') {
+        const report = reports.find(r => r.id === id);
+        if (report.commentId && report.newsId) {
+          const commentRef = doc(db, `news/${report.newsId}/comments`, report.commentId);
+          const commentDoc = await getDoc(commentRef);
+          let commentText = 'N/A';
+          if (commentDoc.exists()) {
+            commentText = commentDoc.data().text || 'N/A';
+            await deleteDoc(commentRef);
+
+            const repliesQuery = query(collection(db, `news/${report.newsId}/comments`), where('parentId', '==', report.commentId));
+            const replySnapshot = await getDocs(repliesQuery);
+            const deleteReplies = replySnapshot.docs.map(reply => deleteDoc(reply.ref));
+            await Promise.all(deleteReplies);
+          }
+          await deleteDoc(doc(db, 'reports', id));
+          setReports(prev => prev.filter(report => report.id !== id));
+          await logActivity('DELETE_COMMENT_AND_RESOLVE', {
+            reportId: id,
+            commentId: report.commentId,
+            newsId: report.newsId,
+            commentText,
+            totalRepliesDeleted: replySnapshot.docs.length
+          });
+          toast.success('Komentar dan laporan berhasil dihapus!');
+        }
+      } else if (action === 'keep') {
+        await updateDoc(doc(db, 'reports', id), {
+          status: 'resolved',
+          resolvedAt: serverTimestamp(),
+          resolvedBy: currentUser.email,
+          resolutionAction: 'kept'
+        });
+        await logActivity('MARK_REPORT_RESOLVED', { reportId: id, action: 'kept' });
+        toast.success('Laporan ditandai sebagai selesai dengan komentar dibiarkan.');
+      }
     } catch (error) {
-      console.error('Error marking report as resolved:', error);
-      setError('Gagal menandai laporan sebagai selesai.');
+      console.error('Error resolving report:', error);
+      setError('Gagal menangani laporan: ' + error.message);
       await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId: id, error: error.message });
-      toast.error('Gagal menandai laporan sebagai selesai.');
+      toast.error('Gagal menangani laporan.');
     } finally {
-      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' });
+      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red', options: null });
     }
   };
 
@@ -832,7 +893,7 @@ const ReportManagement = () => {
 
         <ConfirmationModal
           isOpen={confirmationModal.isOpen}
-          onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red' })}
+          onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red', options: null })}
           onConfirm={
             confirmationModal.type === 'deleteReport' ? confirmDeleteReport :
             confirmationModal.type === 'deleteComment' ? confirmDeleteComment :
@@ -844,6 +905,7 @@ const ReportManagement = () => {
           isProcessing={confirmationModal.isProcessing}
           confirmLabel={confirmationModal.confirmLabel}
           confirmColor={confirmationModal.confirmColor}
+          options={confirmationModal.options}
         />
       </div>
       
