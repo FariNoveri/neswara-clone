@@ -19,6 +19,8 @@ import {
 import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
 import DOMPurify from 'dompurify';
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../../firebaseconfig"; // Ensure this import is present
 
 // Modal Component with smooth animations
 const Modal = ({ isOpen, onClose, children, title }) => {
@@ -517,7 +519,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
   );
 };
 
-const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
+const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange }) => {
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -539,6 +541,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     isSubmitting: false,
     commentText: ''
   });
+  const [currentUser, setCurrentUser] = useState(propCurrentUser);
   const commentRefs = useRef({});
 
   const sanitizeInput = useCallback((input) => {
@@ -576,6 +579,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   useEffect(() => {
     let unsubscribeComments = () => {};
     let unsubscribeLikes = () => {};
+    let unsubscribeAuth = () => {};
 
     const fetchCommentsData = async () => {
       if (!newsId) {
@@ -620,7 +624,10 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
 
         snapshot.docs.forEach(doc => {
           const commentData = doc.data();
-          const userData = userMap[commentData.userId] || null;
+          const userData = userMap[commentData.userId] || (commentData.userId === currentUser?.uid ? {
+            displayName: sanitizeInput(currentUser.displayName || currentUser.email || "User"),
+            photoURL: currentUser.photoURL || null
+          } : null);
           const authorName = userData ? userData.displayName : (commentData.author || "User");
           const photoURL = userData ? userData.photoURL : (commentData.photoURL || null);
 
@@ -707,13 +714,24 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       });
     };
 
+    if (currentUser) {
+      unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          setCurrentUser(user);
+        } else {
+          setCurrentUser(null);
+        }
+      });
+    }
+
     fetchCommentsData();
 
     return () => {
       unsubscribeComments();
       unsubscribeLikes();
+      unsubscribeAuth && unsubscribeAuth();
     };
-  }, [newsId, currentUser, onCommentCountChange, sanitizeInput, logSecurityEvent, countAllComments]);
+  }, [newsId, onCommentCountChange, sanitizeInput, logSecurityEvent, countAllComments]);
 
   const checkSpamLimit = useCallback(() => {
     const now = Date.now();
@@ -766,7 +784,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       const commentsRef = collection(db, `news/${newsId}/comments`);
       const userDoc = await getDoc(doc(db, "users", currentUser.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
-      const authorName = sanitizeInput(userData.displayName || currentUser.email || "User");
+      const authorName = sanitizeInput(currentUser.displayName || userData.displayName || currentUser.email || "User");
       const photoURL = userData.photoURL || currentUser.photoURL || null;
 
       await addDoc(commentsRef, {
