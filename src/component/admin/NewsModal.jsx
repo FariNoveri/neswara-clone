@@ -1,6 +1,6 @@
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, RefreshCw } from 'lucide-react';
+import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, Camera, Eye, EyeOff } from 'lucide-react';
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db, auth } from "../../firebaseconfig";
 import { useState, useEffect } from 'react';
@@ -24,11 +24,7 @@ const NewsModal = ({
   const [uploading, setUploading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [useUserName, setUseUserName] = useState(false);
-  const [hasDraft, setHasDraft] = useState(false);
-  const [showDraftNotification, setShowDraftNotification] = useState(false);
-
-  // Draft storage key
-  const DRAFT_KEY = 'newsModalDraft';
+  const [showProfilePicture, setShowProfilePicture] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -36,43 +32,6 @@ const NewsModal = ({
     });
     return () => unsubscribe();
   }, []);
-
-  // Load draft when modal opens
-  useEffect(() => {
-    if (showModal && !editingNews) {
-      const savedDraft = localStorage.getItem(DRAFT_KEY);
-      if (savedDraft) {
-        try {
-          const draftData = JSON.parse(savedDraft);
-          setHasDraft(true);
-          setShowDraftNotification(true);
-          // Don't auto-load draft, let user choose
-        } catch (error) {
-          console.error('Error parsing draft:', error);
-          localStorage.removeItem(DRAFT_KEY);
-        }
-      }
-    }
-  }, [showModal, editingNews]);
-
-  // Save draft periodically
-  useEffect(() => {
-    if (showModal && !editingNews) {
-      const saveDraft = () => {
-        const isDraftEmpty = !formData.judul && !formData.konten && !formData.ringkasan && !formData.author && !formData.kategori && !formData.gambar;
-        
-        if (!isDraftEmpty) {
-          localStorage.setItem(DRAFT_KEY, JSON.stringify({
-            ...formData,
-            timestamp: new Date().toISOString()
-          }));
-        }
-      };
-
-      const interval = setInterval(saveDraft, 30000); // Save every 30 seconds
-      return () => clearInterval(interval);
-    }
-  }, [showModal, editingNews, formData]);
 
   useEffect(() => {
     if (showModal) {
@@ -84,8 +43,8 @@ const NewsModal = ({
     } else {
       setIsAnimating(false);
       setImagePreview('');
-      setUseUserName(false);
-      setShowDraftNotification(false);
+      setUseUserName(false); // Reset to manual input when closing
+      setShowProfilePicture(true); // Reset profile picture visibility
     }
   }, [showModal, editingNews, formData.gambar]);
 
@@ -101,33 +60,6 @@ const NewsModal = ({
   }, [formData.gambar]);
 
   if (!showModal) return null;
-
-  // Load draft function
-  const loadDraft = () => {
-    const savedDraft = localStorage.getItem(DRAFT_KEY);
-    if (savedDraft) {
-      try {
-        const draftData = JSON.parse(savedDraft);
-        delete draftData.timestamp;
-        setFormData(draftData);
-        if (draftData.gambar) {
-          setImagePreview(draftData.gambar);
-        }
-        setShowDraftNotification(false);
-        setHasDraft(false);
-      } catch (error) {
-        console.error('Error loading draft:', error);
-        alert('Error loading draft. Please try again.');
-      }
-    }
-  };
-
-  // Clear draft function
-  const clearDraft = () => {
-    localStorage.removeItem(DRAFT_KEY);
-    setHasDraft(false);
-    setShowDraftNotification(false);
-  };
 
   // Utility function to generate a URL-friendly slug
   const generateSlug = async (title) => {
@@ -291,12 +223,6 @@ const NewsModal = ({
           slug: newSlug
         });
       }
-
-      // Clear draft on successful submission
-      if (!editingNews) {
-        clearDraft();
-      }
-
       setShowModal(false);
       resetForm();
       window.dispatchEvent(new CustomEvent('newsEdited', { 
@@ -324,7 +250,8 @@ const NewsModal = ({
     setTimeout(() => {
       setShowModal(false);
       resetForm();
-      setUseUserName(false);
+      setUseUserName(false); // Reset to manual input when closing
+      setShowProfilePicture(true); // Reset profile picture visibility
     }, 200);
   };
 
@@ -337,7 +264,7 @@ const NewsModal = ({
     }
   };
 
-  const handleManualInput = () => {
+  const handleSwitchToManual = () => {
     setUseUserName(false);
     setFormData(prev => ({ ...prev, author: '' }));
   };
@@ -373,37 +300,6 @@ const NewsModal = ({
           isAnimating ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
         }`}>
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-            {/* Draft Notification */}
-            {showDraftNotification && (
-              <div className="bg-amber-50 border-b border-amber-200 px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-amber-100 rounded-full">
-                      <FileText className="h-4 w-4 text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-amber-800">Draft Tersimpan Ditemukan</p>
-                      <p className="text-xs text-amber-600">Anda memiliki draft yang belum selesai. Ingin melanjutkan?</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={loadDraft}
-                      className="px-3 py-1 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 transition-colors duration-200"
-                    >
-                      Muat Draft
-                    </button>
-                    <button
-                      onClick={clearDraft}
-                      className="px-3 py-1 bg-gray-500 text-white text-sm rounded-lg hover:bg-gray-600 transition-colors duration-200"
-                    >
-                      Hapus Draft
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Header with gradient */}
             <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 px-8 py-6">
               <div className="flex items-center justify-between">
@@ -500,46 +396,117 @@ const NewsModal = ({
                       <User className="h-4 w-4 mr-2 text-purple-500" />
                       Penulis
                     </label>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
+                    
+                    {/* Profile Picture Section */}
+{currentUser && currentUser.photoURL && (
+  <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg">
+    <div className="flex items-center space-x-3">
+      {showProfilePicture ? (
+        <img 
+          src={currentUser.photoURL} 
+          alt="Profile" 
+          className="w-8 h-8 rounded-full object-cover"
+        />
+      ) : (
+        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+          <User className="h-4 w-4 text-gray-500" />
+        </div>
+      )}
+      <div className="flex flex-col">
+        <span className="text-sm font-medium text-gray-700">
+          {currentUser.displayName || currentUser.email}
+        </span>
+        {!showProfilePicture && (
+          <span className="text-xs text-gray-500 italic">
+            [Foto profil disembunyikan]
+          </span>
+        )}
+      </div>
+    </div>
+    <button
+      type="button"
+      onClick={() => setShowProfilePicture(!showProfilePicture)}
+      className="p-1 text-gray-500 hover:text-gray-700 transition-colors duration-200"
+      title={showProfilePicture ? "Sembunyikan foto profil" : "Tampilkan foto profil"}
+    >
+      {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+    </button>
+  </div>
+)}
+
+                    {/* Author Input Field */}
+                    <div className="flex items-center space-x-2">
+                      <div className="relative flex-1">
                         <input
                           type="text"
                           required
                           value={formData.author}
                           onChange={(e) => {
                             setFormData(prev => ({ ...prev, author: e.target.value }));
-                            if (useUserName) setUseUserName(false);
+                            setUseUserName(false); // Switch to manual input when typing
                           }}
-                          className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
+                          className={`w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500 ${
+                            useUserName ? 'bg-blue-50 border-blue-300' : ''
+                          }`}
                           placeholder="Masukkan nama penulis..."
-                          disabled={useUserName}
+                          readOnly={useUserName}
                         />
-                        {useUserName ? (
-                          <button
-                            type="button"
-                            onClick={handleManualInput}
-                            className="px-3 py-2 bg-gray-500 text-white rounded-xl hover:bg-gray-600 transition-all duration-300 flex items-center space-x-1"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                            <span className="text-sm">Manual</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleUseUserName}
-                            className="px-3 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-all duration-300 disabled:opacity-50 flex items-center space-x-1"
-                            disabled={!currentUser || !currentUser.displayName}
-                          >
-                            <User className="h-4 w-4" />
-                            <span className="text-sm">Username</span>
-                          </button>
+                        {useUserName && (
+                          <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 pointer-events-none" />
                         )}
                       </div>
-                      {useUserName && (
-                        <div className="flex items-center space-x-2 text-sm text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
+                      
+                      {/* Toggle Button */}
+                      {useUserName ? (
+                        <button
+                          type="button"
+                          onClick={handleSwitchToManual}
+                          className="px-4 py-3 bg-gray-500 text-white rounded-xl hover:bg-gray-600 transition-all duration-300 flex items-center space-x-2"
+                          title="Ketik manual"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          <span className="text-sm">Manual</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleUseUserName}
+                          className="px-4 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-all duration-300 disabled:opacity-50 flex items-center space-x-2"
+                          disabled={!currentUser || !currentUser.displayName}
+                          title="Gunakan username"
+                        >
                           <User className="h-4 w-4" />
-                          <span>Menggunakan username: {currentUser?.displayName}</span>
+                          <span className="text-sm">Username</span>
+                        </button>
+                      )}
+                    </div>
+                    
+                    {/* Helper Text */}
+                    <div className="mt-2 text-xs text-gray-500">
+                      {useUserName ? (
+                        <div className="flex items-center space-x-1">
+                          <span>✓ Menggunakan username akun</span>
+                          <button
+                            type="button"
+                            onClick={handleSwitchToManual}
+                            className="text-blue-500 hover:text-blue-700 underline"
+                          >
+                            Ganti ke manual
+                          </button>
                         </div>
+                      ) : (
+                        currentUser && currentUser.displayName && (
+                          <div className="flex items-center space-x-1">
+                            <span>💡 Username tersedia:</span>
+                            <button
+                              type="button"
+                              onClick={handleUseUserName}
+                              className="text-blue-500 hover:text-blue-700 underline"
+                            >
+                              {currentUser.displayName}
+                            </button>
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
