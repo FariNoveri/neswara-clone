@@ -22,6 +22,7 @@ import {
   FaHeart,
   FaBookmark
 } from "react-icons/fa";
+import { toast } from "react-toastify";
 import {
   auth,
   db
@@ -34,7 +35,8 @@ import {
   reauthenticateWithCredential,
   EmailAuthProvider,
   sendEmailVerification,
-  signOut
+  signOut,
+  getAuth
 } from "firebase/auth";
 import {
   doc,
@@ -46,10 +48,10 @@ import {
   onSnapshot,
   query,
   where,
-  getDocs
+  getDocs,
+  deleteDoc
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
-import { deleteDoc } from "firebase/firestore";
 
 // Simple input sanitization function
 const sanitizeInput = (input) => {
@@ -112,6 +114,7 @@ const Profile = () => {
   const [userRole, setUserRole] = useState('user');
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editCountLoading, setEditCountLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -148,7 +151,7 @@ const Profile = () => {
       signOut(auth)
         .then(() => {
           navigate('/');
-          alert("Session expired. You have been logged out.");
+          toast.info("Session expired. You have been logged out.");
         })
         .catch((error) => {
           console.error("Error signing out:", error);
@@ -210,6 +213,7 @@ const Profile = () => {
       }
     } catch (error) {
       console.error("Error checking admin status:", error);
+      setError("Failed to check admin status: " + error.message);
       return false;
     }
   };
@@ -217,7 +221,7 @@ const Profile = () => {
   // Check edit count for the current day
   const checkEditLimit = async (userId) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
       const editsQuery = query(
         collection(db, "profile_edits"),
         where("userId", "==", userId),
@@ -225,39 +229,81 @@ const Profile = () => {
       );
       const editsSnapshot = await getDocs(editsQuery);
       const count = editsSnapshot.size;
+      console.log("Check edit limit - Date:", today, "Count:", count); // Debug log
+      setEditCountLoading(true);
       setEditCount(count);
-      setEditLimitReached(count >= 5); // Set limit reached only if count is 5 or more
-      return count < 5; // Return true if edits are still allowed
+      setEditLimitReached(count >= 5);
+      setEditCountLoading(false);
+      if (count >= 5) {
+        toast.error("Anda telah mencapai batas 5 kali pengeditan profil harian. Silakan coba lagi besok.", {
+          position: "top-center",
+          autoClose: 5000,
+          toastId: "edit-limit-reached"
+        });
+      }
+      return { canEdit: count < 5, currentDayEditCount: count };
     } catch (error) {
       console.error("Error checking edit limit:", error);
       setError("Failed to check edit limit: " + error.message);
-      return false;
+      setEditCountLoading(false);
+      return { canEdit: false, currentDayEditCount: 0 };
     }
   };
 
-  // Log profile edit
-  const logProfileEdit = async (userId, type) => {
+  // Delete previous displayName edits for the current day only
+  const deletePreviousEdits = async (userId) => {
     try {
-      // Check edit limit before logging new edit
-      const canEdit = await checkEditLimit(userId);
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
+      const editsQuery = query(
+        collection(db, "profile_edits"),
+        where("userId", "==", userId),
+        where("date", "==", today),
+        where("type", "==", "displayName")
+      );
+      const editsSnapshot = await getDocs(editsQuery);
+      console.log("Documents to delete (displayName, today):", editsSnapshot.docs.map(doc => doc.data())); // Debug log
+      const deletePromises = editsSnapshot.docs.map(doc => {
+        console.log("Deleting document ID:", doc.id, "Data:", doc.data());
+        return deleteDoc(doc.ref);
+      });
+      await Promise.all(deletePromises);
+      console.log("Deleted displayName docs for", today, ":", deletePromises.length);
+      await checkEditLimit(userId); // Re-check edit count after deletion
+    } catch (error) {
+      console.error("Error deleting previous displayName edits:", error);
+      toast.error("Failed to delete previous displayName edits: " + error.message, {
+        position: "top-center",
+        autoClose: 5000,
+      });
+    }
+  };
+
+  // Log profile edit with beforeName and newName for displayName changes
+  const logProfileEdit = async (userId, type, beforeName, newName) => {
+    try {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
+      const { canEdit } = await checkEditLimit(userId);
       if (!canEdit) {
-        setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
-        setEditLimitReached(true);
+        console.log("Edit limit reached, cannot log edit:", { type, beforeName, newName });
         return false;
       }
 
-      const today = new Date().toISOString().split('T')[0];
-      await addDoc(collection(db, "profile_edits"), {
+      const logData = {
         userId,
         type,
         date: today,
-        timestamp: new Date()
-      });
+        timestamp: new Date().toISOString()
+      };
 
-      // Re-check edit count after logging
-      const newCount = await checkEditLimit(userId);
-      setEditCount(prev => prev + 1);
-      setEditLimitReached(newCount >= 5);
+      if (type === "displayName" && beforeName && newName) {
+        await deletePreviousEdits(userId); // Only delete previous displayName edits for today
+        logData.beforeName = sanitizeInput(beforeName);
+        logData.newName = sanitizeInput(newName);
+      }
+
+      const docRef = await addDoc(collection(db, "profile_edits"), logData);
+      console.log("Profile edit logged - Doc ID:", docRef.id, "Data:", logData); // Debug log
+      await checkEditLimit(userId); // Update edit count after adding new edit
       return true;
     } catch (error) {
       console.error("Error logging profile edit:", error);
@@ -283,58 +329,163 @@ const Profile = () => {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUser(user);
-        setDisplayName(sanitizeInput(user.displayName || ""));
-        setEmail(sanitizeInput(user.email || ""));
-        setProfileImageURL(user.photoURL || "");
-
-        const loginMethod = getLoginMethod(user);
-        setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
-
-        await checkEditLimit(user.uid); // Check edit limit on load
-
-        const userRef = doc(db, "users", user.uid);
-        const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data();
-            setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
-            setEmail(sanitizeInput(userData.email || user.email || ""));
-            setProfileImageURL(userData.photoURL || user.photoURL || "");
-            setPendingEmail(userData.pendingEmail || "");
-            setEmailVerificationSent(!!userData.pendingEmail);
-            const isAdminValue = userData.isAdmin === true;
-            setUserRole(isAdminValue ? 'admin' : 'user');
-            setIsAdmin(isAdminValue);
-          } else {
-            checkAdminStatus(user.uid);
-          }
-        }, (error) => {
-          console.error("Error with real-time listener:", error);
-          checkAdminStatus(user.uid);
-        });
-
-        resetTimeout();
-
-        window.addEventListener('mousemove', handleUserActivity);
-        window.addEventListener('keydown', handleUserActivity);
-        window.addEventListener('click', handleUserActivity);
-      } else {
+    setLoading(true);
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.error("Auth state check timed out");
+        setError("Failed to load profile: Authentication timeout. Please try logging in again.");
+        setLoading(false);
         navigate('/');
       }
-      setLoading(false);
-      return () => {
-        if (unsubscribeUser) unsubscribeUser();
-        unsubscribe();
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
+    }, 5000);
+
+    const checkAuthState = async () => {
+      try {
+        const currentUser = getAuth().currentUser;
+        if (currentUser) {
+          console.log("Manual auth check: User found");
+          setUser(currentUser);
+          setDisplayName(sanitizeInput(currentUser.displayName || ""));
+          setEmail(sanitizeInput(currentUser.email || ""));
+          setProfileImageURL(currentUser.photoURL || "");
+          setIsSocialLogin(getLoginMethod(currentUser) === 'google' || getLoginMethod(currentUser) === 'facebook');
+          await checkEditLimit(currentUser.uid);
+          await checkAdminStatus(currentUser.uid);
+          setLoading(false);
+          clearTimeout(timeoutId);
+        } else {
+          console.log("Manual auth check: No user found");
+          setError("No user logged in. Redirecting to login page.");
+          setLoading(false);
+          navigate('/');
+          clearTimeout(timeoutId);
         }
-        window.removeEventListener('mousemove', handleUserActivity);
-        window.removeEventListener('keydown', handleUserActivity);
-        window.removeEventListener('click', handleUserActivity);
-      };
-    }, [navigate]);
+      } catch (error) {
+        console.error("Manual auth check failed:", error);
+        setError("Failed to verify authentication: " + error.message);
+        setLoading(false);
+        navigate('/');
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        console.log("onAuthStateChanged triggered:", user ? "User logged in" : "No user");
+        if (user) {
+          setUser(user);
+          setDisplayName(sanitizeInput(user.displayName || ""));
+          setEmail(sanitizeInput(user.email || ""));
+          setProfileImageURL(user.photoURL || "");
+
+          const loginMethod = getLoginMethod(user);
+          setIsSocialLogin(loginMethod === 'google' || loginMethod === 'facebook');
+
+          await checkEditLimit(user.uid);
+
+          const userRef = doc(db, "users", user.uid);
+          const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+            try {
+              if (docSnap.exists()) {
+                const userData = docSnap.data();
+                setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
+                setEmail(sanitizeInput(userData.email || user.email || ""));
+                setProfileImageURL(userData.photoURL || user.photoURL || "");
+                setPendingEmail(userData.pendingEmail || "");
+                setEmailVerificationSent(!!userData.pendingEmail);
+                const isAdminValue = userData.isAdmin === true;
+                setUserRole(isAdminValue ? 'admin' : 'user');
+                setIsAdmin(isAdminValue);
+              } else {
+                checkAdminStatus(user.uid);
+              }
+            } catch (error) {
+              console.error("Error in user snapshot listener:", error);
+              setError("Failed to load user data: " + error.message);
+            }
+          }, (error) => {
+            console.error("Error setting up user snapshot:", error);
+            setError("Failed to set up user listener: " + error.message);
+            checkAdminStatus(user.uid);
+          });
+
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+          const editsQuery = query(
+            collection(db, "profile_edits"),
+            where("userId", "==", user.uid),
+            where("date", "==", today)
+          );
+          const unsubscribeEdits = onSnapshot(editsQuery, (snapshot) => {
+            try {
+              const count = snapshot.size;
+              console.log("Real-time edit count - Date:", today, "Count:", count); // Debug log
+              setEditCountLoading(true);
+              setEditCount(count);
+              setEditLimitReached(count >= 5);
+              setEditCountLoading(false);
+            } catch (error) {
+              console.error("Error in profile_edits snapshot:", error);
+              setError("Failed to monitor profile edits: " + error.message);
+              setEditCountLoading(false);
+            }
+          }, (error) => {
+            console.error("Error setting up profile_edits snapshot:", error);
+            setError("Failed to set up profile edits listener: " + error.message);
+            setEditCountLoading(false);
+          });
+
+          resetTimeout();
+
+          window.addEventListener('mousemove', handleUserActivity);
+          window.addEventListener('keydown', handleUserActivity);
+          window.addEventListener('click', handleUserActivity);
+
+          setLoading(false);
+          clearTimeout(timeoutId);
+
+          return () => {
+            if (unsubscribeUser) unsubscribeUser();
+            if (unsubscribeEdits) unsubscribeEdits();
+            unsubscribe();
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
+            window.removeEventListener('mousemove', handleUserActivity);
+            window.removeEventListener('keydown', handleUserActivity);
+            window.removeEventListener('click', handleUserActivity);
+          };
+        } else {
+          console.log("onAuthStateChanged: No user, redirecting");
+          setError("No user logged in. Redirecting to login page.");
+          setLoading(false);
+          navigate('/');
+          clearTimeout(timeoutId);
+        }
+      } catch (error) {
+        console.error("Error in auth state listener:", error);
+        setError("Failed to authenticate: " + error.message);
+        setLoading(false);
+        navigate('/');
+        clearTimeout(timeoutId);
+      }
+    }, (error) => {
+      console.error("Error setting up auth listener:", error);
+      setError("Failed to set up auth listener: " + error.message);
+      setLoading(false);
+      navigate('/');
+      clearTimeout(timeoutId);
+      checkAuthState();
+    });
+
+    setTimeout(checkAuthState, 3000);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('click', handleUserActivity);
+    };
   }, [navigate]);
 
   const clearMessages = () => {
@@ -347,11 +498,8 @@ const Profile = () => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Check edit limit before proceeding
-    const canEdit = await checkEditLimit(user.uid);
+    const { canEdit } = await checkEditLimit(user.uid);
     if (!canEdit) {
-      setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
-      setEditLimitReached(true);
       return;
     }
 
@@ -398,12 +546,15 @@ const Profile = () => {
           { merge: true }
         );
 
-        // Log edit only if successful
         const logged = await logProfileEdit(user.uid, "photoURL");
         if (logged) {
           setProfileImageURL(publicUrl);
           setSuccess("Profile image updated successfully!");
           setLastUploadTime(now);
+          toast.success("Profile image updated successfully!", {
+            position: "top-center",
+            autoClose: 5000,
+          });
         }
       } catch (error) {
         console.error("Error uploading image:", error);
@@ -418,11 +569,8 @@ const Profile = () => {
     e.preventDefault();
     clearMessages();
 
-    // Check edit limit before proceeding
-    const canEdit = await checkEditLimit(user.uid);
+    const { canEdit } = await checkEditLimit(user.uid);
     if (!canEdit) {
-      setError("You have reached the daily limit of 5 profile edits. Please try again tomorrow.");
-      setEditLimitReached(true);
       return;
     }
 
@@ -438,7 +586,6 @@ const Profile = () => {
       const originalDisplayName = user.displayName || "";
       const originalEmail = user.email;
 
-      // Check display name uniqueness
       if (sanitizedDisplayName !== originalDisplayName) {
         const isUnique = await checkDisplayNameUnique(sanitizedDisplayName);
         if (!isUnique) {
@@ -449,13 +596,10 @@ const Profile = () => {
         }
       }
 
-      let editCountIncrement = 0;
-
       if (sanitizedDisplayName !== originalDisplayName) {
-        const logged = await logProfileEdit(user.uid, "displayName");
-        if (!logged) return; // Stop if edit limit is reached
+        const logged = await logProfileEdit(user.uid, "displayName", originalDisplayName, sanitizedDisplayName);
+        if (!logged) return;
         await updateProfile(user, { displayName: sanitizedDisplayName });
-        editCountIncrement++;
       }
 
       if (sanitizedEmail !== originalEmail) {
@@ -470,7 +614,7 @@ const Profile = () => {
         await reauthenticateWithCredential(user, credential);
 
         const logged = await logProfileEdit(user.uid, "email");
-        if (!logged) return; // Stop if edit limit is reached
+        if (!logged) return;
         await updateEmail(user, sanitizedEmail);
         await sendEmailVerification(user);
 
@@ -483,9 +627,12 @@ const Profile = () => {
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
-        editCountIncrement++;
         setEmailVerificationSent(true);
         setSuccess("A verification email has been sent to your new email address. Please verify it to complete the email change.");
+        toast.success("A verification email has been sent to your new email address.", {
+          position: "top-center",
+          autoClose: 5000,
+        });
       } else {
         await setDoc(doc(db, "users", user.uid), {
           displayName: sanitizedDisplayName,
@@ -518,14 +665,15 @@ const Profile = () => {
         await reauthenticateWithCredential(user, credential);
 
         const logged = await logProfileEdit(user.uid, "password");
-        if (!logged) return; // Stop if edit limit is reached
+        if (!logged) return;
         await updatePassword(user, newPassword);
-        editCountIncrement++;
       }
 
-      if (editCountIncrement > 0) {
-        setSuccess("Profile updated successfully!");
-      }
+      setSuccess("Profile updated successfully!");
+      toast.success("Profile updated successfully!", {
+        position: "top-center",
+        autoClose: 5000,
+      });
       setIsEditing(false);
       setCurrentPassword("");
       setNewPassword("");
@@ -542,6 +690,10 @@ const Profile = () => {
       } else {
         setError("Error updating profile: " + error.message);
       }
+      toast.error(error.message, {
+        position: "top-center",
+        autoClose: 5000,
+      });
     }
   };
 
@@ -553,7 +705,7 @@ const Profile = () => {
     setNewPassword("");
     setConfirmPassword("");
     setEmailVerificationSent(false);
-    setdubbing.setNameSuggestions([]);
+    setNameSuggestions([]);
     clearMessages();
   };
 
@@ -580,11 +732,18 @@ const Profile = () => {
         timestamp: new Date()
       });
 
-      alert("Account successfully deleted.");
+      toast.success("Account successfully deleted.", {
+        position: "top-center",
+        autoClose: 5000,
+      });
       navigate("/");
     } catch (error) {
       console.error("Error deleting account:", error);
       setError("Failed to delete account: " + error.message);
+      toast.error("Failed to delete account: " + error.message, {
+        position: "top-center",
+        autoClose: 5000,
+      });
     } finally {
       setDeleting(false);
     }
@@ -799,7 +958,7 @@ const Profile = () => {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-white/60">Profile Edits Today</span>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${editCount >= 5 ? 'bg-red-500/20 text-red-300' : 'bg-blue-500/20 text-blue-300'}`}>
-                    {editCount}/5
+                    {editCountLoading ? 'Loading...' : `${editCount}/5`}
                   </span>
                 </div>
                 
@@ -1006,6 +1165,10 @@ const Profile = () => {
                       .catch((error) => {
                         console.error("Error signing out:", error);
                         setError("Failed to sign out: " + error.message);
+                        toast.error("Failed to sign out: " + error.message, {
+                          position: "top-center",
+                          autoClose: 5000,
+                        });
                       });
                   }}
                   className="group w-full flex items-center justify-between px-6 py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300"

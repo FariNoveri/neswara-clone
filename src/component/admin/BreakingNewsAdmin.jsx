@@ -1,30 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
-import { db } from '../../firebaseconfig';
+import { db, auth } from '../../firebaseconfig';
 import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { PlusCircle, Edit3, Trash2, Eye, EyeOff, Save, X, AlertCircle, Play, Pause, Gauge, Settings, Radio } from 'lucide-react';
 
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
   if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-      <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl transform animate-scaleIn">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-              <AlertCircle className="w-6 h-6 text-red-600" />
-            </div>
-            <h3 className="text-xl font-bold text-gray-900">{title}</h3>
-          </div>
-          <button 
-            onClick={onClose} 
-            className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-scaleIn">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-2 rounded hover:bg-gray-100 transition-all duration-200 hover:scale-110"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-gray-600 mb-8 leading-relaxed">{message}</p>
+        <p className="text-sm text-gray-700 mb-6">{message}</p>
         <div className="flex justify-end space-x-4">
           <button
             onClick={onClose}
@@ -57,7 +51,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
     isActive: true,
     priority: 1,
     speed: 15,
-    isEmergency: false
+    isEmergency: false,
+    animationType: 'marquee'
   });
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -67,7 +62,11 @@ const BreakingNewsAdmin = ({ logActivity }) => {
     try {
       const q = query(collection(db, 'breakingNews'), orderBy('priority', 'asc'));
       const snapshot = await getDocs(q);
-      const newsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const newsData = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        animationType: doc.data().animationType || 'marquee'
+      }));
       setBreakingNews(newsData);
     } catch (error) {
       console.error('Error fetching breaking news:', error);
@@ -83,7 +82,14 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
   const handleAddNews = () => {
     setEditingNews(null);
-    setFormData({ text: '', isActive: true, priority: breakingNews.length + 1, speed: 15, isEmergency: false });
+    setFormData({ 
+      text: '', 
+      isActive: true, 
+      priority: breakingNews.length + 1, 
+      speed: 15, 
+      isEmergency: false,
+      animationType: 'marquee'
+    });
     setIsModalOpen(true);
   };
 
@@ -94,7 +100,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       isActive: news.isActive,
       priority: news.priority,
       speed: news.speed || 15,
-      isEmergency: news.isEmergency || false
+      isEmergency: news.isEmergency || false,
+      animationType: news.animationType || 'marquee'
     });
     setIsModalOpen(true);
   };
@@ -113,6 +120,33 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
     setLoading(true);
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error('User tidak terautentikasi. Silakan login kembali.');
+        setLoading(false);
+        return;
+      }
+
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log('User claims in handleSaveNews:', tokenResult.claims);
+
+      if (!tokenResult.claims.isAdmin) {
+        toast.error('Anda tidak memiliki izin untuk mengubah breaking news.');
+        setLoading(false);
+        return;
+      }
+
+      if (formData.isEmergency) {
+        const batch = writeBatch(db);
+        breakingNews.forEach((news) => {
+          if (!news.isEmergency && news.isActive) {
+            const newsRef = doc(db, 'breakingNews', news.id);
+            batch.update(newsRef, { isActive: false, updatedAt: serverTimestamp() });
+          }
+        });
+        await batch.commit();
+      }
+
       if (editingNews) {
         await updateDoc(doc(db, 'breakingNews', editingNews.id), {
           ...formData,
@@ -123,7 +157,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           newsId: editingNews.id, 
           title: formData.text, 
           newSpeed: speedValue, 
-          oldSpeed: editingNews.speed 
+          oldSpeed: editingNews.speed,
+          animationType: formData.animationType
         });
         toast.success('Breaking news berhasil diperbarui.');
       } else {
@@ -133,15 +168,31 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
-        await logActivity('NEWS_ADD', { newsId: docRef.id, title: formData.text, newSpeed: speedValue });
+        await logActivity('NEWS_ADD', { 
+          newsId: docRef.id, 
+          title: formData.text, 
+          newSpeed: speedValue,
+          animationType: formData.animationType
+        });
         toast.success('Breaking news berhasil ditambahkan.');
       }
       fetchBreakingNews();
       setIsModalOpen(false);
-      setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
+      setFormData({ 
+        text: '', 
+        isActive: true, 
+        priority: 1, 
+        speed: 15, 
+        isEmergency: false,
+        animationType: 'marquee'
+      });
     } catch (error) {
       console.error('Error saving breaking news:', error);
-      toast.error('Gagal menyimpan breaking news.');
+      if (error.code === 'permission-denied') {
+        toast.error('Izin ditolak: Anda tidak memiliki hak akses untuk mengubah breaking news.');
+      } else {
+        toast.error('Gagal menyimpan breaking news.');
+      }
       await logActivity('SAVE_BREAKING_NEWS_ERROR', { error: error.message, title: formData.text });
     }
     setLoading(false);
@@ -164,17 +215,33 @@ const BreakingNewsAdmin = ({ logActivity }) => {
     }
     setLoading(true);
     try {
-      const newsDoc = await getDoc(doc(db, 'breakingNews', id));
-      if (newsDoc.exists()) {
-        const newsData = newsDoc.data();
-        await deleteDoc(doc(db, 'breakingNews', id));
-        await logActivity('NEWS_DELETE', { newsId: id, title: newsData.text });
-        toast.success('Breaking news berhasil dihapus.');
-        fetchBreakingNews();
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error('User tidak terautentikasi. Silakan login kembali.');
+        setLoading(false);
+        return;
       }
+
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log('User claims in confirmDelete:', tokenResult.claims);
+
+      if (!tokenResult.claims.isAdmin) {
+        toast.error('Anda tidak memiliki izin untuk menghapus breaking news.');
+        setLoading(false);
+        return;
+      }
+
+      await deleteDoc(doc(db, 'breakingNews', id));
+      await logActivity('NEWS_DELETE', { newsId: id, title: confirmationModal.message });
+      toast.success('Breaking news berhasil dihapus.');
+      fetchBreakingNews();
     } catch (error) {
       console.error('Error deleting breaking news:', error);
-      toast.error('Gagal menghapus breaking news.');
+      if (error.code === 'permission-denied') {
+        toast.error('Izin ditolak: Anda tidak memiliki hak akses untuk menghapus.');
+      } else {
+        toast.error('Gagal menghapus breaking news.');
+      }
       await logActivity('DELETE_BREAKING_NEWS_ERROR', { newsId: id, error: error.message });
     } finally {
       setLoading(false);
@@ -182,23 +249,50 @@ const BreakingNewsAdmin = ({ logActivity }) => {
     }
   };
 
-  const handleToggleActive = async (id, currentIsActive) => {
+  const handleToggleActive = async (id, currentIsActive, isEmergency) => {
     setLoading(true);
     try {
-      const newsDoc = await getDoc(doc(db, 'breakingNews', id));
-      if (newsDoc.exists()) {
-        const newsData = newsDoc.data();
-        await updateDoc(doc(db, 'breakingNews', id), {
-          isActive: !currentIsActive,
-          updatedAt: serverTimestamp()
-        });
-        await logActivity('TOGGLE_NEWS_STATUS', { newsId: id, title: newsData.text, newStatus: !currentIsActive });
-        toast.success(`Breaking news ${!currentIsActive ? 'diaktifkan' : 'dinonaktifkan'}.`);
-        fetchBreakingNews();
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error('User tidak terautentikasi. Silakan login kembali.');
+        setLoading(false);
+        return;
       }
+
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log('User claims in handleToggleActive:', tokenResult.claims);
+
+      if (!tokenResult.claims.isAdmin) {
+        toast.error('Anda tidak memiliki izin untuk mengubah status breaking news.');
+        setLoading(false);
+        return;
+      }
+
+      if (isEmergency && currentIsActive) {
+        const batch = writeBatch(db);
+        breakingNews.forEach((news) => {
+          if (!news.isEmergency && news.isActive) {
+            const newsRef = doc(db, 'breakingNews', news.id);
+            batch.update(newsRef, { isActive: false, updatedAt: serverTimestamp() });
+          }
+        });
+        await batch.commit();
+      }
+
+      await updateDoc(doc(db, 'breakingNews', id), {
+        isActive: !currentIsActive,
+        updatedAt: serverTimestamp()
+      });
+      await logActivity('TOGGLE_NEWS_STATUS', { newsId: id, newStatus: !currentIsActive });
+      toast.success(`Breaking news ${!currentIsActive ? 'diaktifkan' : 'dinonaktifkan'}.`);
+      fetchBreakingNews();
     } catch (error) {
       console.error('Error toggling breaking news status:', error);
-      toast.error('Gagal mengubah status breaking news.');
+      if (error.code === 'permission-denied') {
+        toast.error('Izin ditolak: Anda tidak memiliki hak akses untuk mengubah status.');
+      } else {
+        toast.error('Gagal mengubah status breaking news.');
+      }
       await logActivity('TOGGLE_NEWS_STATUS_ERROR', { newsId: id, error: error.message });
     }
     setLoading(false);
@@ -219,6 +313,22 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
     setLoading(true);
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error('User tidak terautentikasi. Silakan login kembali.');
+        setLoading(false);
+        return;
+      }
+
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log('User claims in handleUpdateAllSpeeds:', tokenResult.claims);
+
+      if (!tokenResult.claims.isAdmin) {
+        toast.error('Anda tidak memiliki izin untuk memperbarui kecepatan global.');
+        setLoading(false);
+        return;
+      }
+
       const batch = writeBatch(db);
       breakingNews.forEach((news) => {
         const newsRef = doc(db, 'breakingNews', news.id);
@@ -234,7 +344,11 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       setIsSpeedModalOpen(false);
     } catch (error) {
       console.error('Error during batch update:', error);
-      toast.error('Gagal memperbarui kecepatan global.');
+      if (error.code === 'permission-denied') {
+        toast.error('Izin ditolak: Anda tidak memiliki hak akses untuk memperbarui kecepatan.');
+      } else {
+        toast.error('Gagal memperbarui kecepatan global.');
+      }
       await logActivity('SPEED_UPDATE_ERROR', { error: error.message, newSpeed: speedValue });
     } finally {
       setLoading(false);
@@ -247,6 +361,22 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
     setLoading(true);
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error('User tidak terautentikasi. Silakan login kembali.');
+        setLoading(false);
+        return;
+      }
+
+      const tokenResult = await user.getIdTokenResult(true);
+      console.log('User claims in handleSpeedWarningConfirm:', tokenResult.claims);
+
+      if (!tokenResult.claims.isAdmin) {
+        toast.error('Anda tidak memiliki izin untuk memperbarui kecepatan.');
+        setLoading(false);
+        return;
+      }
+
       if (isSpeedModalOpen) {
         const batch = writeBatch(db);
         breakingNews.forEach((news) => {
@@ -273,12 +403,20 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             newsId: editingNews.id, 
             title: formData.text, 
             newSpeed: adjustedSpeed, 
-            oldSpeed: editingNews.speed 
+            oldSpeed: editingNews.speed,
+            animationType: formData.animationType
           });
           toast.success('Breaking news berhasil diperbarui.');
           fetchBreakingNews();
           setIsModalOpen(false);
-          setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
+          setFormData({ 
+            text: '', 
+            isActive: true, 
+            priority: 1, 
+            speed: 15, 
+            isEmergency: false,
+            animationType: 'marquee'
+          });
         } else {
           const docRef = await addDoc(collection(db, 'breakingNews'), {
             ...formData,
@@ -286,16 +424,32 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
-          await logActivity('NEWS_ADD', { newsId: docRef.id, title: formData.text, newSpeed: adjustedSpeed });
+          await logActivity('NEWS_ADD', { 
+            newsId: docRef.id, 
+            title: formData.text, 
+            newSpeed: adjustedSpeed,
+            animationType: formData.animationType
+          });
           toast.success('Breaking news berhasil ditambahkan.');
           fetchBreakingNews();
           setIsModalOpen(false);
-          setFormData({ text: '', isActive: true, priority: 1, speed: 15, isEmergency: false });
+          setFormData({ 
+            text: '', 
+            isActive: true, 
+            priority: 1, 
+            speed: 15, 
+            isEmergency: false,
+            animationType: 'marquee'
+          });
         }
       }
     } catch (error) {
       console.error('Error in speed warning confirmation:', error);
-      toast.error('Gagal memproses kecepatan.');
+      if (error.code === 'permission-denied') {
+        toast.error('Izin ditolak: Anda tidak memiliki hak akses untuk memperbarui kecepatan.');
+      } else {
+        toast.error('Gagal memproses kecepatan.');
+      }
       await logActivity('SPEED_WARNING_CONFIRM_ERROR', { error: error.message });
     } finally {
       setIsSpeedWarningOpen(false);
@@ -314,8 +468,12 @@ const BreakingNewsAdmin = ({ logActivity }) => {
   };
 
   const activeNews = breakingNews.filter(news => news.isActive).sort((a, b) => a.priority - b.priority);
-  const isEmergency = activeNews.some(n => n.isEmergency);
+  const isEmergencyActive = activeNews.some(n => n.isEmergency);
   const speed = activeNews.length > 0 ? (activeNews[0].speed || 15) : 15;
+  const animationType = activeNews.length > 0 ? (activeNews[0].animationType || 'marquee') : 'marquee';
+
+  const emergencyNews = breakingNews.filter(news => news.isEmergency).sort((a, b) => a.priority - b.priority);
+  const nonEmergencyNews = breakingNews.filter(news => !news.isEmergency).sort((a, b) => a.priority - b.priority);
 
   const newsContent = activeNews.map((news, index) => (
     `${news.text || 'Tidak ada teks'} ${index < activeNews.length - 1 ? ' - ' : ''}`
@@ -379,27 +537,44 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
         {isPreviewMode && activeNews.length > 0 && (
           <div className="mb-6 animate-slideUp">
-            <div className={`bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border ${isEmergency ? 'border-red-300 animate-pulse' : 'border-gray-200'} p-6`}>
+            <div className={`bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border ${isEmergencyActive ? 'border-red-300 animate-pulse' : 'border-gray-200'} p-6`}>
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <Eye className="w-5 h-5 text-indigo-600 mr-2" />
                 Live Preview
               </h3>
-              <div className={`bg-gradient-to-r ${isEmergency ? 'from-red-500 to-red-600' : 'from-indigo-500 to-purple-500'} rounded-xl overflow-hidden shadow-md`}>
+              <div className={`bg-gradient-to-r ${isEmergencyActive ? 'from-red-500 to-red-600' : 'from-indigo-500 to-purple-500'} rounded-xl overflow-hidden shadow-md`}>
                 <div className="flex items-center py-3 px-4">
-                  <span className={`bg-white ${isEmergency ? 'text-red-600 animate-pulse' : 'text-indigo-600'} px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0`}>
-                    {isEmergency ? 'DARURAT' : 'BREAKING'}
+                  <span className={`bg-white ${isEmergencyActive ? 'text-red-600 animate-pulse' : 'text-indigo-600'} px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0`}>
+                    {isEmergencyActive ? 'DARURAT' : 'BREAKING'}
                   </span>
                   <div className="overflow-hidden flex-1">
-                    <div 
-                      className="breaking-news-text whitespace-nowrap text-white font-medium" 
-                      style={{ 
-                        animation: `marquee linear ${speed}s infinite`,
-                        display: 'inline-block',
-                        willChange: 'transform'
-                      }}
-                    >
-                      {newsContent} {newsContent}
-                    </div>
+                    {animationType === 'marquee' ? (
+                      <div 
+                        className="breaking-news-text whitespace-nowrap text-white font-medium" 
+                        style={{ 
+                          animation: `marquee linear ${speed}s infinite`,
+                          display: 'inline-block',
+                          willChange: 'transform'
+                        }}
+                      >
+                        {newsContent} {newsContent}
+                      </div>
+                    ) : (
+                      <div className="breaking-news-text text-white font-medium">
+                        {newsContent.split('').map((char, index) => (
+                          <span
+                            key={index}
+                            style={{
+                              animation: `fadeIn 0.5s ease-in ${index * 0.1}s forwards`,
+                              opacity: 0,
+                              display: 'inline-block'
+                            }}
+                          >
+                            {char}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -456,63 +631,38 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 animate-slideUp">
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 animate-slideUp mb-6">
           <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Daftar Breaking News</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Breaking News Darurat</h2>
           </div>
           <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-gray-100">
             <table className="min-w-full divide-y divide-gray-100">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Breaking News
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Prioritas
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Kecepatan (detik)
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Mode Darurat
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Terakhir Update
-                  </th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">
-                    Aksi
-                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Breaking News</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Prioritas</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Kecepatan (detik)</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Animasi</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Terakhir Update</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
-                      <div className="flex justify-center">
-                        <div className="relative">
-                          <div className="w-10 h-10 border-4 border-indigo-200 rounded-full animate-spin"></div>
-                          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : breakingNews.length === 0 ? (
+                {emergencyNews.length === 0 ? (
                   <tr>
                     <td colSpan="7" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                           <Radio className="w-12 h-12 text-gray-400" />
                         </div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Breaking News</h3>
-                        <p className="text-gray-600">Belum ada breaking news yang tersedia.</p>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Breaking News Darurat</h3>
+                        <p className="text-gray-600">Belum ada breaking news darurat yang tersedia.</p>
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  breakingNews.sort((a, b) => a.priority - b.priority).map((news, index) => (
+                  emergencyNews.map((news, index) => (
                     <tr 
                       key={news.id} 
                       className={`transition-all duration-300 transform hover:scale-[1.01] animate-fadeInUp ${
@@ -530,11 +680,9 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <button
-                          onClick={() => handleToggleActive(news.id, news.isActive)}
+                          onClick={() => handleToggleActive(news.id, news.isActive, true)}
                           className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 hover:scale-105 ${
-                            news.isActive
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
+                            news.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                           }`}
                           disabled={loading}
                         >
@@ -553,11 +701,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                          news.priority <= 2
-                            ? 'bg-red-100 text-red-800'
-                            : news.priority <= 4
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-green-100 text-green-800'
+                          news.priority <= 2 ? 'bg-red-100 text-red-800' : news.priority <= 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
                         }`}>
                           #{news.priority}
                         </span>
@@ -568,10 +712,122 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          {news.animationType === 'marquee' ? 'Marquee' : 'Fade In'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatDate(news.updatedAt)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center space-x-3">
+                          <button
+                            onClick={() => handleEditNews(news)}
+                            className="text-indigo-600 hover:text-indigo-900 transition-all duration-200 hover:scale-110"
+                            title="Edit"
+                            disabled={loading}
+                          >
+                            <Edit3 className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteNews(news.id, news.text)}
+                            className="text-red-600 hover:text-red-900 transition-all duration-200 hover:scale-110"
+                            title="Hapus"
+                            disabled={loading}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 animate-slideUp">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">Breaking News Non-Darurat</h2>
+          </div>
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-gray-100">
+            <table className="min-w-full divide-y divide-gray-100">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Breaking News</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Prioritas</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Kecepatan (detik)</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Animasi</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Terakhir Update</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {nonEmergencyNews.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                          <Radio className="w-12 h-12 text-gray-400" />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Breaking News Non-Darurat</h3>
+                        <p className="text-gray-600">Belum ada breaking news non-darurat yang tersedia.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  nonEmergencyNews.map((news, index) => (
+                    <tr 
+                      key={news.id} 
+                      className={`transition-all duration-300 transform hover:scale-[1.01] animate-fadeInUp ${
+                        index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                      }`}
+                      style={{ animationDelay: `${index * 0.1}s` }}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-start">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900 line-clamp-2">{news.text || 'Tidak ada teks'}</p>
+                            <p className="text-xs text-gray-500 mt-1">ID: {news.id}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => handleToggleActive(news.id, news.isActive, false)}
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 hover:scale-105 ${
+                            news.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}
+                          disabled={loading || (isEmergencyActive && !news.isActive)}
+                        >
+                          {news.isActive ? (
+                            <>
+                              <Eye className="w-4 h-4 mr-1" />
+                              Aktif
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-4 h-4 mr-1" />
+                              Non-Aktif
+                            </>
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                          news.isEmergency ? 'bg-red-100 text-red-800' : 'bg-indigo-100 text-indigo-800'
+                          news.priority <= 2 ? 'bg-red-100 text-red-800' : news.priority <= 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
                         }`}>
-                          {news.isEmergency ? 'Ya' : 'Tidak'}
+                          #{news.priority}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                          {news.speed || 15}s
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          {news.animationType === 'marquee' ? 'Marquee' : 'Fade In'}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatDate(news.updatedAt)}</td>
@@ -705,6 +961,22 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                     Aktifkan untuk mode darurat (warna merah dan label DARURAT)
                   </p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tipe Animasi
+                  </label>
+                  <select
+                    value={formData.animationType}
+                    onChange={(e) => setFormData(prev => ({ ...prev, animationType: e.target.value }))}
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
+                  >
+                    <option value="marquee">Marquee (Berjalan)</option>
+                    <option value="fadeIn">Fade In (Muncul)</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Pilih tipe animasi untuk teks breaking news
+                  </p>
+                </div>
                 {formData.text && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -716,16 +988,33 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                           {formData.isEmergency ? 'DARURAT' : 'BREAKING'}
                         </span>
                         <div className="overflow-hidden flex-1">
-                          <div 
-                            className="breaking-news-text whitespace-nowrap text-white font-medium" 
-                            style={{ 
-                              animation: `marquee linear ${(formData.speed || 15)}s infinite`,
-                              display: 'inline-block',
-                              willChange: 'transform'
-                            }}
-                          >
-                            {formData.text} {formData.text}
-                          </div>
+                          {formData.animationType === 'marquee' ? (
+                            <div 
+                              className="breaking-news-text whitespace-nowrap text-white font-medium" 
+                              style={{ 
+                                animation: `marquee linear ${(formData.speed || 15)}s infinite`,
+                                display: 'inline-block',
+                                willChange: 'transform'
+                              }}
+                            >
+                              {formData.text} {formData.text}
+                            </div>
+                          ) : (
+                            <div className="breaking-news-text text-white font-medium">
+                              {formData.text.split('').map((char, index) => (
+                                <span
+                                  key={index}
+                                  style={{
+                                    animation: `fadeIn 0.5s ease-in ${index * 0.1}s forwards`,
+                                    opacity: 0,
+                                    display: 'inline-block'
+                                  }}
+                                >
+                                  {char}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

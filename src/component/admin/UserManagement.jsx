@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc, getDocs } from 'firebase/firestore';
 import { useAuth } from '../auth/useAuth';
 import { Edit3, Trash2, RefreshCw, CheckCircle, X } from 'lucide-react';
 
@@ -74,10 +74,11 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
   );
 };
 
-const UserManagement = ({ logActivity, adminEmails }) => {
+const UserManagement = ({ adminEmails }) => {
   const [users, setUsers] = useState([]);
   const [authUsers, setAuthUsers] = useState([]);
   const [combinedUsers, setCombinedUsers] = useState([]);
+  const [profileEdits, setProfileEdits] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterEmail, setFilterEmail] = useState('');
   const [filterName, setFilterName] = useState('');
@@ -119,10 +120,33 @@ const UserManagement = ({ logActivity, adminEmails }) => {
       });
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
-      console.log('Auth Users:', data.users);
       setAuthUsers(data.users || []);
     } catch (error) {
       console.error('Error fetching auth users:', error);
+    }
+  };
+
+  const fetchProfileEdits = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const editsQuery = query(
+        collection(db, 'profile_edits'),
+        where('date', '==', today)
+      );
+      const unsubscribe = onSnapshot(editsQuery, (snapshot) => {
+        const editsData = {};
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (!editsData[data.userId]) {
+            editsData[data.userId] = [];
+          }
+          editsData[data.userId].push({ ...data, id: doc.id });
+        });
+        setProfileEdits(editsData);
+      });
+      return () => unsubscribe();
+    } catch (error) {
+      console.error('Error fetching profile edits:', error);
     }
   };
 
@@ -147,7 +171,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
     });
 
     const allUids = new Set([...firestoreUserMap.keys(), ...authUserMap.keys()]);
-    console.log('Unique UIDs:', allUids.size, 'Firestore users:', firestoreUserMap.size, 'Auth users:', authUserMap.size);
 
     const combined = Array.from(allUids).map(uid => {
       if (!uid) {
@@ -192,7 +215,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
                 updatedAt: new Date().toISOString().split('T')[0],
               })
                 .then(() => {
-                  console.log('Admin status corrected for:', currentUser.email);
                   setIsAdmin(true);
                 })
                 .catch(error => {
@@ -203,12 +225,10 @@ const UserManagement = ({ logActivity, adminEmails }) => {
               setIsAdmin(true);
             }
           } else {
-            setIsAdmin(userData.isAdmin === true);
+              setIsAdmin(userData.isAdmin === true);
           }
-          console.log('Real-time Admin status:', userData.isAdmin, 'for email:', currentUser.email, 'UID:', currentUser.uid);
           setIsInitialLoad(false);
         } else {
-          console.log('User document not found for UID:', currentUser.uid);
           setIsAdmin(false);
           setIsInitialLoad(false);
         }
@@ -240,7 +260,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log('Firestore Users:', usersData);
       setUsers(usersData);
       setLoading(false);
     }, (error) => {
@@ -254,6 +273,7 @@ const UserManagement = ({ logActivity, adminEmails }) => {
   useEffect(() => {
     if (currentUser && isAdmin) {
       fetchAuthUsers();
+      fetchProfileEdits();
     }
   }, [currentUser, isAdmin]);
 
@@ -315,7 +335,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
             createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           });
           
-          logActivity('USER_SYNC', { userId: user.id, email: user.email, action: 'sync_to_firestore' });
           showPopup('Berhasil', 'Pengguna berhasil ditambahkan ke Firestore.', 'success');
         } catch (error) {
           console.error('Error syncing user to Firestore:', error);
@@ -351,7 +370,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
           if (user.source.inFirestore) {
             const userRef = doc(db, 'users', userId);
             await deleteDoc(userRef);
-            console.log('User deleted from Firestore:', userId);
           }
 
           if (user.source.inAuth) {
@@ -368,10 +386,8 @@ const UserManagement = ({ logActivity, adminEmails }) => {
             if (!response.ok) {
               throw new Error(responseData.message || 'Gagal menghapus pengguna dari Firebase Authentication.');
             }
-            console.log('User deleted from Authentication:', responseData);
           }
 
-          logActivity('USER_DELETE', { userId: user.id, email: user.email, source: deleteOptions.join(' dan ') });
           showPopup('Berhasil', `Pengguna berhasil dihapus dari ${deleteOptions.join(' dan ')}.`, 'success');
           await fetchAuthUsers();
         } catch (error) {
@@ -425,7 +441,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
         );
       }
       
-      logActivity('USER_EDIT', { userId: editUserId, email: editForm.email, displayName: editForm.displayName });
       setEditUserId(null);
       setEditForm({ email: '', displayName: '' });
       showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
@@ -469,7 +484,6 @@ const UserManagement = ({ logActivity, adminEmails }) => {
             });
           }
           
-          logActivity('USER_ROLE_UPDATE', { userId: userId, email: user.email, newRole: isAdminRole ? 'admin' : 'user' });
           showPopup('Berhasil', 'Role berhasil diperbarui.', 'success');
         } catch (error) {
           console.error('Error updating role:', error);
@@ -626,13 +640,14 @@ const UserManagement = ({ logActivity, adminEmails }) => {
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Status</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sumber Data</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Riwayat Edit</th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
+                    <td colSpan="8" className="px-6 py-12 text-center">
                       <div className="flex justify-center">
                         <div className="relative">
                           <div className="w-12 h-12 border-4 border-indigo-200 rounded-full animate-spin"></div>
@@ -643,7 +658,7 @@ const UserManagement = ({ logActivity, adminEmails }) => {
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
                       Tidak ada pengguna ditemukan
                     </td>
                   </tr>
@@ -655,6 +670,7 @@ const UserManagement = ({ logActivity, adminEmails }) => {
                     }
                     const verificationStatus = getVerificationStatus(user);
                     const sourceStatus = getSourceStatus(user);
+                    const userEdits = profileEdits[user.id] || [];
                     return (
                       <tr key={user.id} className={`hover:bg-gray-50 transition-all duration-300 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} transform hover:scale-[1.01] animate-fadeInUp`} style={{ animationDelay: `${index * 0.1}s` }}>
                         <td className="px-6 py-4 text-sm text-gray-900">
@@ -708,6 +724,19 @@ const UserManagement = ({ logActivity, adminEmails }) => {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
                           {user.updatedAt ? new Date(user.updatedAt).toLocaleDateString() : 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {userEdits.length > 0 ? (
+                            <ul className="list-disc list-inside">
+                              {userEdits.map((edit, idx) => (
+                                <li key={idx} className="text-sm">
+                                  {edit.type} - {new Date(edit.timestamp.toDate()).toLocaleString()}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            'No edits today'
+                          )}
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="flex items-center space-x-3">
