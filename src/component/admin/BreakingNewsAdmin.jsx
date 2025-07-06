@@ -7,28 +7,28 @@ import { PlusCircle, Edit3, Trash2, Eye, EyeOff, Save, X, AlertCircle, Play, Pau
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-scaleIn">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold text-gray-900">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-2 rounded hover:bg-gray-100 transition-all duration-200 hover:scale-110"
+            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-all duration-200"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-sm text-gray-700 mb-6">{message}</p>
-        <div className="flex justify-end space-x-4">
+        <p className="text-xs text-gray-700 mb-4">{message}</p>
+        <div className="flex justify-end space-x-2">
           <button
             onClick={onClose}
-            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
           >
             Batal
           </button>
           <button
             onClick={onConfirm}
-            className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 font-medium"
           >
             Hapus
           </button>
@@ -375,7 +375,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         breakingNews.forEach((news) => {
           const newsRef = doc(db, 'breakingNews', news.id);
           batch.update(newsRef, {
-            speed: adjustedraw
+            speed: adjustedSpeed,
+            updatedAt: serverTimestamp()
           });
         });
         await batch.commit();
@@ -469,8 +470,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 mb-6 animate-slideUp">
-          <div className="flex items-center justify-between">
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-indigo-100 rounded-2xl flex items-center justify-center">
                 <Radio className="w-6 h-6 text-indigo-600" />
@@ -480,7 +481,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                 <p className="text-gray-600">Atur teks breaking news yang berjalan di navbar</p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 flex-wrap gap-2">
               <button
                 onClick={() => setIsPreviewMode(!isPreviewMode)}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-medium transition-all duration-200 hover:scale-105 shadow-lg ${
@@ -523,7 +524,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         </div>
 
         {isPreviewMode && activeNews.length > 0 && (
-          <div className="mb-6 animate-slideUp">
+          <div className="mb-6">
             <div className={`bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border ${isEmergencyActive ? 'border-red-300 animate-pulse' : 'border-gray-200'} p-6`}>
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <Eye className="w-5 h-5 text-indigo-600 mr-2" />
@@ -553,7 +554,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105 animate-scaleIn" style={{ animationDelay: '0.1s' }}>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm font-medium">Total Breaking News</p>
@@ -564,7 +565,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105 animate-scaleIn" style={{ animationDelay: '0.2s' }}>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm font-medium">Aktif</p>
@@ -575,7 +576,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105 animate-scaleIn" style={{ animationDelay: '0.3s' }}>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm font-medium">Non-Aktif</p>
@@ -586,7 +587,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105 animate-scaleIn" style={{ animationDelay: '0.4s' }}>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 p-6 transition-all duration-200 hover:scale-105">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm font-medium">Rata-rata Kecepatan</p>
@@ -601,12 +602,88 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 animate-slideUp mb-6">
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 mb-6">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">Breaking News Darurat</h2>
           </div>
           <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-gray-100">
-            <table className="min-w-full divide-y divide-gray-100">
+            <div className="sm:hidden space-y-2 p-4">
+              {emergencyNews.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Radio className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-base font-bold text-gray-900 mb-2">Tidak Ada Breaking News Darurat</h3>
+                    <p className="text-gray-600 text-xs">Belum ada breaking news darurat yang tersedia.</p>
+                  </div>
+                </div>
+              ) : (
+                emergencyNews.map((news, index) => (
+                  <div 
+                    key={news.id} 
+                    className="bg-white rounded-lg shadow-md p-3 border border-gray-200"
+                  >
+                    <div className="flex flex-col space-y-2">
+                      <div className="flex items-start">
+                        <p className="text-sm font-medium text-gray-900 line-clamp-2">{news.text || 'Tidak ada teks'}</p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => handleToggleActive(news.id, news.isActive, true)}
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium transition-all duration-200 hover:scale-105 touch-target ${
+                            news.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}
+                          disabled={loading}
+                        >
+                          {news.isActive ? (
+                            <>
+                              <Eye className="w-3 h-3 mr-1" />
+                              Aktif
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-3 h-3 mr-1" />
+                              Non-Aktif
+                            </>
+                          )}
+                        </button>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          news.priority <= 2 ? 'bg-red-100 text-red-800' : news.priority <= 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                        }`}>
+                          #{news.priority}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                          {news.speed || globalSpeed}s
+                        </span>
+                        <div className="text-xs text-gray-600">{formatDate(news.updatedAt)}</div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleEditNews(news)}
+                          className="text-indigo-600 hover:text-indigo-900 transition-all duration-200 hover:scale-110 touch-target"
+                          title="Edit"
+                          disabled={loading}
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNews(news.id, news.text)}
+                          className="text-red-600 hover:text-red-900 transition-all duration-200 hover:scale-110 touch-target"
+                          title="Hapus"
+                          disabled={loading}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <table className="min-w-full divide-y divide-gray-100 hidden sm:table">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Breaking News</th>
@@ -634,10 +711,9 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                   emergencyNews.map((news, index) => (
                     <tr 
                       key={news.id} 
-                      className={`transition-all duration-300 transform hover:scale-[1.01] animate-fadeInUp ${
+                      className={`transition-all duration-300 transform hover:scale-[1.01] ${
                         index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
                       }`}
-                      style={{ animationDelay: `${index * 0.1}s` }}
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-start">
@@ -709,12 +785,88 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 animate-slideUp">
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900">Breaking News Non-Darurat</h2>
           </div>
           <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-gray-100">
-            <table className="min-w-full divide-y divide-gray-100">
+            <div className="sm:hidden space-y-2 p-4">
+              {nonEmergencyNews.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Radio className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-base font-bold text-gray-900 mb-2">Tidak Ada Breaking News Non-Darurat</h3>
+                    <p className="text-gray-600 text-xs">Belum ada breaking news non-darurat yang tersedia.</p>
+                  </div>
+                </div>
+              ) : (
+                nonEmergencyNews.map((news, index) => (
+                  <div 
+                    key={news.id} 
+                    className="bg-white rounded-lg shadow-md p-3 border border-gray-200"
+                  >
+                    <div className="flex flex-col space-y-2">
+                      <div className="flex items-start">
+                        <p className="text-sm font-medium text-gray-900 line-clamp-2">{news.text || 'Tidak ada teks'}</p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => handleToggleActive(news.id, news.isActive, false)}
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium transition-all duration-200 hover:scale-105 touch-target ${
+                            news.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}
+                          disabled={loading || (isEmergencyActive && !news.isActive)}
+                        >
+                          {news.isActive ? (
+                            <>
+                              <Eye className="w-3 h-3 mr-1" />
+                              Aktif
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-3 h-3 mr-1" />
+                              Non-Aktif
+                            </>
+                          )}
+                        </button>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          news.priority <= 2 ? 'bg-red-100 text-red-800' : news.priority <= 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                        }`}>
+                          #{news.priority}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                          {news.speed || globalSpeed}s
+                        </span>
+                        <div className="text-xs text-gray-600">{formatDate(news.updatedAt)}</div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleEditNews(news)}
+                          className="text-indigo-600 hover:text-indigo-900 transition-all duration-200 hover:scale-110 touch-target"
+                          title="Edit"
+                          disabled={loading}
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNews(news.id, news.text)}
+                          className="text-red-600 hover:text-red-900 transition-all duration-200 hover:scale-110 touch-target"
+                          title="Hapus"
+                          disabled={loading}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <table className="min-w-full divide-y divide-gray-100 hidden sm:table">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Breaking News</th>
@@ -742,10 +894,9 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                   nonEmergencyNews.map((news, index) => (
                     <tr 
                       key={news.id} 
-                      className={`transition-all duration-300 transform hover:scale-[1.01] animate-fadeInUp ${
+                      className={`transition-all duration-300 transform hover:scale-[1.01] ${
                         index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
                       }`}
-                      style={{ animationDelay: `${index * 0.1}s` }}
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-start">
@@ -818,54 +969,54 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         </div>
 
         {isModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-lg sm:max-w-xl w-full max-h-[90vh] overflow-y-auto animate-scaleIn">
-              <div className="p-6 border-b border-gray-200">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-4 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900">
+                  <h3 className="text-base font-semibold text-gray-900">
                     {editingNews ? 'Edit Breaking News' : 'Tambah Breaking News'}
                   </h3>
                   <button
                     onClick={() => setIsModalOpen(false)}
-                    className="text-gray-400 hover:text-gray-600 p-2 rounded hover:bg-gray-100 transition-all duration-200 hover:scale-110"
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-all duration-200"
                     disabled={loading}
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-              <div className="p-6 space-y-6">
+              <div className="p-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Teks Breaking News
                   </label>
                   <textarea
                     value={formData.text}
                     onChange={(e) => setFormData(prev => ({ ...prev, text: e.target.value }))}
                     placeholder="Masukkan teks breaking news... (gunakan emoji untuk menarik perhatian)"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500 resize-none"
+                    className="w-full px-3 py-2 bg-gray-50 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-xs placeholder-gray-500 resize-none"
                     rows={4}
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 mt-1">
                     Tip: Gunakan emoji seperti 🔴, ⚡, 🏆 untuk membuat breaking news lebih menarik
                   </p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
                       Status
                     </label>
                     <select
                       value={formData.isActive}
                       onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.value === 'true' }))}
-                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
+                      className="w-full px-3 py-2 bg-gray-50 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-xs"
                     >
                       <option value={true}>Aktif</option>
                       <option value={false}>Non-Aktif</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
                       Prioritas
                     </label>
                     <input
@@ -873,44 +1024,44 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       min="1"
                       value={formData.priority}
                       onChange={(e) => setFormData(prev => ({ ...prev, priority: parseInt(e.target.value) || 1 }))}
-                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
+                      className="w-full px-3 py-2 bg-gray-50 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-xs"
                       placeholder="1"
                     />
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-gray-500 mt-1">
                       Prioritas rendah (1-2) akan ditampilkan lebih dulu
                     </p>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Mode Darurat
                   </label>
                   <select
                     value={formData.isEmergency}
                     onChange={(e) => setFormData(prev => ({ ...prev, isEmergency: e.target.value === 'true' }))}
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
+                    className="w-full px-3 py-2 bg-gray-50 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-xs"
                     disabled={activeNews.length > 0 && formData.isEmergency && !editingNews}
                   >
                     <option value={false}>Tidak</option>
                     <option value={true}>Ya</option>
                   </select>
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 mt-1">
                     Aktifkan untuk mode darurat (warna merah dan label DARURAT)
                   </p>
                 </div>
                 {formData.text && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
                       Preview
                     </label>
-                    <div className={`bg-gradient-to-r ${formData.isEmergency ? 'from-red-500 to-red-600' : 'from-indigo-500 to-purple-500'} rounded-xl overflow-hidden shadow-md`}>
-                      <div className="flex items-center py-3 px-4">
-                        <span className={`bg-white ${formData.isEmergency ? 'text-red-600 animate-pulse' : 'text-indigo-600'} px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0`}>
+                    <div className={`bg-gradient-to-r ${formData.isEmergency ? 'from-red-500 to-red-600' : 'from-indigo-500 to-purple-500'} rounded-lg overflow-hidden shadow-md`}>
+                      <div className="flex items-center py-2 px-3">
+                        <span className={`bg-white ${formData.isEmergency ? 'text-red-600 animate-pulse' : 'text-indigo-600'} px-2 py-1 rounded-full text-xs font-bold mr-3 flex-shrink-0`}>
                           {formData.isEmergency ? 'DARURAT' : 'BREAKING'}
                         </span>
                         <div className="overflow-hidden flex-1">
                           <div 
-                            className="breaking-news-text whitespace-nowrap text-white font-medium" 
+                            className="breaking-news-text whitespace-nowrap text-white font-medium text-xs" 
                             style={{ 
                               animation: `marquee linear ${globalSpeed}s infinite`,
                               display: 'inline-block',
@@ -925,10 +1076,10 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                   </div>
                 )}
               </div>
-              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              <div className="p-4 border-t border-gray-200 flex justify-end space-x-2">
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
                   disabled={loading}
                 >
                   Batal
@@ -936,7 +1087,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                 <button
                   onClick={handleSaveNews}
                   disabled={!formData.text.trim() || loading}
-                  className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center space-x-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save className="w-4 h-4" />
                   <span>{editingNews ? 'Update' : 'Simpan'}</span>
@@ -947,37 +1098,37 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         )}
 
         {isSpeedModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-scaleIn">
-              <div className="p-6 border-b border-gray-200">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+              <div className="p-4 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                    <Settings className="w-5 h-5 text-purple-600 mr-2" />
+                  <h3 className="text-base font-semibold text-gray-900 flex items-center">
+                    <Settings className="w-4 h-4 text-purple-600 mr-2" />
                     Pengaturan Kecepatan Global
                   </h3>
                   <button
                     onClick={() => setIsSpeedModalOpen(false)}
-                    className="text-gray-400 hover:text-gray-600 p-2 rounded hover:bg-gray-100 transition-all duration-200 hover:scale-110"
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-all duration-200"
                     disabled={loading}
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-              <div className="p-6 space-y-6">
-                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+              <div className="p-4 space-y-4">
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
                   <div className="flex">
-                    <Gauge className="w-5 h-5 text-indigo-600 mt-0.5 mr-3" />
+                    <Gauge className="w-4 h-4 text-indigo-600 mt-0.5 mr-2" />
                     <div>
-                      <h4 className="text-sm font-medium text-indigo-900">Informasi</h4>
-                      <p className="text-sm text-indigo-700 mt-2">
+                      <h4 className="text-xs font-medium text-indigo-900">Informasi</h4>
+                      <p className="text-xs text-indigo-700 mt-1">
                         Fitur ini akan mengubah kecepatan scroll semua breaking news ({breakingNews.length} item) secara bersamaan.
                       </p>
                     </div>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Kecepatan Global (detik)
                   </label>
                   <input
@@ -987,23 +1138,23 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       const value = e.target.value;
                       setGlobalSpeed(value === '' ? '' : parseInt(value));
                     }}
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900"
+                    className="w-full px-3 py-2 bg-gray-50 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-xs"
                     placeholder="15"
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 mt-1">
                     Kecepatan yang lebih rendah = scrolling lebih cepat (5-30 detik direkomendasikan)
                   </p>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-4">
-                  <h5 className="text-sm font-medium text-gray-900 mb-2">Preview Kecepatan</h5>
-                  <div className="bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl overflow-hidden shadow-md">
-                    <div className="flex items-center py-3 px-4">
-                      <span className="bg-white text-indigo-600 px-3 py-1 rounded-full text-xs font-bold mr-4 flex-shrink-0">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <h5 className="text-xs font-medium text-gray-900 mb-2">Preview Kecepatan</h5>
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-500 rounded-lg overflow-hidden shadow-md">
+                    <div className="flex items-center py-2 px-3">
+                      <span className="bg-white text-indigo-600 px-2 py-1 rounded-full text-xs font-bold mr-3 flex-shrink-0">
                         BREAKING
                       </span>
                       <div className="overflow-hidden flex-1">
                         <div 
-                          className="breaking-news-text whitespace-nowrap text-white font-medium text-sm" 
+                          className="breaking-news-text whitespace-nowrap text-white font-medium text-xs" 
                           style={{ 
                             animation: `marquee linear ${(globalSpeed || 15)}s infinite`,
                             display: 'inline-block',
@@ -1016,22 +1167,22 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                     </div>
                   </div>
                 </div>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                   <div className="flex">
-                    <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 mr-3" />
+                    <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 mr-2" />
                     <div>
-                      <h4 className="text-sm font-medium text-yellow-900">Peringatan</h4>
-                      <p className="text-sm text-yellow-700 mt-2">
+                      <h4 className="text-xs font-medium text-yellow-900">Peringatan</h4>
+                      <p className="text-xs text-yellow-700 mt-1">
                         Perubahan ini akan diterapkan ke semua breaking news dan tidak dapat dibatalkan.
                       </p>
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              <div className="p-4 border-t border-gray-200 flex justify-end space-x-2">
                 <button
                   onClick={() => setIsSpeedModalOpen(false)}
-                  className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
                   disabled={loading}
                 >
                   Batal
@@ -1039,7 +1190,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                 <button
                   onClick={handleUpdateAllSpeeds}
                   disabled={loading}
-                  className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl hover:from-purple-600 hover:to-purple-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center space-x-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Gauge className="w-4 h-4" />
                   <span>Terapkan ke Semua</span>
@@ -1050,35 +1201,35 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         )}
 
         {isSpeedWarningOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-scaleIn">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-red-600 flex items-center">
-                  <AlertCircle className="w-5 h-5 mr-2" />
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-2">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-red-600 flex items-center">
+                  <AlertCircle className="w-4 h-4 mr-2" />
                   Peringatan Kecepatan
                 </h3>
                 <button
                   onClick={() => setIsSpeedWarningOpen(false)}
-                  className="text-gray-400 hover:text-gray-600 p-2 rounded hover:bg-gray-100 transition-all duration-200 hover:scale-110"
+                  className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-all duration-200"
                   disabled={loading}
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-              <p className="text-sm text-gray-700 mb-6">
+              <p className="text-xs text-gray-700 mb-4">
                 Kecepatan {globalSpeed} detik di luar rentang normal (5-30 detik). Apakah Anda yakin ingin melanjutkan dengan menyesuaikan ke {Math.max(5, Math.min(30, parseInt(globalSpeed) || 15))} detik?
               </p>
-              <div className="flex justify-end space-x-4">
+              <div className="flex justify-end space-x-2">
                 <button
                   onClick={() => setIsSpeedWarningOpen(false)}
-                  className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
                   disabled={loading}
                 >
                   Tidak
                 </button>
                 <button
                   onClick={handleSpeedWarningConfirm}
-                  className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200 font-medium"
                   disabled={loading}
                 >
                   Ya
@@ -1101,30 +1252,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             0% { transform: translateX(100%); }
             100% { transform: translateX(-100%); }
           }
-          @keyframes scaleIn {
-            0% { opacity: 0; transform: scale(0.95); }
-            100% { opacity: 1; transform: scale(1); }
-          }
-          @keyframes slideUp {
-            0% { opacity: 0; transform: translateY(20px); }
-            100% { opacity: 1; transform: translateY(0); }
-          }
-          @keyframes fadeInUp {
-            0% { opacity: 0; transform: translateY(10px); }
-            100% { opacity: 1; transform: translateY(0); }
-          }
-          .animate-fadeIn {
-            animation: fadeIn 0.3s ease-out;
-          }
-          .animate-scaleIn {
-            animation: scaleIn 0.3s ease-out;
-          }
-          .animate-slideUp {
-            animation: slideUp 0.3s ease-out;
-          }
-          .animate-fadeInUp {
-            animation: fadeInUp 0.5s ease-out;
-          }
           .breaking-news-text {
             display: inline-block;
             white-space: nowrap;
@@ -1139,6 +1266,182 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           }
           .scrollbar-track-gray-100::-webkit-scrollbar-track {
             background-color: #e5e7eb;
+          }
+          .touch-target {
+            min-width: 32px;
+            min-height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          /* Mobile-specific styles */
+          @media (max-width: 640px) {
+            .min-h-screen {
+              padding: 0.5rem;
+            }
+            .max-w-7xl {
+              max-width: 100%;
+            }
+            .p-6 {
+              padding: 0.5rem;
+            }
+            .mb-6 {
+              margin-bottom: 0.5rem;
+            }
+            .space-x-4 > :not(:last-child) {
+              margin-right: 0.25rem;
+            }
+            .space-x-2 > :not(:last-child) {
+              margin-right: 0.25rem;
+            }
+            .space-y-4 > :not(:last-child) {
+              margin-bottom: 0.5rem;
+            }
+            .space-y-2 > :not(:last-child) {
+              margin-bottom: 0.25rem;
+            }
+            .text-2xl {
+              font-size: 1rem;
+            }
+            .text-xl {
+              font-size: 0.875rem;
+            }
+            .text-lg {
+              font-size: 0.75rem;
+            }
+            .text-base {
+              font-size: 0.75rem;
+            }
+            .text-sm {
+              font-size: 0.7rem;
+            }
+            .text-xs {
+              font-size: 0.65rem;
+            }
+            .w-12.h-12 {
+              width: 1.5rem;
+              height: 1.5rem;
+            }
+            .w-8.h-8 {
+              width: 1rem;
+              height: 1rem;
+            }
+            .w-6.h-6 {
+              width: 0.875rem;
+              height: 0.875rem;
+            }
+            .w-5.h-5 {
+              width: 0.75rem;
+              height: 0.75rem;
+            }
+            .w-4.h-4 {
+              width: 0.625rem;
+              height: 0.625rem;
+            }
+            .w-3.h-3 {
+              width: 0.5rem;
+              height: 0.5rem;
+            }
+            .px-6.py-4 {
+              padding-left: 0.5rem;
+              padding-right: 0.5rem;
+              padding-top: 0.25rem;
+              padding-bottom: 0.25rem;
+            }
+            .px-4.py-2 {
+              padding-left: 0.5rem;
+              padding-right: 0.5rem;
+              padding-top: 0.25rem;
+              padding-bottom: 0.25rem;
+            }
+            .px-3.py-1 {
+              padding-left: 0.375rem;
+              padding-right: 0.375rem;
+              padding-top: 0.125rem;
+              padding-bottom: 0.125rem;
+            }
+            .px-2.py-1 {
+              padding-left: 0.25rem;
+              padding-right: 0.25rem;
+              padding-top: 0.125rem;
+              padding-bottom: 0.125rem;
+            }
+            .p-4 {
+              padding: 0.5rem;
+            }
+            .p-3 {
+              padding: 0.375rem;
+            }
+            .p-2 {
+              padding: 0.25rem;
+            }
+            .p-1 {
+              padding: 0.125rem;
+            }
+            .grid-cols-1.sm\\:grid-cols-2.lg\\:grid-cols-4 {
+              grid-template-columns: 1fr;
+            }
+            .gap-6 {
+              gap: 0.5rem;
+            }
+            .gap-4 {
+              gap: 0.5rem;
+            }
+            .gap-2 {
+              gap: 0.25rem;
+            }
+            .w-24.h-24 {
+              width: 3rem;
+              height: 3rem;
+            }
+            .w-16.h-16 {
+              width: 2rem;
+              height: 2rem;
+            }
+            .py-12 {
+              padding-top: 0.75rem;
+              padding-bottom: 0.75rem;
+            }
+            .py-6 {
+              padding-top: 0.5rem;
+              padding-bottom: 0.5rem;
+            }
+            .mb-4 {
+              margin-bottom: 0.5rem;
+            }
+            .mb-3 {
+              margin-bottom: 0.375rem;
+            }
+            .mt-2 {
+              margin-top: 0.25rem;
+            }
+            .mt-1 {
+              margin-top: 0.125rem;
+            }
+            .rounded-2xl {
+              border-radius: 0.5rem;
+            }
+            .rounded-xl {
+              border-radius: 0.375rem;
+            }
+            .rounded-lg {
+              border-radius: 0.25rem;
+            }
+            .breaking-news-text {
+              font-size: 0.65rem;
+            }
+            .max-w-md {
+              max-width: 100%;
+            }
+            .grid-cols-1.sm\\:grid-cols-2 {
+              grid-template-columns: 1fr;
+            }
+            .flex-wrap {
+              flex-wrap: wrap;
+            }
+            .animate-scaleIn, .animate-slideUp, .animate-fadeIn, .animate-fadeInUp {
+              animation: none;
+            }
           }
         `}</style>
       </div>

@@ -31,26 +31,6 @@ const Navbar = () => {
     return () => unsubscribe();
   }, []);
 
-  const mainMenuItems = [
-    { name: "BERANDA", path: "/", icon: FaHome },
-    { name: "NASIONAL", path: "/nasional", icon: FaNewspaper },
-    { name: "INTERNASIONAL", path: "/internasional", icon: FaGlobe },
-    { name: "OLAHRAGA", path: "/olahraga" },
-    { name: "EKONOMI", path: "/ekonomi" },
-    { name: "TEKNOLOGI", path: "/teknologi" },
-    { name: "LIFESTYLE", path: "/lifestyle" },
-    { name: "DAERAH", path: "/daerah" },
-  ];
-
-  const dropdownItems = [
-    { name: "PENDIDIKAN", path: "/pendidikan" },
-    { name: "KESEHATAN", path: "/kesehatan" },
-    { name: "OTOMOTIF", path: "/otomotif" },
-    { name: "WISATA", path: "/wisata" },
-    { name: "KULINER", path: "/kuliner" },
-    { name: "ENTERTAINMENT", path: "/entertainment" },
-  ];
-
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
@@ -71,6 +51,18 @@ const Navbar = () => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Lock/unlock body scroll when mobile menu is open/closed
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobileMenuOpen]);
 
   const handleLogout = async () => {
     try {
@@ -102,6 +94,26 @@ const Navbar = () => {
   if (loading) {
     return <div>Loading...</div>;
   }
+
+  const mainMenuItems = [
+    { name: "BERANDA", path: "/", icon: FaHome },
+    { name: "NASIONAL", path: "/nasional", icon: FaNewspaper },
+    { name: "INTERNASIONAL", path: "/internasional", icon: FaGlobe },
+    { name: "OLAHRAGA", path: "/olahraga" },
+    { name: "EKONOMI", path: "/ekonomi" },
+    { name: "TEKNOLOGI", path: "/teknologi" },
+    { name: "LIFESTYLE", path: "/lifestyle" },
+    { name: "DAERAH", path: "/daerah" },
+  ];
+
+  const dropdownItems = [
+    { name: "PENDIDIKAN", path: "/pendidikan" },
+    { name: "KESEHATAN", path: "/kesehatan" },
+    { name: "OTOMOTIF", path: "/otomotif" },
+    { name: "WISATA", path: "/wisata" },
+    { name: "KULINER", path: "/kuliner" },
+    { name: "ENTERTAINMENT", path: "/entertainment" },
+  ];
 
   return (
     <>
@@ -185,7 +197,7 @@ const Navbar = () => {
           font-size: 13px;
           font-weight: 500;
           position: relative;
-          z-index: 1; /* Below navbar but above content */
+          z-index: 1;
         }
 
         .breaking-news-text {
@@ -234,7 +246,7 @@ const Navbar = () => {
 
         .notification-dropdown {
           position: fixed;
-          z-index: 1; /* Above navbar but below modals */
+          z-index: 1;
           max-height: 80vh;
           overflow: hidden;
         }
@@ -247,7 +259,7 @@ const Navbar = () => {
           animation: slideDown 0.2s ease-out;
           max-height: 400px;
           overflow-y: auto;
-          z-index: 1; /* Above navbar but below modals */
+          z-index: 1;
         }
 
         .search-suggestion:hover {
@@ -258,7 +270,7 @@ const Navbar = () => {
 
         .mobile-search-overlay {
           animation: slideInFromTop 0.3s ease-out;
-          z-index: 1; /* Above navbar but below modals */
+          z-index: 1;
         }
 
         .search-highlight {
@@ -285,7 +297,7 @@ const Navbar = () => {
         }
 
         .main-content {
-          padding-top: 80px; /* Adjusted to match navbar height */
+          padding-top: 80px;
         }
       `}</style>
 
@@ -429,7 +441,7 @@ const Navbar = () => {
         <div
           className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl transform transition-transform duration-300 ${
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          } min-h-screen overflow-y-auto overscroll-behavior-contain mobile-menu`}
         >
           <div className="p-6">
             <button

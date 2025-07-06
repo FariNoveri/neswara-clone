@@ -132,7 +132,7 @@ const ReportItem = ({ report, expanded, toggleExpand, onDeleteReport, onDeleteCo
     <div 
       className={`p-6 hover:bg-gray-50 transition-all duration-300 ${
         index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-      } transform hover:scale-[1.01] animate-fadeInUp`}
+      } transform hover:scale-[1.01] animate-fadeInUp min-w-[800px]`}
       style={{ animationDelay: `${index * 0.1}s` }}
     >
       <div className="flex items-start justify-between">
@@ -159,7 +159,7 @@ const ReportItem = ({ report, expanded, toggleExpand, onDeleteReport, onDeleteCo
               </span>
             </p>
             
-            <div className="flex items-center space-x-6 text-sm text-gray-500">
+            <div className="flex items-center space-x-6 text-sm text-gray-500 flex-wrap gap-y-2">
               <div className="flex items-center space-x-2">
                 <User className="w-4 h-4" />
                 <span>{report.userEmail || 'Email tidak tersedia'}</span>
@@ -872,7 +872,7 @@ const ReportManagement = () => {
             <p className="text-gray-600">Belum ada laporan yang cocok dengan filter yang dipilih.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden animate-slideUp">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-x-auto animate-slideUp">
             <div className="divide-y divide-gray-100">
               {filteredReports.map((report, index) => (
                 <ReportItem

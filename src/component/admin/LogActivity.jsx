@@ -456,11 +456,11 @@ const LogActivity = () => {
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <Activity className="w-12 h-12 text-gray-400" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Log</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-2already">Tidak Ada Log</h3>
             <p className="text-gray-600">Belum ada log aktivitas yang cocok dengan filter yang dipilih.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden animate-slideUp">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-x-auto animate-slideUp">
             <div className="divide-y divide-gray-100">
               {filteredLogs.map((log, index) => (
                 <LogItem
@@ -638,7 +638,7 @@ const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
     <div 
       className={`p-6 hover:bg-gray-50 transition-all duration-300 ${
         index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-      } transform hover:scale-[1.01] animate-fadeInUp`}
+      } transform hover:scale-[1.01] animate-fadeInUp min-w-[800px]`}
       style={{ animationDelay: `${index * 0.1}s` }}
     >
       <div className="flex items-start justify-between">
@@ -665,7 +665,7 @@ const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
               {getActionDescription()}
             </p>
             
-            <div className="flex items-center space-x-6 text-sm text-gray-500">
+            <div className="flex items-center space-x-6 text-sm text-gray-500 flex-wrap gap-y-2">
               <div className="flex items-center space-x-2">
                 <User className="w-4 h-4" />
                 <span>{log.userEmail || 'Email tidak tersedia'}</span>

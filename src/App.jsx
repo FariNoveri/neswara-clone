@@ -3,6 +3,7 @@ import { Routes, Route } from "react-router-dom";
 import ErrorBoundary from "./component/common/ErrorBoundary";
 import Navbar from "./component/common/navbar";
 import Footer from "./component/common/footer";
+import ScrollToTop from "./component/Pages/ScrollToTop";
 import NewsDetail from "./component/Pages/NewsDetail";
 import NewsList from "./component/config/NewsList";
 import Profile from "./component/common/profile";
@@ -217,6 +218,9 @@ const App = () => {
         </Routes>
       </main>
       <Footer />
+      
+      {/* ScrollToTop Component */}
+      <ScrollToTop />
     </div>
   );
 };
