@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle, Edit2 } from "lucide-react";
+import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle, Edit2, Eye, EyeOff } from "lucide-react";
 import { db } from "../../firebaseconfig";
 import { 
   collection, 
@@ -20,7 +20,7 @@ import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
 import DOMPurify from 'dompurify';
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../../firebaseconfig"; // Ensure this import is present
+import { auth } from "../../firebaseconfig";
 
 // Modal Component with smooth animations
 const Modal = ({ isOpen, onClose, children, title }) => {
@@ -264,7 +264,7 @@ const ReportModal = ({ isOpen, onClose, onSubmit, isSubmitting, commentText }) =
 };
 
 // Custom hook for avatar rendering
-const useCommentAvatar = (cmt, logSecurityEvent) => {
+const useCommentAvatar = (cmt) => {
   const placeholderRef = useRef(null);
 
   const handleError = (e) => {
@@ -273,11 +273,6 @@ const useCommentAvatar = (cmt, logSecurityEvent) => {
       placeholderRef.current.style.display = 'none';
     }
     e.target.nextSibling.style.display = 'flex';
-    logSecurityEvent('COMMENT_PHOTOURL_ERROR', {
-      commentId: cmt.id,
-      photoURL: cmt.photoURL,
-      error: 'Failed to load profile image'
-    });
   };
 
   const handleLoad = (e) => {
@@ -320,16 +315,18 @@ const useCommentAvatar = (cmt, logSecurityEvent) => {
 };
 
 // Comment Component
-const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, logSecurityEvent, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments }) => {
+const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, handleToggleReplies, areRepliesHidden, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments }) => {
   const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
   const isOwner = cmt.userId === currentUser?.uid;
   const canDelete = isAdmin || isOwner;
   const canEdit = (isAdmin || isOwner) && cmt.createdAt && (Date.now() - cmt.createdAt.toDate().getTime()) < 300000; // 5 minutes
   const likes = commentLikes[cmt.id] || { count: 0, userLiked: currentUser ? !!currentUser.uid : false };
   const isReported = reportedComments[cmt.id] || false;
-  const { renderAvatar } = useCommentAvatar(cmt, logSecurityEvent);
+  const { renderAvatar } = useCommentAvatar(cmt);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const commentRef = useRef(null);
+  const hasReplies = cmt.replies && cmt.replies.length > 0;
+  const repliesHidden = areRepliesHidden(cmt.id);
 
   useEffect(() => {
     commentRefs.current[cmt.id] = commentRef;
@@ -342,13 +339,14 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
   ) : null;
 
   return (
-    <div key={cmt.id} className={`space-y-4`} ref={commentRef}>
+    <div key={cmt.id} className="space-y-4">
       <AdminInfoModal
         isOpen={isAdminModalOpen}
         onClose={() => setIsAdminModalOpen(false)}
       />
       <div
         className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
+        ref={commentRef}
         onMouseEnter={() => setFocusedComment(cmt.id)}
         onMouseLeave={() => setFocusedComment(null)}
       >
@@ -376,6 +374,15 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {hasReplies && currentUser && (
+              <button
+                onClick={() => handleToggleReplies(cmt.id)}
+                className="text-gray-500 hover:text-gray-700 hover:bg-gray-50 p-2 rounded-lg transition-colors"
+                title={repliesHidden ? "Tampilkan balasan" : "Sembunyikan balasan"}
+              >
+                {repliesHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              </button>
+            )}
             {currentUser && !isOwner && (
               <button
                 onClick={() => handleReportClick(cmt.id)}
@@ -432,7 +439,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             </button>
             <button
               onClick={() => handleReplyClick(cmt.id, cmt.author)}
-              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate-400 cursor-not-allowed'}`}
+              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate- feuille cursor-not-allowed'}`}
               disabled={!currentUser}
             >
               <Reply className="w-4 h-4" />
@@ -478,8 +485,8 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
           </div>
         )}
       </div>
-      {cmt.replies && cmt.replies.length > 0 && (
-        <div className="space-y-4">
+      {hasReplies && (
+        <div className={`space-y-4 ${repliesHidden ? 'hidden' : ''}`}>
           {cmt.replies.sort((a, b) => {
             const timeA = a.createdAt?.toDate?.() || new Date(0);
             const timeB = b.createdAt?.toDate?.() || new Date(0);
@@ -504,7 +511,8 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
               handleReportClick={handleReportClick}
               handleEditClick={handleEditClick}
               handleShowOriginalClick={handleShowOriginalClick}
-              logSecurityEvent={logSecurityEvent}
+              handleToggleReplies={handleToggleReplies}
+              areRepliesHidden={areRepliesHidden}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
               sanitizeInput={sanitizeInput}
@@ -531,6 +539,10 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
   const [replyComment, setReplyComment] = useState("");
   const [commentLikes, setCommentLikes] = useState({});
   const [reportedComments, setReportedComments] = useState({});
+  const [hiddenReplies, setHiddenReplies] = useState(() => {
+    const saved = localStorage.getItem(`hiddenReplies_${newsId}`);
+    return saved ? JSON.parse(saved) : {};
+  });
   const [editModal, setEditModal] = useState({ isOpen: false, commentId: null, isSubmitting: false, commentText: '' });
   const [originalCommentModal, setOriginalCommentModal] = useState({ isOpen: false, originalText: '' });
   const [spamWarning, setSpamWarning] = useState({ isOpen: false, remainingTime: 0 });
@@ -561,20 +573,17 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
     return total;
   }, []);
 
-  const logSecurityEvent = useCallback(async (action, details) => {
-    try {
-      await addDoc(collection(db, 'security_logs'), {
-        action,
-        userEmail: currentUser?.email || 'anonymous',
-        details,
-        timestamp: serverTimestamp(),
-        userAgent: navigator.userAgent,
-        ipAddress: 'N/A'
-      });
-    } catch (error) {
-      console.error('Failed to log security event:', error);
-    }
-  }, [currentUser]);
+  const areRepliesHidden = useCallback((commentId) => {
+    return !!hiddenReplies[commentId];
+  }, [hiddenReplies]);
+
+  const handleToggleReplies = useCallback((commentId) => {
+    setHiddenReplies(prev => {
+      const newHiddenReplies = { ...prev, [commentId]: !prev[commentId] };
+      localStorage.setItem(`hiddenReplies_${newsId}`, JSON.stringify(newHiddenReplies));
+      return newHiddenReplies;
+    });
+  }, [newsId]);
 
   useEffect(() => {
     let unsubscribeComments = () => {};
@@ -616,7 +625,11 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
             }
           } catch (err) {
             console.error("Error fetching user data:", err);
-            logSecurityEvent('FETCH_USER_DATA_ERROR', { error: err.message });
+            toast.error("Gagal memuat data pengguna.", {
+              position: 'top-center',
+              autoClose: 3000,
+              toastId: 'fetch-user-error'
+            });
           }
         }
 
@@ -667,7 +680,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
                 newReportedComments[comment.id] = !reportSnapshot.empty;
               } catch (error) {
                 console.error('Error fetching report status for comment:', comment.id, error);
-                logSecurityEvent('FETCH_REPORT_STATUS_ERROR', { commentId: comment.id, error: error.message });
               }
             })
           );
@@ -681,7 +693,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
           autoClose: 3000,
           toastId: 'comments-error'
         });
-        logSecurityEvent('FETCH_COMMENTS_ERROR', { error: err.message });
       });
 
       const commentsQueryLikes = query(
@@ -700,13 +711,11 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
             likesData[commentDoc.id] = { count, userLiked };
           }, (err) => {
             console.error("Error fetching likes:", err);
-            logSecurityEvent('FETCH_LIKES_ERROR', { commentId: commentDoc.id, error: err.message });
           });
         });
         setCommentLikes(likesData);
       }, (err) => {
         console.error("Error setting up likes listener:", err);
-        logSecurityEvent('SETUP_LIKES_LISTENER_ERROR', { error: err.message });
       });
     };
 
@@ -727,7 +736,7 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
       unsubscribeLikes();
       unsubscribeAuth && unsubscribeAuth();
     };
-  }, [newsId, onCommentCountChange, sanitizeInput, logSecurityEvent, countAllComments]);
+  }, [newsId, onCommentCountChange, sanitizeInput, countAllComments, currentUser]);
 
   const checkSpamLimit = useCallback(() => {
     const now = Date.now();
@@ -737,11 +746,10 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
     if (timeDiff < requiredDelay) {
       const remainingTime = requiredDelay - timeDiff;
       setSpamWarning({ isOpen: true, remainingTime });
-      logSecurityEvent('SPAM_LIMIT_EXCEEDED', { remainingTime, newsId });
       return false;
     }
     return true;
-  }, [lastCommentTime, logSecurityEvent, newsId]);
+  }, [lastCommentTime]);
 
   const handleSubmit = useCallback(async (e, parentId = null, replyToAuthor = null) => {
     e.preventDefault();
@@ -754,7 +762,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'submit-no-user'
       });
-      logSecurityEvent('UNAUTHENTICATED_SUBMIT_ATTEMPT', { newsId, parentId });
       return;
     }
 
@@ -771,7 +778,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'invalid-length'
       });
-      logSecurityEvent('INVALID_COMMENT_LENGTH', { length: textToSubmit.length, newsId });
       setIsSubmitting(false);
       return;
     }
@@ -808,7 +814,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'submit-success'
       });
-      logSecurityEvent('COMMENT_SUBMITTED', { newsId, parentId, textLength: textToSubmit.length });
     } catch (err) {
       console.error("Error submitting comment:", err);
       setError("Gagal mengirim komentar.");
@@ -817,11 +822,10 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'submit-error'
       });
-      logSecurityEvent('COMMENT_SUBMIT_ERROR', { newsId, parentId, error: err.message });
     } finally {
       setIsSubmitting(false);
     }
-  }, [currentUser, newsId, comment, replyComment, checkSpamLimit, sanitizeInput, logSecurityEvent]);
+  }, [currentUser, newsId, comment, replyComment, checkSpamLimit, sanitizeInput]);
 
   const findCommentById = useCallback((comments, id) => {
     for (const comment of comments) {
@@ -842,7 +846,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-no-user'
       });
-      logSecurityEvent('UNAUTHENTICATED_EDIT_ATTEMPT', { commentId });
       return;
     }
 
@@ -854,7 +857,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-not-found'
       });
-      logSecurityEvent('EDIT_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -869,7 +871,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-no-permission'
       });
-      logSecurityEvent('UNAUTHORIZED_EDIT_ATTEMPT', { commentId, userId: currentUser.uid, commentUserId: comment.userId });
       return;
     }
 
@@ -880,12 +881,11 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-time-limit'
       });
-      logSecurityEvent('EDIT_TIME_LIMIT_EXCEEDED', { commentId });
       return;
     }
 
     setEditModal({ isOpen: true, commentId, isSubmitting: false, commentText });
-  }, [currentUser, comments, logSecurityEvent, sanitizeInput]);
+  }, [currentUser, comments, sanitizeInput]);
 
   const handleEditSubmit = useCallback(async (editedText) => {
     const { commentId } = editModal;
@@ -899,7 +899,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-not-found'
       });
-      logSecurityEvent('EDIT_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -911,7 +910,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-invalid-length'
       });
-      logSecurityEvent('INVALID_EDIT_LENGTH', { length: sanitizedText.length, commentId });
       return;
     }
 
@@ -930,7 +928,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-success'
       });
-      logSecurityEvent('COMMENT_EDITED', { commentId, originalText: comment.text, newText: sanitizedText });
     } catch (err) {
       console.error("Error editing comment:", err);
       setError("Gagal mengedit komentar.");
@@ -939,10 +936,9 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'edit-error'
       });
-      logSecurityEvent('EDIT_COMMENT_ERROR', { commentId, error: err.message });
       setEditModal(prev => ({ ...prev, isSubmitting: false }));
     }
-  }, [currentUser, newsId, editModal, comments, sanitizeInput, logSecurityEvent]);
+  }, [currentUser, newsId, editModal, comments, sanitizeInput]);
 
   const handleShowOriginalClick = useCallback((commentId, originalText) => {
     if (!originalText) {
@@ -975,7 +971,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'delete-not-found'
       });
-      logSecurityEvent('DELETE_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -988,11 +983,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         position: 'top-center',
         autoClose: 3000,
         toastId: 'delete-no-permission'
-      });
-      logSecurityEvent('UNAUTHORIZED_DELETE_ATTEMPT', { 
-        commentId, 
-        userId: currentUser.uid, 
-        commentUserId: comment.userId 
       });
       return;
     }
@@ -1018,11 +1008,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'delete-success'
       });
-      logSecurityEvent('COMMENT_DELETED', { 
-        commentId, 
-        isAdmin, 
-        commentText: comment.text 
-      });
     } catch (err) {
       console.error("Error deleting comment:", err);
       setError("Gagal menghapus komentar.");
@@ -1031,10 +1016,9 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'delete-error'
       });
-      logSecurityEvent('DELETE_COMMENT_ERROR', { commentId, error: err.message });
       setDeleteModal(prev => ({ ...prev, isDeleting: false }));
     }
-  }, [currentUser, newsId, deleteModal, comments, logSecurityEvent, sanitizeInput]);
+  }, [currentUser, newsId, deleteModal, comments, sanitizeInput]);
 
   const handleReportClick = useCallback((commentId) => {
     if (!currentUser) {
@@ -1044,7 +1028,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-no-user'
       });
-      logSecurityEvent('UNAUTHENTICATED_REPORT_ATTEMPT', { commentId });
       return;
     }
 
@@ -1056,7 +1039,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-not-found'
       });
-      logSecurityEvent('REPORT_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -1066,12 +1048,11 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-duplicate'
       });
-      logSecurityEvent('DUPLICATE_REPORT_ATTEMPT', { commentId });
       return;
     }
 
     setReportModal({ isOpen: true, commentId, isSubmitting: false, commentText: sanitizeInput(comment.text) });
-  }, [currentUser, comments, reportedComments, logSecurityEvent, sanitizeInput]);
+  }, [currentUser, comments, reportedComments, sanitizeInput]);
 
   const handleReportSubmit = useCallback(async (reason) => {
     const { commentId } = reportModal;
@@ -1085,7 +1066,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-not-found'
       });
-      logSecurityEvent('REPORT_NONEXISTENT_COMMENT', { commentId });
       return;
     }
 
@@ -1127,12 +1107,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-success'
       });
-      logSecurityEvent('REPORT_SUBMITTED', { 
-        commentId, 
-        reason: sanitizedReason, 
-        commentText: comment.text,
-        newsId
-      });
     } catch (err) {
       console.error("Error reporting comment:", err);
       setError("Gagal mengirim laporan.");
@@ -1141,10 +1115,9 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'report-error'
       });
-      logSecurityEvent('REPORT_SUBMIT_ERROR', { commentId, newsId, error: err.message });
       setReportModal(prev => ({ ...prev, isSubmitting: false }));
     }
-  }, [currentUser, newsId, reportModal, comments, sanitizeInput, logSecurityEvent]);
+  }, [currentUser, newsId, reportModal, comments, sanitizeInput]);
 
   const handleLikeComment = useCallback(async (commentId) => {
     if (!currentUser) {
@@ -1154,7 +1127,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'like-no-user'
       });
-      logSecurityEvent('UNAUTHENTICATED_LIKE_ATTEMPT', { commentId });
       return;
     }
 
@@ -1164,10 +1136,8 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
     try {
       if (likes.userLiked) {
         await deleteDoc(likeRef);
-        logSecurityEvent('LIKE_REMOVED', { commentId });
       } else {
         await setDoc(likeRef, { userId: currentUser.uid, timestamp: serverTimestamp() });
-        logSecurityEvent('LIKE_ADDED', { commentId });
       }
     } catch (err) {
       console.error("Error liking comment:", err);
@@ -1177,9 +1147,8 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'like-error'
       });
-      logSecurityEvent('LIKE_ERROR', { commentId, error: err.message });
     }
-  }, [currentUser, newsId, commentLikes, logSecurityEvent]);
+  }, [currentUser, newsId, commentLikes]);
 
   const handleReplyClick = useCallback((commentId, author) => {
     if (!currentUser) {
@@ -1189,11 +1158,10 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         autoClose: 3000,
         toastId: 'reply-no-user'
       });
-      logSecurityEvent('UNAUTHENTICATED_REPLY_ATTEMPT', { commentId });
       return;
     }
     setReplyTo(replyTo?.id === commentId ? null : { id: commentId, author: author || "User" });
-  }, [currentUser, replyTo, logSecurityEvent]);
+  }, [currentUser, replyTo]);
 
   const formatTimeAgo = useCallback((date) => {
     if (!date || !date.toDate) return "Baru saja";
@@ -1239,42 +1207,54 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
   return (
     <div className="space-y-6">
       <style>
-        {`
-          .toastify {
-            z-index: 100001 !important;
-            position: fixed !important;
-            top: 10px !important;
-            width: 320px !important;
-            font-family: Arial, sans-serif !important;
-          }
-          .Toastify__toast--success {
-            background: #06b6d4 !important;
-            color: white !important;
-          }
-          .Toastify__toast--error {
-            background: #ef4444 !important;
-            color: white !important;
-          }
-          .Toastify__toast--warn {
-            background: #f59e0b !important;
-            color: white !important;
-          }
-          .Toastify__toast--info {
-            background: #3b82f6 !important;
-            color: white !important;
-          }
-          @keyframes scaleIn {
-            from {
-              transform: scale(0.95);
-              opacity: 0;
-            }
-            to {
-              transform: scale(1);
-              opacity: 1;
-            }
-          }
-        `}
-      </style>
+  {`
+    .toastify {
+      z-index: 100001 !important;
+      position: fixed !important;
+      top: 10px !important;
+      width: 320px !important;
+      font-family: Arial, sans-serif !important;
+    }
+    .Toastify__toast--success {
+      background: #06b6d4 !important;
+      color: white !important;
+    }
+    .Toastify__toast--error {
+      background: #ef4444 !important;
+      color: white !important;
+    }
+    .Toastify__toast--warn {
+      background: #f59e0b !important;
+      color: white !important;
+    }
+    .Toastify__toast--info {
+      background: #3b82f6 !important;
+      color: white !important;
+    }
+    @keyframes scaleIn {
+      from {
+        transform: scale(0.95);
+        opacity: 0;
+      }
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    textarea {
+      color: #ffffff !important; /* white text */
+      background-color: #0f172a !important; /* slate-900 for contrast */
+    }
+    @media (max-width: 640px) {
+      textarea {
+        font-size: 14px !important; /* Smaller font size for mobile */
+      }
+      .comment-container {
+        padding: 12px !important; /* Adjust padding for mobile */
+      }
+    }
+  `}
+</style>
       <SpamWarningModal 
         isOpen={spamWarning.isOpen}
         onClose={() => setSpamWarning({ isOpen: false, remainingTime: 0 })}
@@ -1376,7 +1356,8 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
               handleReportClick={handleReportClick}
               handleEditClick={handleEditClick}
               handleShowOriginalClick={handleShowOriginalClick}
-              logSecurityEvent={logSecurityEvent}
+              handleToggleReplies={handleToggleReplies}
+              areRepliesHidden={areRepliesHidden}
               setFocusedComment={setFocusedComment}
               focusedComment={focusedComment}
               sanitizeInput={sanitizeInput}
