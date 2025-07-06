@@ -24,7 +24,7 @@ const BreakingNews = () => {
   useEffect(() => {
     const handleResize = () => {
       const newsText = breakingNews.length > 0 
-        ? breakingNews.map(news => news.text || 'No text available').join(' • ')
+        ? breakingNews.map(news => news.text || 'No text available').join(' | ')
         : '';
       const baseSpeed = breakingNews.length > 0 ? (breakingNews[0].speed || 15) : 15;
       setCurrentSpeed(getUnifiedSpeed(baseSpeed, newsText.length));
@@ -48,7 +48,7 @@ const BreakingNews = () => {
           
           const newIsEmergency = newsData.some(news => news.isEmergency);
           const newsText = newsData.length > 0 
-            ? newsData.map(news => news.text || 'No text available').join(' • ')
+            ? newsData.map(news => news.text || 'No text available').join(' | ')
             : 'No breaking news available at this time';
           const baseSpeed = newsData.length > 0 ? (newsData[0].speed || 15) : 15;
           const newSpeed = getUnifiedSpeed(baseSpeed, newsText.length);
@@ -88,7 +88,7 @@ const BreakingNews = () => {
 
   // Generate text with unique news items or fallback
   const newsText = breakingNews.length > 0 
-    ? breakingNews.map(news => news.text || 'No text available').join(' • ')
+    ? breakingNews.map(news => news.text || 'No text available').join(' | ')
     : 'No breaking news available at this time';
 
   // Ensure seamless loop with padding
