@@ -71,9 +71,7 @@ const NewsDetail = () => {
             createdAt: serverTimestamp(),
           });
           console.log("Created user document for:", user.uid);
-          // Wait briefly to ensure Firestore syncs the document
           await new Promise(resolve => setTimeout(resolve, 500));
-          // Verify document creation
           const verifySnap = await getDoc(userRef);
           if (!verifySnap.exists()) {
             throw new Error("Failed to verify user document creation");
@@ -111,14 +109,15 @@ const NewsDetail = () => {
           id: "default",
           title: "Berita Tidak Ditemukan",
           content: "<p>Maaf, slug berita tidak valid.</p>",
-          image: "https://via.placeholder.com/600x400?text=Berita+Tidak+Ditemukan",
+          image: "https://via.placeholder.com/640x360?text=Berita+Tidak+Ditemukan",
           imageDescription: "Gambar default",
           views: 0,
           author: "Sistem",
           createdAt: serverTimestamp(),
           category: "Umum",
           slug: "",
-          likeCount: 0
+          likeCount: 0,
+          hideProfilePicture: false
         });
         return;
       }
@@ -126,7 +125,6 @@ const NewsDetail = () => {
       setLoading(true);
       setError(null);
       try {
-        // Ensure user document exists before attempting views update
         let userDocCreated = true;
         if (currentUser) {
           userDocCreated = await ensureUserDocument(currentUser);
@@ -155,14 +153,15 @@ const NewsDetail = () => {
             id: newsData.id,
             title: newsData.judul || newsData.title || "Tanpa Judul",
             content: newsData.konten || newsData.content || "Konten belum ditulis.",
-            image: newsData.gambar || newsData.image || "https://via.placeholder.com/600x400?text=Berita",
+            image: newsData.gambar || newsData.image || "https://via.placeholder.com/640x360?text=Berita",
             imageDescription: newsData.gambarDeskripsi || newsData.imageDescription || "Gambar utama",
             views: newsData.views || 0,
             author: newsData.author || "Penulis Tidak Diketahui",
             createdAt: newsData.createdAt || serverTimestamp(),
             category: newsData.kategori || newsData.category || "Umum",
             slug: newsData.slug || slug,
-            likeCount: newsData.likeCount || 0
+            likeCount: newsData.likeCount || 0,
+            hideProfilePicture: newsData.hideProfilePicture || false
           });
 
           if (newsData.slug && newsData.slug !== slug) {
@@ -179,7 +178,6 @@ const NewsDetail = () => {
             return;
           }
 
-          // Update views for authenticated users with verified user document
           if (currentUser && newsData.id && userDocCreated) {
             try {
               const docRef = doc(db, "news", newsData.id);
@@ -207,14 +205,15 @@ const NewsDetail = () => {
             id: "default",
             title: "Berita Tidak Ditemukan",
             content: "<p>Maaf, berita yang Anda cari tidak tersedia.</p>",
-            image: "https://via.placeholder.com/600x400?text=Berita+Tidak+Ditemukan",
+            image: "https://via.placeholder.com/640x360?text=Berita+Tidak+Ditemukan",
             imageDescription: "Gambar default",
             views: 0,
             author: "Sistem",
             createdAt: serverTimestamp(),
             category: "Umum",
             slug: "",
-            likeCount: 0
+            likeCount: 0,
+            hideProfilePicture: false
           });
           if (currentUser) {
             await addDoc(collection(db, "logs"), {
@@ -241,14 +240,15 @@ const NewsDetail = () => {
           id: "default",
           title: "Kesalahan Memuat Berita",
           content: "<p>Terjadi kesalahan saat memuat berita. Silakan coba lagi.</p>",
-          image: "https://via.placeholder.com/600x400?text=Berita+Tidak+Ditemukan",
+          image: "https://via.placeholder.com/640x360?text=Berita+Tidak+Ditemukan",
           imageDescription: "Gambar default",
           views: 0,
           author: "Sistem",
           createdAt: serverTimestamp(),
           category: "Umum",
           slug: "",
-          likeCount: 0
+          likeCount: 0,
+          hideProfilePicture: false
         });
       }
       setLoading(false);
@@ -275,7 +275,8 @@ const NewsDetail = () => {
           category: updatedData.kategori || updatedData.category || prev.category,
           slug: updatedData.slug || prev.slug,
           views: updatedData.views || prev.views,
-          likeCount: updatedData.likeCount || prev.likeCount
+          likeCount: updatedData.likeCount || prev.likeCount,
+          hideProfilePicture: updatedData.hideProfilePicture || false
         }));
         if (updatedData.slug && updatedData.slug !== slug) {
           console.log(`Slug changed from ${slug} to ${updatedData.slug}, redirecting...`);
@@ -478,7 +479,7 @@ const NewsDetail = () => {
           title: news.title,
           slug: news.slug || slug,
           summary: news.content ? news.content.replace(/<[^>]+>/g, "").substring(0, 200) : "No summary available",
-          imageUrl: news.image || "https://via.placeholder.com/400x200",
+          imageUrl: news.image || "https://via.placeholder.com/640x360",
           savedAt: serverTimestamp(),
         });
         await addDoc(collection(db, "logs"), {
@@ -634,17 +635,17 @@ const NewsDetail = () => {
       />
 
       {news.image && (
-        <div className="w-full py-8 mt-16">
-          <div className="max-w-7xl mx-auto px-4">
-            <div className="relative w-full bg-slate-200 rounded-2xl overflow-hidden shadow-lg" style={{ aspectRatio: "16/9" }}>
-              <img src={news.image} alt={news.imageDescription} className="absolute inset-0 w-full h-full object-cover object-center" onError={(e) => (e.target.src = "https://via.placeholder.com/600x400?text=Berita")} style={{ objectFit: "cover", objectPosition: "center" }} />
-              <div className="absolute top-4 left-4 bg-cyan-600 text-white text-sm font-semibold px-3 py-1 rounded-full">
-                {news.category}
-              </div>
-            </div>
-          </div>
+  <div className="w-full py-8 mt-16">
+    <div className="max-w-7xl mx-auto px-4">
+      <div className="relative w-full max-w-[995px] mx-auto bg-slate-200 rounded-2xl overflow-hidden shadow-lg" style={{ aspectRatio: "16/9" }}>
+        <img src={news.image} alt={news.imageDescription} className="absolute inset-0 w-full h-full object-cover object-center" onError={(e) => (e.target.src = "https://via.placeholder.com/640x360?text=Berita")} style={{ objectFit: "cover", objectPosition: "center" }} />
+        <div className="absolute top-4 left-4 bg-cyan-600 text-white text-sm font-semibold px-3 py-1 rounded-full">
+          {news.category}
         </div>
-      )}
+      </div>
+    </div>
+  </div>
+)}
 
       <div className={`${news.image ? "bg-white" : "bg-gradient-to-r from-cyan-600 to-purple-600"} py-8 md:py-12`}>
         <div className="max-w-7xl mx-auto px-4">
@@ -681,6 +682,68 @@ const NewsDetail = () => {
               <div className="prose prose-lg max-w-none prose-headings:text-slate-900 prose-p:text-slate-800 prose-p:leading-relaxed prose-a:text-cyan-600 prose-strong:text-slate-900 prose-li:text-slate-800 text-slate-800" style={{ wordWrap: "break-word", overflowWrap: "break-word", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: news.content }} />
             </div>
 
+            {/* Author and Stats for Mobile (before Comments) */}
+            <div className="md:hidden space-y-6">
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h4 className="font-bold text-slate-800 mb-4">Tentang Penulis</h4>
+                <div className="flex items-center mb-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    {currentUser && currentUser.photoURL && (
+                      <>
+                        {!news.hideProfilePicture ? (
+                          <img 
+                            src={currentUser.photoURL} 
+                            alt="Profile" 
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                            <User className="h-4 w-4 text-gray-500" />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-gray-700">
+                        {news.author}
+                      </span>
+                      {news.hideProfilePicture && currentUser && currentUser.photoURL && (
+                        <span className="text-xs text-gray-500 italic">
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-600 break-words">Penulis berpengalaman dalam bidang jurnalistik dan media digital.</p>
+              </div>
+
+              <div className="bg-gradient-to-r from-cyan-50 to-purple-50 rounded-2xl p-6 border border-cyan-100">
+                <h4 className="font-bold text-slate-800 mb-4">Statistik Artikel</h4>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Views</span>
+                    <span className="font-semibold text-slate-800 break-words">{news.views}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Suka</span>
+                    <span className="font-semibold text-slate-800">{likeCount}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Komentar</span>
+                    <span className="font-semibold text-slate-800">{commentCount}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Kata</span>
+                    <span className="font-semibold text-slate-800">{news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">Waktu Baca</span>
+                    <span className="font-semibold text-slate-800">{Math.ceil((news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0) / 200)} min</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
               <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
                 <h3 className="text-xl font-bold text-slate-800">Berikan Reaksi</h3>
@@ -694,16 +757,36 @@ const NewsDetail = () => {
             </div>
           </div>
 
-          <div className="space-y-6">
+          {/* Author and Stats for Desktop (Sidebar) */}
+          <div className="hidden md:block lg:col-span-1 space-y-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h4 className="font-bold text-slate-800 mb-4">Tentang Penulis</h4>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-12 h-12 bg-gradient-to-r from-cyan-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="w-6 h-6 text-white" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-800 break-words">{news.author}</p>
-                  <p className="text-sm text-slate-600">Content Writer</p>
+              <div className="flex items-center mb-3 p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  {currentUser && currentUser.photoURL && (
+                    <>
+                      {!news.hideProfilePicture ? (
+                        <img 
+                          src={currentUser.photoURL} 
+                          alt="Profile" 
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                          <User className="h-4 w-4 text-gray-500" />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-gray-700">
+                      {news.author}
+                    </span>
+                    {news.hideProfilePicture && currentUser && currentUser.photoURL && (
+                      <span className="text-xs text-gray-500 italic">
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <p className="text-sm text-slate-600 break-words">Penulis berpengalaman dalam bidang jurnalistik dan media digital.</p>

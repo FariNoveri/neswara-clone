@@ -40,13 +40,25 @@ const NewsModal = ({
       if (editingNews && formData.gambar) {
         setImagePreview(formData.gambar);
       }
+      // Set initial showProfilePicture based on editingNews
+      if (editingNews && editingNews.hideProfilePicture !== undefined) {
+        setShowProfilePicture(!editingNews.hideProfilePicture); // Invert because hideProfilePicture=true means showProfilePicture=false
+      }
     } else {
       setIsAnimating(false);
       setImagePreview('');
       setUseUserName(false); // Reset to manual input when closing
-      setShowProfilePicture(true); // Reset profile picture visibility
+      // Do not reset showProfilePicture here to preserve the last state
     }
   }, [showModal, editingNews, formData.gambar]);
+
+  useEffect(() => {
+    // Sync showProfilePicture with formData.hideProfilePicture
+    setFormData(prev => ({
+      ...prev,
+      hideProfilePicture: !showProfilePicture // true if hidden, false if shown
+    }));
+  }, [showProfilePicture, setFormData]);
 
   useEffect(() => {
     if (formData.gambar && formData.gambar.startsWith('http')) {
@@ -220,7 +232,8 @@ const NewsModal = ({
           newsId: editingNews?.id || newsId || 'new', 
           title: formData.judul, 
           category: formData.kategori,
-          slug: newSlug
+          slug: newSlug,
+          hideProfilePicture: formData.hideProfilePicture // Log the hide status
         });
       }
       setShowModal(false);
@@ -249,9 +262,9 @@ const NewsModal = ({
     setIsAnimating(false);
     setTimeout(() => {
       setShowModal(false);
+      // Do not reset showProfilePicture here to preserve the last state
       resetForm();
       setUseUserName(false); // Reset to manual input when closing
-      setShowProfilePicture(true); // Reset profile picture visibility
     }, 200);
   };
 
@@ -398,41 +411,41 @@ const NewsModal = ({
                     </label>
                     
                     {/* Profile Picture Section */}
-{currentUser && currentUser.photoURL && (
-  <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg">
-    <div className="flex items-center space-x-3">
-      {showProfilePicture ? (
-        <img 
-          src={currentUser.photoURL} 
-          alt="Profile" 
-          className="w-8 h-8 rounded-full object-cover"
-        />
-      ) : (
-        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
-          <User className="h-4 w-4 text-gray-500" />
-        </div>
-      )}
-      <div className="flex flex-col">
-        <span className="text-sm font-medium text-gray-700">
-          {currentUser.displayName || currentUser.email}
-        </span>
-        {!showProfilePicture && (
-          <span className="text-xs text-gray-500 italic">
-            [Foto profil disembunyikan]
-          </span>
-        )}
-      </div>
-    </div>
-    <button
-      type="button"
-      onClick={() => setShowProfilePicture(!showProfilePicture)}
-      className="p-1 text-gray-500 hover:text-gray-700 transition-colors duration-200"
-      title={showProfilePicture ? "Sembunyikan foto profil" : "Tampilkan foto profil"}
-    >
-      {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-    </button>
-  </div>
-)}
+                    {currentUser && currentUser.photoURL && (
+                      <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          {showProfilePicture ? (
+                            <img 
+                              src={currentUser.photoURL} 
+                              alt="Profile" 
+                              className="w-8 h-8 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                              <User className="h-4 w-4 text-gray-500" />
+                            </div>
+                          )}
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-700">
+                              {currentUser.displayName || currentUser.email}
+                            </span>
+                            {!showProfilePicture && (
+                              <span className="text-xs text-gray-500 italic">
+                                [Foto profil disembunyikan]
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowProfilePicture(!showProfilePicture)}
+                          className="p-1 text-gray-500 hover:text-gray-700 transition-colors duration-200"
+                          title={showProfilePicture ? "Sembunyikan foto profil" : "Tampilkan foto profil"}
+                        >
+                          {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Author Input Field */}
                     <div className="flex items-center space-x-2">

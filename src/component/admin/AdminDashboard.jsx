@@ -805,7 +805,7 @@ const AdminDashboard = () => {
                 >
                   {showGif && (
                     <img
-                      src="https://media1.tenor.com/m/9D5avsgnEf0AAAAC/fsn-fate-stay-night.gif"
+                      src=""
                       alt="Fate/Stay Night GIF"
                       className="w-full max-h-96 rounded-lg shadow-md object-contain"
                     />

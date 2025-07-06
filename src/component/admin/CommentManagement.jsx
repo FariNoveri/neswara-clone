@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, getDocs, query, orderBy, doc, getDoc, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
 import { Trash2, AlertCircle, Search, X, Filter, Calendar, MessageSquare, Edit2, Eye } from 'lucide-react';
 import DOMPurify from 'dompurify';
@@ -18,51 +18,83 @@ const CommentManagement = ({ logActivity }) => {
   const [originalCommentModal, setOriginalCommentModal] = useState({ isOpen: false, originalText: '', commentId: '' });
 
   useEffect(() => {
-    const fetchComments = async () => {
-      try {
-        console.log('Fetching comments from all news subcollections');
-        const newsQuery = query(collection(db, 'news'));
-        const newsSnapshot = await getDocs(newsQuery);
-        let allComments = [];
+    let unsubscribe;
 
-        for (const newsDoc of newsSnapshot.docs) {
+    const fetchComments = () => {
+      setLoading(true);
+      console.log('Subscribing to comments from all news subcollections');
+      const newsQuery = query(collection(db, 'news'));
+      const unsubscribeArray = [];
+
+      onSnapshot(newsQuery, async (newsSnapshot) => {
+        let allComments = [];
+        const promises = newsSnapshot.docs.map(async (newsDoc) => {
           const newsData = newsDoc.data();
           const commentsQuery = query(
             collection(db, 'news', newsDoc.id, 'comments'),
             orderBy('createdAt', 'desc')
           );
-          const commentsSnapshot = await getDocs(commentsQuery);
-          const commentsData = await Promise.all(commentsSnapshot.docs.map(async (commentDoc) => {
-            const commentData = { id: commentDoc.id, ...commentDoc.data(), newsId: newsDoc.id };
-            let displayName = commentData.author || 'Unknown';
-            let userIdField = commentData.uid || commentData.userId || commentData.authorId || commentDoc.id;
-            if (userIdField) {
-              const userDoc = await getDoc(doc(db, 'users', userIdField));
-              if (userDoc.exists()) {
-                displayName = userDoc.data().displayName || displayName;
+          return new Promise((resolve) => {
+            const unsubscribeComments = onSnapshot(commentsQuery, async (commentsSnapshot) => {
+              try {
+                const commentsData = await Promise.all(commentsSnapshot.docs.map(async (commentDoc) => {
+                  const commentData = { id: commentDoc.id, ...commentDoc.data(), newsId: newsDoc.id };
+                  let displayName = commentData.author || 'Unknown';
+                  let userIdField = commentData.uid || commentData.userId || commentData.authorId || commentDoc.id;
+                  if (userIdField) {
+                    const userDoc = await getDoc(doc(db, 'users', userIdField));
+                    if (userDoc.exists()) {
+                      displayName = userDoc.data().displayName || displayName;
+                    }
+                  }
+                  return { 
+                    ...commentData, 
+                    displayName, 
+                    newsSlug: newsData.slug || newsDoc.id,
+                    isEdited: commentData.isEdited || false,
+                    replyToAuthor: commentData.replyToAuthor || null,
+                    originalText: commentData.originalText || null
+                  };
+                }));
+                resolve(commentsData);
+              } catch (error) {
+                console.error(`Error fetching comments for news ${newsDoc.id}:`, error);
+                resolve([]);
               }
-            }
-            return { 
-              ...commentData, 
-              displayName, 
-              newsSlug: newsData.slug || newsDoc.id,
-              isEdited: commentData.isEdited || false,
-              replyToAuthor: commentData.replyToAuthor || null,
-              originalText: commentData.originalText || null
-            };
-          }));
-          allComments = [...allComments, ...commentsData];
-        }
+            }, (error) => {
+              console.error(`Snapshot error for news ${newsDoc.id}:`, error);
+              resolve([]);
+            });
+            unsubscribeArray.push(unsubscribeComments);
+          });
+        });
 
-        setComments(allComments);
-        setFilteredComments(allComments);
-      } catch (error) {
-        console.error('Error fetching comments:', error);
-      }
-      setLoading(false);
+        Promise.all(promises)
+          .then((results) => {
+            results.forEach(commentsData => allComments = [...allComments, ...commentsData]);
+            setComments(allComments);
+            setFilteredComments(allComments); // Apply filters after initial load
+            setLoading(false);
+          })
+          .catch((error) => {
+            console.error('Error in Promise.all:', error);
+            setLoading(false);
+          });
+      }, (error) => {
+        console.error('Error subscribing to news:', error);
+        setLoading(false);
+      });
+
+      unsubscribe = () => {
+        unsubscribeArray.forEach(unsub => unsub());
+      };
     };
 
     fetchComments();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -127,30 +159,8 @@ const CommentManagement = ({ logActivity }) => {
           replyToAuthor: commentData.replyToAuthor || null,
           originalText: commentData.originalText || null
         });
-        const updatedComments = comments.filter(comment => comment.id !== commentId);
-        setComments(updatedComments);
-        setFilteredComments(updatedComments.filter(comment => {
-          let include = true;
-          if (filters.searchText) {
-            include = include && (
-              (comment.displayName || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-              (comment.text || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-              (comment.replyToAuthor || '').toLowerCase().includes(filters.searchText.toLowerCase()) ||
-              (comment.originalText || '').toLowerCase().includes(filters.searchText.toLowerCase())
-            );
-          }
-          if (filters.dateFrom && comment.createdAt) {
-            const fromDate = new Date(filters.dateFrom);
-            fromDate.setHours(0, 0, 0, 0);
-            include = include && comment.createdAt.toDate() >= fromDate;
-          }
-          if (filters.dateTo && comment.createdAt) {
-            const toDate = new Date(filters.dateTo);
-            toDate.setHours(23, 59, 59, 999);
-            include = include && comment.createdAt.toDate() <= toDate;
-          }
-          return include;
-        }));
+        setComments(prev => prev.filter(comment => comment.id !== commentId));
+        setFilteredComments(prev => prev.filter(comment => comment.id !== commentId));
         console.log("Komentar berhasil dihapus:", commentId);
       }
     } catch (err) {
@@ -177,7 +187,6 @@ const CommentManagement = ({ logActivity }) => {
 
   const DeleteModal = ({ isOpen, onClose, onConfirm }) => {
     if (!isOpen) return null;
-
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
         <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl transform animate-scaleIn">
@@ -188,10 +197,7 @@ const CommentManagement = ({ logActivity }) => {
               </div>
               <h3 className="text-xl font-bold text-gray-900">Hapus Komentar</h3>
             </div>
-            <button 
-              onClick={onClose} 
-              className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
-            >
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform">
               <X className="w-6 h-6" />
             </button>
           </div>
@@ -199,7 +205,7 @@ const CommentManagement = ({ logActivity }) => {
           <div className="flex justify-end space-x-4">
             <button
               onClick={onClose}
-              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105"
             >
               Batal
             </button>
@@ -217,7 +223,6 @@ const CommentManagement = ({ logActivity }) => {
 
   const OriginalCommentModal = ({ isOpen, onClose, originalText }) => {
     if (!isOpen) return null;
-
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
         <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl transform animate-scaleIn">
@@ -228,10 +233,7 @@ const CommentManagement = ({ logActivity }) => {
               </div>
               <h3 className="text-xl font-bold text-gray-900">Komentar Asli</h3>
             </div>
-            <button 
-              onClick={onClose} 
-              className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
-            >
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform">
               <X className="w-6 h-6" />
             </button>
           </div>

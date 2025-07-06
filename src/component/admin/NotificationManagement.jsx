@@ -12,7 +12,7 @@ import {
   onSnapshot,
   getDoc 
 } from 'firebase/firestore';
-import { PlusCircle, Edit3, Trash, X, Upload, Image, FileText, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit3, Trash, X, Upload, Image, FileText, AlertCircle, Link } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
@@ -215,6 +215,30 @@ const NotificationModal = React.memo(({
                     onFocus={() => setActiveStep(1)}
                   />
                 </div>
+
+                {/* News Article Selection */}
+                <div className="group">
+                  <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                    <Link className="h-4 w-4 mr-2 text-purple-500" />
+                    Tautan Berita
+                  </label>
+                  <select
+                    value={notificationForm.newsSlug || ''}
+                    onChange={(e) => setNotificationForm({ ...notificationForm, newsSlug: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900"
+                    onFocus={() => setActiveStep(1)}
+                  >
+                    <option value="">Pilih artikel berita (opsional)</option>
+                    {newsArticles.map((article) => (
+                      <option key={article.id} value={article.slug}>
+                        {article.title}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Pilih artikel berita untuk ditautkan ke notifikasi ini
+                  </p>
+                </div>
               </div>
 
               {/* Right Column */}
@@ -347,7 +371,7 @@ const NotificationManagement = ({ logActivity }) => {
     message: '',
     image: '',
     type: 'news',
-    newsLink: ''
+    newsSlug: ''
   });
   const [newsArticles, setNewsArticles] = useState([]);
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, id: null, title: '', message: '' });
@@ -363,7 +387,7 @@ const NotificationManagement = ({ logActivity }) => {
   };
 
   const resetForm = useCallback(() => {
-    setNotificationForm({ title: '', message: '', image: '', type: 'news', newsLink: '' });
+    setNotificationForm({ title: '', message: '', image: '', type: 'news', newsSlug: '' });
     setEditingNotification(null);
     setPreviewImage('');
     setImageFile(null);
@@ -503,7 +527,8 @@ const NotificationManagement = ({ logActivity }) => {
         logActivity('NOTIFICATION_EDIT', { 
           notificationId: editingNotification.id, 
           title: notificationForm.title, 
-          type: notificationForm.type 
+          type: notificationForm.type,
+          newsSlug: notificationForm.newsSlug
         });
         toast.success('Notifikasi berhasil diperbarui.');
       } else {
@@ -515,7 +540,8 @@ const NotificationManagement = ({ logActivity }) => {
         logActivity('NOTIFICATION_ADD', { 
           notificationId: docRef.id, 
           title: notificationForm.title, 
-          type: notificationForm.type 
+          type: notificationForm.type,
+          newsSlug: notificationForm.newsSlug
         });
         toast.success('Notifikasi berhasil ditambahkan.');
       }
@@ -553,7 +579,8 @@ const NotificationManagement = ({ logActivity }) => {
         logActivity('NOTIFICATION_DELETE', { 
           notificationId: id, 
           title: notificationData.title || 'N/A', 
-          type: notificationData.type || 'N/A' 
+          type: notificationData.type || 'N/A',
+          newsSlug: notificationData.newsSlug || 'N/A'
         });
         toast.success('Notifikasi berhasil dihapus.');
       } else {
@@ -580,7 +607,9 @@ const NotificationManagement = ({ logActivity }) => {
       const formData = {
         title: notification.title || '',
         message: notification.message || '',
-        image: notification.image || ''
+        image: notification.image || '',
+        type: notification.type || 'news',
+        newsSlug: notification.newsSlug || ''
       };
 
       editDataRef.current = notification;
@@ -684,6 +713,7 @@ const NotificationManagement = ({ logActivity }) => {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Judul</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Pesan</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Gambar</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Tautan Berita</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Tanggal</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -691,7 +721,7 @@ const NotificationManagement = ({ logActivity }) => {
               <tbody className="divide-y divide-gray-100">
                 {notifications.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center">
+                    <td colSpan="6" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                           <PlusCircle className="w-12 h-12 text-gray-400" />
@@ -725,6 +755,20 @@ const NotificationManagement = ({ logActivity }) => {
                           </div>
                         ) : (
                           <span className="text-gray-500 italic">Tidak ada</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        {notification.newsSlug ? (
+                          <a 
+                            href={`/berita/${notification.newsSlug}`} 
+                            className="text-indigo-600 hover:text-indigo-900 underline truncate block max-w-xs"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {newsArticles.find(article => article.slug === notification.newsSlug)?.title || notification.newsSlug}
+                          </a>
+                        ) : (
+                          <span className="text-gray-500 italic">Tidak ada tautan</span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">{formatDate(notification.timestamp)}</td>

@@ -52,7 +52,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
     priority: 1,
     speed: 15,
     isEmergency: false,
-    animationType: 'marquee'
   });
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -65,7 +64,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       const newsData = snapshot.docs.map(doc => ({ 
         id: doc.id, 
         ...doc.data(),
-        animationType: doc.data().animationType || 'marquee'
       }));
       setBreakingNews(newsData);
     } catch (error) {
@@ -86,9 +84,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       text: '', 
       isActive: true, 
       priority: breakingNews.length + 1, 
-      speed: 15, 
+      speed: globalSpeed,
       isEmergency: false,
-      animationType: 'marquee'
     });
     setIsModalOpen(true);
   };
@@ -99,9 +96,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       text: news.text,
       isActive: news.isActive,
       priority: news.priority,
-      speed: news.speed || 15,
+      speed: globalSpeed,
       isEmergency: news.isEmergency || false,
-      animationType: news.animationType || 'marquee'
     });
     setIsModalOpen(true);
   };
@@ -112,7 +108,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
       return;
     }
 
-    const speedValue = parseInt(formData.speed) || 15;
+    const speedValue = parseInt(globalSpeed) || 15;
     if (speedValue < 5 || speedValue > 30) {
       setIsSpeedWarningOpen(true);
       return;
@@ -158,7 +154,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           title: formData.text, 
           newSpeed: speedValue, 
           oldSpeed: editingNews.speed,
-          animationType: formData.animationType
         });
         toast.success('Breaking news berhasil diperbarui.');
       } else {
@@ -172,7 +167,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           newsId: docRef.id, 
           title: formData.text, 
           newSpeed: speedValue,
-          animationType: formData.animationType
         });
         toast.success('Breaking news berhasil ditambahkan.');
       }
@@ -182,9 +176,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         text: '', 
         isActive: true, 
         priority: 1, 
-        speed: 15, 
+        speed: globalSpeed, 
         isEmergency: false,
-        animationType: 'marquee'
       });
     } catch (error) {
       console.error('Error saving breaking news:', error);
@@ -268,7 +261,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         return;
       }
 
-      if (isEmergency && currentIsActive) {
+      if (isEmergency && !currentIsActive) {
         const batch = writeBatch(db);
         breakingNews.forEach((news) => {
           if (!news.isEmergency && news.isActive) {
@@ -356,7 +349,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
   };
 
   const handleSpeedWarningConfirm = async () => {
-    const speedValue = isSpeedModalOpen ? parseInt(globalSpeed) || 15 : parseInt(formData.speed) || 15;
+    const speedValue = parseInt(globalSpeed) || 15;
     const adjustedSpeed = Math.max(5, Math.min(30, speedValue));
 
     setLoading(true);
@@ -382,8 +375,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
         breakingNews.forEach((news) => {
           const newsRef = doc(db, 'breakingNews', news.id);
           batch.update(newsRef, {
-            speed: adjustedSpeed,
-            updatedAt: serverTimestamp()
+            speed: adjustedraw
           });
         });
         await batch.commit();
@@ -404,7 +396,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             title: formData.text, 
             newSpeed: adjustedSpeed, 
             oldSpeed: editingNews.speed,
-            animationType: formData.animationType
           });
           toast.success('Breaking news berhasil diperbarui.');
           fetchBreakingNews();
@@ -413,9 +404,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             text: '', 
             isActive: true, 
             priority: 1, 
-            speed: 15, 
+            speed: globalSpeed,
             isEmergency: false,
-            animationType: 'marquee'
           });
         } else {
           const docRef = await addDoc(collection(db, 'breakingNews'), {
@@ -428,7 +418,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             newsId: docRef.id, 
             title: formData.text, 
             newSpeed: adjustedSpeed,
-            animationType: formData.animationType
           });
           toast.success('Breaking news berhasil ditambahkan.');
           fetchBreakingNews();
@@ -437,9 +426,8 @@ const BreakingNewsAdmin = ({ logActivity }) => {
             text: '', 
             isActive: true, 
             priority: 1, 
-            speed: 15, 
+            speed: globalSpeed,
             isEmergency: false,
-            animationType: 'marquee'
           });
         }
       }
@@ -469,8 +457,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
 
   const activeNews = breakingNews.filter(news => news.isActive).sort((a, b) => a.priority - b.priority);
   const isEmergencyActive = activeNews.some(n => n.isEmergency);
-  const speed = activeNews.length > 0 ? (activeNews[0].speed || 15) : 15;
-  const animationType = activeNews.length > 0 ? (activeNews[0].animationType || 'marquee') : 'marquee';
+  const speed = activeNews.length > 0 ? (activeNews[0].speed || globalSpeed) : globalSpeed;
 
   const emergencyNews = breakingNews.filter(news => news.isEmergency).sort((a, b) => a.priority - b.priority);
   const nonEmergencyNews = breakingNews.filter(news => !news.isEmergency).sort((a, b) => a.priority - b.priority);
@@ -548,33 +535,16 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                     {isEmergencyActive ? 'DARURAT' : 'BREAKING'}
                   </span>
                   <div className="overflow-hidden flex-1">
-                    {animationType === 'marquee' ? (
-                      <div 
-                        className="breaking-news-text whitespace-nowrap text-white font-medium" 
-                        style={{ 
-                          animation: `marquee linear ${speed}s infinite`,
-                          display: 'inline-block',
-                          willChange: 'transform'
-                        }}
-                      >
-                        {newsContent} {newsContent}
-                      </div>
-                    ) : (
-                      <div className="breaking-news-text text-white font-medium">
-                        {newsContent.split('').map((char, index) => (
-                          <span
-                            key={index}
-                            style={{
-                              animation: `fadeIn 0.5s ease-in ${index * 0.1}s forwards`,
-                              opacity: 0,
-                              display: 'inline-block'
-                            }}
-                          >
-                            {char}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <div 
+                      className="breaking-news-text whitespace-nowrap text-white font-medium" 
+                      style={{ 
+                        animation: `marquee linear ${speed}s infinite`,
+                        display: 'inline-block',
+                        willChange: 'transform'
+                      }}
+                    >
+                      {newsContent} {newsContent}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -621,7 +591,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               <div>
                 <p className="text-gray-600 text-sm font-medium">Rata-rata Kecepatan</p>
                 <p className="text-2xl font-bold text-purple-600">
-                  {breakingNews.length > 0 ? Math.round(breakingNews.reduce((acc, news) => acc + (news.speed || 15), 0) / breakingNews.length) : 0}s
+                  {breakingNews.length > 0 ? Math.round(breakingNews.reduce((acc, news) => acc + (news.speed || globalSpeed), 0) / breakingNews.length) : 0}s
                 </p>
               </div>
               <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -643,7 +613,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Prioritas</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Kecepatan (detik)</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Animasi</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Terakhir Update</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -651,7 +620,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               <tbody className="divide-y divide-gray-100">
                 {emergencyNews.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
+                    <td colSpan="6" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                           <Radio className="w-12 h-12 text-gray-400" />
@@ -708,12 +677,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                          {news.speed || 15}s
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          {news.animationType === 'marquee' ? 'Marquee' : 'Fade In'}
+                          {news.speed || globalSpeed}s
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatDate(news.updatedAt)}</td>
@@ -757,7 +721,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Prioritas</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Kecepatan (detik)</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Animasi</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Terakhir Update</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -765,7 +728,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
               <tbody className="divide-y divide-gray-100">
                 {nonEmergencyNews.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center">
+                    <td colSpan="6" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                           <Radio className="w-12 h-12 text-gray-400" />
@@ -822,12 +785,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                          {news.speed || 15}s
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          {news.animationType === 'marquee' ? 'Marquee' : 'Fade In'}
+                          {news.speed || globalSpeed}s
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatDate(news.updatedAt)}</td>
@@ -925,27 +883,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Kecepatan (detik)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.speed || ''}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setFormData(prev => ({
-                        ...prev,
-                        speed: value === '' ? '' : parseInt(value)
-                      }));
-                    }}
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
-                    placeholder="15"
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    Atur kecepatan scroll (5-30 detik direkomendasikan)
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Mode Darurat
                   </label>
                   <select
@@ -961,22 +898,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                     Aktifkan untuk mode darurat (warna merah dan label DARURAT)
                   </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tipe Animasi
-                  </label>
-                  <select
-                    value={formData.animationType}
-                    onChange={(e) => setFormData(prev => ({ ...prev, animationType: e.target.value }))}
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-indigo-500 focus:bg-white transition-all duration-300 text-gray-900"
-                  >
-                    <option value="marquee">Marquee (Berjalan)</option>
-                    <option value="fadeIn">Fade In (Muncul)</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Pilih tipe animasi untuk teks breaking news
-                  </p>
-                </div>
                 {formData.text && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -988,33 +909,16 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                           {formData.isEmergency ? 'DARURAT' : 'BREAKING'}
                         </span>
                         <div className="overflow-hidden flex-1">
-                          {formData.animationType === 'marquee' ? (
-                            <div 
-                              className="breaking-news-text whitespace-nowrap text-white font-medium" 
-                              style={{ 
-                                animation: `marquee linear ${(formData.speed || 15)}s infinite`,
-                                display: 'inline-block',
-                                willChange: 'transform'
-                              }}
-                            >
-                              {formData.text} {formData.text}
-                            </div>
-                          ) : (
-                            <div className="breaking-news-text text-white font-medium">
-                              {formData.text.split('').map((char, index) => (
-                                <span
-                                  key={index}
-                                  style={{
-                                    animation: `fadeIn 0.5s ease-in ${index * 0.1}s forwards`,
-                                    opacity: 0,
-                                    display: 'inline-block'
-                                  }}
-                                >
-                                  {char}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          <div 
+                            className="breaking-news-text whitespace-nowrap text-white font-medium" 
+                            style={{ 
+                              animation: `marquee linear ${globalSpeed}s infinite`,
+                              display: 'inline-block',
+                              willChange: 'transform'
+                            }}
+                          >
+                            {formData.text} {formData.text}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1162,7 +1066,7 @@ const BreakingNewsAdmin = ({ logActivity }) => {
                 </button>
               </div>
               <p className="text-sm text-gray-700 mb-6">
-                Kecepatan {isSpeedModalOpen ? (parseInt(globalSpeed) || 15) : (parseInt(formData.speed) || 15)} detik di luar rentang normal (5-30 detik). Apakah Anda yakin ingin melanjutkan dengan menyesuaikan ke {Math.max(5, Math.min(30, isSpeedModalOpen ? (parseInt(globalSpeed) || 15) : (parseInt(formData.speed) || 15)))} detik?
+                Kecepatan {globalSpeed} detik di luar rentang normal (5-30 detik). Apakah Anda yakin ingin melanjutkan dengan menyesuaikan ke {Math.max(5, Math.min(30, parseInt(globalSpeed) || 15))} detik?
               </p>
               <div className="flex justify-end space-x-4">
                 <button
@@ -1196,10 +1100,6 @@ const BreakingNewsAdmin = ({ logActivity }) => {
           @keyframes marquee {
             0% { transform: translateX(100%); }
             100% { transform: translateX(-100%); }
-          }
-          @keyframes fadeIn {
-            0% { opacity: 0; }
-            100% { opacity: 1; }
           }
           @keyframes scaleIn {
             0% { opacity: 0; transform: scale(0.95); }
