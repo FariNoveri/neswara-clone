@@ -24,7 +24,6 @@ const Ekonomi = () => {
   const fetchNews = async () => {
     setLoading(true);
     try {
-      console.log("Initializing fetchNews for category:", CATEGORY);
       const collectionRef = collection(db, "news");
       const q = query(
         collectionRef,
@@ -32,12 +31,9 @@ const Ekonomi = () => {
         // where("isActive", "==", true),
         orderBy("createdAt", "desc")
       );
-      console.log("Query constructed:", q);
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        console.log("Snapshot received, docs count:", snapshot.docs.length);
         const newsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        console.log("Mapped data:", newsData);
         setNewsData(newsData);
         setLoading(false);
         setError(null);
@@ -71,7 +67,6 @@ const Ekonomi = () => {
   const handleNewsClick = async (newsId) => {
     const auth = getAuth();
     const user = auth.currentUser;
-    console.log("Auth state for view update:", user ? user.uid : "Unauthenticated");
 
     const item = newsData.find((n) => n.id === newsId);
     if (!item) {
@@ -81,10 +76,8 @@ const Ekonomi = () => {
     }
 
     const slug = item.slug || createSlug(item.judul || item.title || 'untitled');
-    console.log("Navigating to slug:", slug);
 
     if (!user) {
-      console.log("User not authenticated, skipping view update");
       navigate(`/berita/${slug}`);
       return;
     }
@@ -99,7 +92,6 @@ const Ekonomi = () => {
         return;
       }
       if (!newsSnap.data().hasOwnProperty("views")) {
-        console.log("Initializing views for news ID:", newsId);
         await updateDoc(newsRef, { views: 0 });
       }
       
@@ -111,7 +103,6 @@ const Ekonomi = () => {
         await updateDoc(newsRef, { views: currentViews + 1 });
       }
       
-      console.log("View count updated successfully for news ID:", newsId);
     } catch (error) {
       console.error("Error updating views:", {
         message: error.message,

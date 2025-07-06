@@ -28,7 +28,6 @@ export const AuthProvider = ({ children }) => {
               emailVerified: user.emailVerified, // Sinkronisasi status verifikasi email
               updatedAt: new Date().toISOString().split('T')[0],
             }, { merge: true });
-            console.log("User data synced (preserving isAdmin, updated emailVerified):", user.uid, userData);
           } else {
             // Buat dokumen baru untuk pengguna baru
             await setDoc(userRef, {

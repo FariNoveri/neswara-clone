@@ -15,7 +15,6 @@ const findNewsById = async (newsId, currentUser) => {
     const docRef = doc(db, "news", newsId);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
-      console.log("Found news by ID:", { id: docSnap.id, data: docSnap.data() });
       return { id: docSnap.id, ...docSnap.data() };
     }
     console.warn("No document found for ID:", newsId);
@@ -92,7 +91,6 @@ const NewsDetail = () => {
     };
 
     const fetchNews = async () => {
-      console.log("FetchNews called with slug:", slug, "currentUser:", currentUser?.uid);
       if (!slug || slug.trim() === "") {
         console.error("Invalid or empty slug:", slug);
         setError("Slug berita tidak valid.");
@@ -182,7 +180,6 @@ const NewsDetail = () => {
             try {
               const docRef = doc(db, "news", newsData.id);
               await updateDoc(docRef, { views: increment(1) });
-              console.log("Views incremented for news:", newsData.id);
             } catch (updateErr) {
               console.warn("Error updating views (non-critical):", updateErr);
               toast.warn("Gagal memperbarui jumlah tampilan.", {
@@ -264,7 +261,6 @@ const NewsDetail = () => {
     const unsubscribeNews = onSnapshot(doc(db, "news", newsId), (doc) => {
       if (doc.exists()) {
         const updatedData = doc.data();
-        console.log("onSnapshot triggered with updated data:", updatedData);
         setNews((prev) => ({
           ...prev,
           title: updatedData.judul || updatedData.title || prev.title,
@@ -365,7 +361,6 @@ const NewsDetail = () => {
 
     const unsubscribeComments = onSnapshot(query(collection(db, "news", newsId, "comments")), (snapshot) => {
       setCommentCount(snapshot.size);
-      console.log("Comments snapshot received, count:", snapshot.size);
     }, (err) => {
       console.error("Error fetching comments count:", err);
       toast.error("Gagal memuat jumlah komentar.");

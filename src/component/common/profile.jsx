@@ -229,7 +229,6 @@ const Profile = () => {
       );
       const editsSnapshot = await getDocs(editsQuery);
       const count = editsSnapshot.size;
-      console.log("Check edit limit - Date:", today, "Count:", count); // Debug log
       setEditCountLoading(true);
       setEditCount(count);
       setEditLimitReached(count >= 5);
@@ -261,13 +260,10 @@ const Profile = () => {
         where("type", "==", "displayName")
       );
       const editsSnapshot = await getDocs(editsQuery);
-      console.log("Documents to delete (displayName, today):", editsSnapshot.docs.map(doc => doc.data())); // Debug log
       const deletePromises = editsSnapshot.docs.map(doc => {
-        console.log("Deleting document ID:", doc.id, "Data:", doc.data());
         return deleteDoc(doc.ref);
       });
       await Promise.all(deletePromises);
-      console.log("Deleted displayName docs for", today, ":", deletePromises.length);
       await checkEditLimit(userId); // Re-check edit count after deletion
     } catch (error) {
       console.error("Error deleting previous displayName edits:", error);
@@ -284,7 +280,6 @@ const Profile = () => {
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
       const { canEdit } = await checkEditLimit(userId);
       if (!canEdit) {
-        console.log("Edit limit reached, cannot log edit:", { type, beforeName, newName });
         return false;
       }
 
@@ -301,8 +296,7 @@ const Profile = () => {
         logData.newName = sanitizeInput(newName);
       }
 
-      const docRef = await addDoc(collection(db, "profile_edits"), logData);
-      console.log("Profile edit logged - Doc ID:", docRef.id, "Data:", logData); // Debug log
+      const docRef = await addDoc(collection(db, "profile_edits"), logData);g
       await checkEditLimit(userId); // Update edit count after adding new edit
       return true;
     } catch (error) {
@@ -343,7 +337,6 @@ const Profile = () => {
       try {
         const currentUser = getAuth().currentUser;
         if (currentUser) {
-          console.log("Manual auth check: User found");
           setUser(currentUser);
           setDisplayName(sanitizeInput(currentUser.displayName || ""));
           setEmail(sanitizeInput(currentUser.email || ""));
@@ -354,7 +347,6 @@ const Profile = () => {
           setLoading(false);
           clearTimeout(timeoutId);
         } else {
-          console.log("Manual auth check: No user found");
           setError("No user logged in. Redirecting to login page.");
           setLoading(false);
           navigate('/');
@@ -371,7 +363,6 @@ const Profile = () => {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
-        console.log("onAuthStateChanged triggered:", user ? "User logged in" : "No user");
         if (user) {
           setUser(user);
           setDisplayName(sanitizeInput(user.displayName || ""));
@@ -418,7 +409,6 @@ const Profile = () => {
           const unsubscribeEdits = onSnapshot(editsQuery, (snapshot) => {
             try {
               const count = snapshot.size;
-              console.log("Real-time edit count - Date:", today, "Count:", count); // Debug log
               setEditCountLoading(true);
               setEditCount(count);
               setEditLimitReached(count >= 5);
@@ -455,7 +445,6 @@ const Profile = () => {
             window.removeEventListener('click', handleUserActivity);
           };
         } else {
-          console.log("onAuthStateChanged: No user, redirecting");
           setError("No user logged in. Redirecting to login page.");
           setLoading(false);
           navigate('/');

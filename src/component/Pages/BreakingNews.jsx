@@ -44,7 +44,6 @@ const BreakingNews = () => {
         const q = query(collectionRef, where("isActive", "==", true), orderBy("priority", "asc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
           const newsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          console.log("Breaking News Data:", newsData, "Timestamp:", new Date().toISOString());
           
           const newIsEmergency = newsData.some(news => news.isEmergency);
           const newsText = newsData.length > 0 

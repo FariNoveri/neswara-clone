@@ -22,7 +22,6 @@ const CommentManagement = ({ logActivity }) => {
 
     const fetchComments = () => {
       setLoading(true);
-      console.log('Subscribing to comments from all news subcollections');
       const newsQuery = query(collection(db, 'news'));
       const unsubscribeArray = [];
 
@@ -161,7 +160,6 @@ const CommentManagement = ({ logActivity }) => {
         });
         setComments(prev => prev.filter(comment => comment.id !== commentId));
         setFilteredComments(prev => prev.filter(comment => comment.id !== commentId));
-        console.log("Komentar berhasil dihapus:", commentId);
       }
     } catch (err) {
       console.error("Gagal menghapus komentar:", err);

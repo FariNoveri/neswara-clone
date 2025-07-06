@@ -587,14 +587,12 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         setLoading(false);
         return;
       }
-      console.log("fetchComments: Subscribing to newsId:", newsId);
 
       const commentsQuery = query(
         collection(db, `news/${newsId}/comments`),
         orderBy("createdAt", "desc")
       );
       unsubscribeComments = onSnapshot(commentsQuery, async (snapshot) => {
-        console.log("fetchComments: Snapshot received, docs length:", snapshot.docs.length);
         const commentsData = [];
         const userIds = [...new Set(snapshot.docs.map(doc => doc.data().userId).filter(id => id))];
 
@@ -652,7 +650,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         });
 
         const rootComments = commentsData.filter(comment => !comment.parentId);
-        console.log("Root comments after structuring:", rootComments);
         setComments(rootComments);
         if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
         setLoading(false);
@@ -675,7 +672,6 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
             })
           );
           setReportedComments(newReportedComments);
-          console.log('Reported comments updated:', newReportedComments);
         }
       }, (err) => {
         console.error("Error fetching comments:", err);

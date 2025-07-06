@@ -21,19 +21,15 @@ const Olahraga = () => {
     const fetchNews = async () => {
       setIsLoading(true);
       try {
-        console.log("Initializing fetchNews for category:", CATEGORY);
         const collectionRef = collection(db, "news");
         const q = query(
           collectionRef,
           where("kategori", "==", CATEGORY),
           orderBy("createdAt", "desc")
         );
-        console.log("Query constructed:", q);
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-          console.log("Snapshot received, docs count:", snapshot.docs.length);
           const newsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          console.log("Mapped data:", newsData);
           setNews(newsData);
           setIsLoading(false);
         }, (error) => {

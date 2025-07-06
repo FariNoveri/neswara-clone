@@ -26,7 +26,6 @@ const Navbar = () => {
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      console.log("Auth state in Navbar:", user ? user.uid : "Unauthenticated");
     });
     return () => unsubscribe();
   }, []);

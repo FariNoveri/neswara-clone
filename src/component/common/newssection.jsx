@@ -33,11 +33,9 @@ const NewsSection = () => {
     try {
       const q = query(collection(db, "news"), orderBy("createdAt", "desc"));
       const snapshot = await getDocs(q);
-      console.log("Firestore query returned", snapshot.size, "documents");
       const data = snapshot.docs.map((doc) => {
         const docData = doc.data();
         const slug = docData.slug || createSlug(docData.judul || docData.title || "untitled");
-        console.log(`News ID: ${doc.id}, Slug: ${slug}, Title: ${docData.judul || docData.title || "untitled"}`);
         return {
           id: doc.id,
           ...docData,
@@ -82,8 +80,6 @@ const NewsSection = () => {
     const user = auth.currentUser;
     const newsId = newsItem.id;
     const slug = newsItem.slug || createSlug(newsItem.judul || newsItem.title || "untitled");
-    console.log("HandleNewsClick - News ID:", newsId, "Slug:", slug, "Title:", newsItem.judul || newsItem.title || "untitled");
-    console.log("Auth state:", user ? user.uid : "Unauthenticated");
 
     if (!slug || slug.trim() === "") {
       console.error("Invalid slug for news item:", newsItem);
@@ -97,10 +93,8 @@ const NewsSection = () => {
       return;
     }
 
-    console.log(`Navigating to: /berita/${slug}`);
 
     if (!user) {
-      console.log("User not authenticated, skipping view update");
       navigate(`/berita/${slug}`);
       return;
     }
@@ -114,18 +108,15 @@ const NewsSection = () => {
         return;
       }
       if (!newsSnap.data().hasOwnProperty("views")) {
-        console.log("Initializing views for news ID:", newsId);
         await updateDoc(newsRef, { views: 0 });
       }
 
       try {
         await updateDoc(newsRef, { views: increment(1) });
-        console.log("View count updated successfully for news ID:", newsId);
       } catch (incrementError) {
         console.warn("Increment failed, trying manual update:", incrementError);
         const currentViews = newsSnap.data().views || 0;
         await updateDoc(newsRef, { views: currentViews + 1 });
-        console.log("Manual view count update successful for news ID:", newsId);
       }
     } catch (error) {
       console.error("Error updating views:", {
