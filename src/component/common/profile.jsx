@@ -53,14 +53,19 @@ import {
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
-// Simple input sanitization function
-const sanitizeInput = (input) => {
+// Simple input sanitization function with length limits
+const sanitizeInput = (input, maxLength) => {
   if (!input) return input;
-  return input
-    .replace(new RegExp('[<>}{]', 'g'), '')
-    .replace(new RegExp('script', 'gi'), '')
-    .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '')
+  let sanitized = input
+    .replace(new RegExp('[<>}{]', 'g'), '') // Remove dangerous characters
+    .replace(new RegExp('script', 'gi'), '') // Prevent script injection
+    .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '') // Remove control characters
     .trim();
+  // Truncate to maxLength if specified
+  if (maxLength && sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength);
+  }
+  return sanitized;
 };
 
 // Validate file type and content
@@ -106,7 +111,7 @@ const generateNameSuggestions = (baseName) => {
   suggestions.push(`${baseName}_user`);
   suggestions.push(`${baseName}${Math.random().toString(36).substring(2, 8)}`);
   suggestions.push(`${baseName}_x`);
-  return suggestions.map(sanitizeInput);
+  return suggestions.map(name => sanitizeInput(name, 50)); // Apply 50-character limit
 };
 
 const Profile = () => {
@@ -201,8 +206,8 @@ const Profile = () => {
         return isAdminValue;
       } else {
         await setDoc(doc(db, "users", userId), {
-          displayName: sanitizeInput(user?.displayName || ""),
-          email: sanitizeInput(user?.email || ""),
+          displayName: sanitizeInput(user?.displayName || "", 50),
+          email: sanitizeInput(user?.email || "", 50),
           photoURL: user?.photoURL || "",
           isAdmin: false,
           updatedAt: new Date().toISOString(),
@@ -249,25 +254,21 @@ const Profile = () => {
     }
   };
 
-  // Delete previous displayName edits for the current day only
-  const deletePreviousEdits = async (userId) => {
+  // Delete all previous edits of the same type for the user (across all days)
+  const deletePreviousEdits = async (userId, type) => {
     try {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
       const editsQuery = query(
         collection(db, "profile_edits"),
         where("userId", "==", userId),
-        where("date", "==", today),
-        where("type", "==", "displayName")
+        where("type", "==", type)
       );
       const editsSnapshot = await getDocs(editsQuery);
-      const deletePromises = editsSnapshot.docs.map(doc => {
-        return deleteDoc(doc.ref);
-      });
+      const deletePromises = editsSnapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
       await checkEditLimit(userId); // Re-check edit count after deletion
     } catch (error) {
-      console.error("Error deleting previous displayName edits:", error);
-      toast.error("Failed to delete previous displayName edits: " + error.message, {
+      console.error(`Error deleting previous ${type} edits:`, error);
+      toast.error(`Gagal menghapus log edit ${type} sebelumnya: ${error.message}`, {
         position: "top-center",
         autoClose: 5000,
       });
@@ -280,8 +281,15 @@ const Profile = () => {
       const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
       const { canEdit } = await checkEditLimit(userId);
       if (!canEdit) {
+        toast.error("Batas pengeditan harian telah tercapai. Silakan coba lagi besok.", {
+          position: "top-center",
+          autoClose: 5000,
+        });
         return false;
       }
+
+      // Delete previous edits of the same type
+      await deletePreviousEdits(userId, type);
 
       const logData = {
         userId,
@@ -291,17 +299,16 @@ const Profile = () => {
       };
 
       if (type === "displayName" && beforeName && newName) {
-        await deletePreviousEdits(userId); // Only delete previous displayName edits for today
-        logData.beforeName = sanitizeInput(beforeName);
-        logData.newName = sanitizeInput(newName);
+        logData.beforeName = sanitizeInput(beforeName, 50);
+        logData.newName = sanitizeInput(newName, 50);
       }
 
-      const docRef = await addDoc(collection(db, "profile_edits"), logData);g
+      await addDoc(collection(db, "profile_edits"), logData);
       await checkEditLimit(userId); // Update edit count after adding new edit
       return true;
     } catch (error) {
       console.error("Error logging profile edit:", error);
-      setError("Failed to log profile edit: " + error.message);
+      setError("Gagal mencatat perubahan profil: " + error.message);
       return false;
     }
   };
@@ -317,7 +324,7 @@ const Profile = () => {
       return querySnapshot.empty;
     } catch (error) {
       console.error("Error checking display name uniqueness:", error);
-      setError("Failed to check display name uniqueness: " + error.message);
+      setError("Gagal memeriksa keunikan nama tampilan: " + error.message);
       return false;
     }
   };
@@ -327,7 +334,7 @@ const Profile = () => {
     const timeoutId = setTimeout(() => {
       if (loading) {
         console.error("Auth state check timed out");
-        setError("Failed to load profile: Authentication timeout. Please try logging in again.");
+        setError("Gagal memuat profil: Waktu autentikasi habis. Silakan login kembali.");
         setLoading(false);
         navigate('/');
       }
@@ -338,8 +345,8 @@ const Profile = () => {
         const currentUser = getAuth().currentUser;
         if (currentUser) {
           setUser(currentUser);
-          setDisplayName(sanitizeInput(currentUser.displayName || ""));
-          setEmail(sanitizeInput(currentUser.email || ""));
+          setDisplayName(sanitizeInput(currentUser.displayName || "", 50));
+          setEmail(sanitizeInput(currentUser.email || "", 50));
           setProfileImageURL(currentUser.photoURL || "");
           setIsSocialLogin(getLoginMethod(currentUser) === 'google' || getLoginMethod(currentUser) === 'facebook');
           await checkEditLimit(currentUser.uid);
@@ -347,14 +354,14 @@ const Profile = () => {
           setLoading(false);
           clearTimeout(timeoutId);
         } else {
-          setError("No user logged in. Redirecting to login page.");
+          setError("Tidak ada pengguna yang login. Mengarahkan ke halaman login.");
           setLoading(false);
           navigate('/');
           clearTimeout(timeoutId);
         }
       } catch (error) {
         console.error("Manual auth check failed:", error);
-        setError("Failed to verify authentication: " + error.message);
+        setError("Gagal memverifikasi autentikasi: " + error.message);
         setLoading(false);
         navigate('/');
         clearTimeout(timeoutId);
@@ -365,8 +372,8 @@ const Profile = () => {
       try {
         if (user) {
           setUser(user);
-          setDisplayName(sanitizeInput(user.displayName || ""));
-          setEmail(sanitizeInput(user.email || ""));
+          setDisplayName(sanitizeInput(user.displayName || "", 50));
+          setEmail(sanitizeInput(user.email || "", 50));
           setProfileImageURL(user.photoURL || "");
 
           const loginMethod = getLoginMethod(user);
@@ -379,8 +386,8 @@ const Profile = () => {
             try {
               if (docSnap.exists()) {
                 const userData = docSnap.data();
-                setDisplayName(sanitizeInput(userData.displayName || user.displayName || ""));
-                setEmail(sanitizeInput(userData.email || user.email || ""));
+                setDisplayName(sanitizeInput(userData.displayName || user.displayName || "", 50));
+                setEmail(sanitizeInput(userData.email || user.email || "", 50));
                 setProfileImageURL(userData.photoURL || user.photoURL || "");
                 setPendingEmail(userData.pendingEmail || "");
                 setEmailVerificationSent(!!userData.pendingEmail);
@@ -392,11 +399,11 @@ const Profile = () => {
               }
             } catch (error) {
               console.error("Error in user snapshot listener:", error);
-              setError("Failed to load user data: " + error.message);
+              setError("Gagal memuat data pengguna: " + error.message);
             }
           }, (error) => {
             console.error("Error setting up user snapshot:", error);
-            setError("Failed to set up user listener: " + error.message);
+            setError("Gagal mengatur listener data pengguna: " + error.message);
             checkAdminStatus(user.uid);
           });
 
@@ -415,12 +422,12 @@ const Profile = () => {
               setEditCountLoading(false);
             } catch (error) {
               console.error("Error in profile_edits snapshot:", error);
-              setError("Failed to monitor profile edits: " + error.message);
+              setError("Gagal memantau perubahan profil: " + error.message);
               setEditCountLoading(false);
             }
           }, (error) => {
             console.error("Error setting up profile_edits snapshot:", error);
-            setError("Failed to set up profile edits listener: " + error.message);
+            setError("Gagal mengatur listener perubahan profil: " + error.message);
             setEditCountLoading(false);
           });
 
@@ -445,21 +452,21 @@ const Profile = () => {
             window.removeEventListener('click', handleUserActivity);
           };
         } else {
-          setError("No user logged in. Redirecting to login page.");
+          setError("Tidak ada pengguna yang login. Mengarahkan ke halaman login.");
           setLoading(false);
           navigate('/');
           clearTimeout(timeoutId);
         }
       } catch (error) {
         console.error("Error in auth state listener:", error);
-        setError("Failed to authenticate: " + error.message);
+        setError("Gagal autentikasi: " + error.message);
         setLoading(false);
         navigate('/');
         clearTimeout(timeoutId);
       }
     }, (error) => {
       console.error("Error setting up auth listener:", error);
-      setError("Failed to set up auth listener: " + error.message);
+      setError("Gagal mengatur listener autentikasi: " + error.message);
       setLoading(false);
       navigate('/');
       clearTimeout(timeoutId);
@@ -494,7 +501,7 @@ const Profile = () => {
 
     const now = Date.now();
     if (lastUploadTime && now - lastUploadTime < 30 * 1000) {
-      setError("Please wait 30 seconds before uploading another image.");
+      setError("Harap tunggu 30 detik sebelum mengunggah gambar lain.");
       return;
     }
 
@@ -526,8 +533,8 @@ const Profile = () => {
         await setDoc(
           doc(db, "users", user.uid),
           {
-            displayName: sanitizeInput(displayName || user.displayName || ""),
-            email: sanitizeInput(user.email),
+            displayName: sanitizeInput(displayName || user.displayName || "", 50),
+            email: sanitizeInput(user.email, 50),
             photoURL: publicUrl,
             role: userRole,
             updatedAt: new Date().toISOString(),
@@ -538,16 +545,16 @@ const Profile = () => {
         const logged = await logProfileEdit(user.uid, "photoURL");
         if (logged) {
           setProfileImageURL(publicUrl);
-          setSuccess("Profile image updated successfully!");
+          setSuccess("Gambar profil berhasil diperbarui!");
           setLastUploadTime(now);
-          toast.success("Profile image updated successfully!", {
+          toast.success("Gambar profil berhasil diperbarui!", {
             position: "top-center",
             autoClose: 5000,
           });
         }
       } catch (error) {
         console.error("Error uploading image:", error);
-        setError("Error uploading image: " + error.message);
+        setError("Gagal mengunggah gambar: " + error.message);
       } finally {
         setUploading(false);
       }
@@ -563,11 +570,31 @@ const Profile = () => {
       return;
     }
 
-    const sanitizedDisplayName = sanitizeInput(displayName);
-    const sanitizedEmail = sanitizeInput(email);
+    const sanitizedDisplayName = sanitizeInput(displayName, 50);
+    const sanitizedEmail = sanitizeInput(email, 50);
+    const sanitizedNewPassword = sanitizeInput(newPassword, 20);
+    const sanitizedConfirmPassword = sanitizeInput(confirmPassword, 20);
+
+    // Validate input lengths
+    if (sanitizedDisplayName.length > 50) {
+      setError("Nama tampilan tidak boleh melebihi 50 karakter.");
+      return;
+    }
+    if (sanitizedEmail.length > 50) {
+      setError("Email tidak boleh melebihi 50 karakter.");
+      return;
+    }
+    if (sanitizedNewPassword && sanitizedNewPassword.length > 20) {
+      setError("Kata sandi baru tidak boleh melebihi 20 karakter.");
+      return;
+    }
+    if (sanitizedConfirmPassword && sanitizedConfirmPassword.length > 20) {
+      setError("Konfirmasi kata sandi tidak boleh melebihi 20 karakter.");
+      return;
+    }
 
     if (!sanitizedDisplayName.trim()) {
-      setError("Display name is required.");
+      setError("Nama tampilan wajib diisi.");
       return;
     }
 
@@ -580,7 +607,7 @@ const Profile = () => {
         if (!isUnique) {
           const suggestions = generateNameSuggestions(sanitizedDisplayName);
           setNameSuggestions(suggestions);
-          setError(`Display name "${sanitizedDisplayName}" is already taken. Try one of these: ${suggestions.join(', ')}`);
+          setError(`Nama tampilan "${sanitizedDisplayName}" sudah digunakan. Coba salah satu dari: ${suggestions.join(', ')}`);
           return;
         }
       }
@@ -594,8 +621,8 @@ const Profile = () => {
       if (sanitizedEmail !== originalEmail) {
         if (!currentPassword) {
           setError(isSocialLogin
-            ? "Current password is required to change email. If you signed in with Google/Facebook, please use the password from that account or set up a new password first."
-            : "Current password is required to change email.");
+            ? "Kata sandi saat ini diperlukan untuk mengubah email. Jika Anda login dengan Google/Facebook, gunakan kata sandi dari akun tersebut atau atur kata sandi baru terlebih dahulu."
+            : "Kata sandi saat ini diperlukan untuk mengubah email.");
           return;
         }
 
@@ -617,8 +644,8 @@ const Profile = () => {
         }, { merge: true });
 
         setEmailVerificationSent(true);
-        setSuccess("A verification email has been sent to your new email address. Please verify it to complete the email change.");
-        toast.success("A verification email has been sent to your new email address.", {
+        setSuccess("Email verifikasi telah dikirim ke alamat email baru Anda. Silakan verifikasi untuk menyelesaikan perubahan email.");
+        toast.success("Email verifikasi telah dikirim ke alamat email baru Anda.", {
           position: "top-center",
           autoClose: 5000,
         });
@@ -632,21 +659,21 @@ const Profile = () => {
         }, { merge: true });
       }
 
-      if (newPassword) {
+      if (sanitizedNewPassword) {
         if (!currentPassword) {
           setError(isSocialLogin
-            ? "Current password is required to change password. If you signed in with Google/Facebook, please enter the password from that account."
-            : "Current password is required to change password.");
+            ? "Kata sandi saat ini diperlukan untuk mengubah kata sandi. Jika Anda login dengan Google/Facebook, masukkan kata sandi dari akun tersebut."
+            : "Kata sandi saat ini diperlukan untuk mengubah kata sandi.");
           return;
         }
 
-        if (newPassword !== confirmPassword) {
-          setError("New passwords do not match.");
+        if (sanitizedNewPassword !== sanitizedConfirmPassword) {
+          setError("Kata sandi baru tidak cocok.");
           return;
         }
 
-        if (newPassword.length < 6) {
-          setError("New password must be at least 6 characters long.");
+        if (sanitizedNewPassword.length < 6) {
+          setError("Kata sandi baru harus minimal 6 karakter.");
           return;
         }
 
@@ -655,11 +682,11 @@ const Profile = () => {
 
         const logged = await logProfileEdit(user.uid, "password");
         if (!logged) return;
-        await updatePassword(user, newPassword);
+        await updatePassword(user, sanitizedNewPassword);
       }
 
-      setSuccess("Profile updated successfully!");
-      toast.success("Profile updated successfully!", {
+      setSuccess("Profil berhasil diperbarui!");
+      toast.success("Profil berhasil diperbarui!", {
         position: "top-center",
         autoClose: 5000,
       });
@@ -670,14 +697,14 @@ const Profile = () => {
     } catch (error) {
       if (error.code === 'auth/wrong-password') {
         setError(isSocialLogin
-          ? "Current password is incorrect. Please use the password from your Google/Facebook account or set up a new password first."
-          : "Current password is incorrect.");
+          ? "Kata sandi saat ini salah. Silakan gunakan kata sandi dari akun Google/Facebook Anda atau atur kata sandi baru terlebih dahulu."
+          : "Kata sandi saat ini salah.");
       } else if (error.code === 'auth/email-already-in-use') {
-        setError("This email is already in use by another account.");
+        setError("Email ini sudah digunakan oleh akun lain.");
       } else if (error.code === 'auth/invalid-email') {
-        setError("Invalid email address.");
+        setError("Alamat email tidak valid.");
       } else {
-        setError("Error updating profile: " + error.message);
+        setError("Gagal memperbarui profil: " + error.message);
       }
       toast.error(error.message, {
         position: "top-center",
@@ -688,8 +715,8 @@ const Profile = () => {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
-    setDisplayName(sanitizeInput(user?.displayName || ""));
-    setEmail(sanitizeInput(user?.email || ""));
+    setDisplayName(sanitizeInput(user?.displayName || "", 50));
+    setEmail(sanitizeInput(user?.email || "", 50));
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
@@ -700,11 +727,11 @@ const Profile = () => {
 
   const handleDeleteAccount = async () => {
     if (!user) {
-      setError("User is not logged in.");
+      setError("Pengguna tidak login.");
       return;
     }
 
-    const confirmed = window.confirm("This will delete your account and all associated data permanently. Are you sure?");
+    const confirmed = window.confirm("Ini akan menghapus akun Anda dan semua data terkait secara permanen. Apakah Anda yakin?");
     if (!confirmed) return;
 
     setDeleting(true);
@@ -721,15 +748,15 @@ const Profile = () => {
         timestamp: new Date()
       });
 
-      toast.success("Account successfully deleted.", {
+      toast.success("Akun berhasil dihapus.", {
         position: "top-center",
         autoClose: 5000,
       });
       navigate("/");
     } catch (error) {
       console.error("Error deleting account:", error);
-      setError("Failed to delete account: " + error.message);
-      toast.error("Failed to delete account: " + error.message, {
+      setError("Gagal menghapus akun: " + error.message);
+      toast.error("Gagal menghapus akun: " + error.message, {
         position: "top-center",
         autoClose: 5000,
       });
@@ -749,7 +776,7 @@ const Profile = () => {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <div className="text-xl text-white/80">Loading your profile...</div>
+          <div className="text-xl text-white/80">Memuat profil Anda...</div>
         </div>
       </div>
     );
@@ -772,13 +799,13 @@ const Profile = () => {
             className="group flex items-center text-white/70 hover:text-white transition-all duration-300 bg-white/5 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10 hover:border-white/20"
           >
             <FaArrowLeft className="mr-2 group-hover:-translate-x-1 transition-transform duration-300" />
-            Back to Home
+            Kembali ke Beranda
           </button>
           <div className="text-right">
             <h1 className="text-4xl font-bold bg-gradient-to-r from-white to-purple-200 bg-clip-text text-transparent">
-              Profile Settings
+              Pengaturan Profil
             </h1>
-            <p className="text-white/60 mt-1">Manage your account preferences</p>
+            <p className="text-white/60 mt-1">Kelola preferensi akun Anda</p>
           </div>
         </div>
 
@@ -786,7 +813,7 @@ const Profile = () => {
           <div className="bg-red-500/20 backdrop-blur-sm border border-red-500/30 text-red-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-center">
               <FaExclamationTriangle className="mr-3 text-red-400" />
-              You have reached the daily limit of 5 profile edits. Please try again tomorrow.
+              Anda telah mencapai batas 5 kali pengeditan profil harian. Silakan coba lagi besok.
             </div>
           </div>
         )}
@@ -797,7 +824,7 @@ const Profile = () => {
               {error}
               {nameSuggestions.length > 0 && (
                 <div className="mt-2">
-                  <p className="text-sm text-red-200/80">Suggested names:</p>
+                  <p className="text-sm text-red-200/80">Nama yang disarankan:</p>
                   <div className="flex flex-wrap gap-2 mt-1">
                     {nameSuggestions.map((suggestion, index) => (
                       <button
@@ -826,7 +853,7 @@ const Profile = () => {
           <div className="bg-yellow-500/20 backdrop-blur-sm border border-yellow-500/30 text-yellow-200 px-6 py-4 rounded-2xl mb-6 animate-in slide-in-from-top duration-500">
             <div className="flex items-center">
               <div className="w-2 h-2 bg-yellow-400 rounded-full mr-3"></div>
-              Verification email sent to {pendingEmail}. Please verify to complete the email change.
+              Email verifikasi dikirim ke {pendingEmail}. Silakan verifikasi untuk menyelesaikan perubahan email.
             </div>
           </div>
         )}
@@ -836,8 +863,8 @@ const Profile = () => {
             <div className="flex items-center space-x-3">
               <FaShieldAlt className="text-amber-400 text-xl" />
               <div>
-                <div className="font-bold text-lg">Administrator Account</div>
-                <div className="text-amber-200/80 text-sm">You have administrative privileges on this platform</div>
+                <div className="font-bold text-lg">Akun Administrator</div>
+                <div className="text-amber-200/80 text-sm">Anda memiliki hak istimewa administratif di platform ini</div>
               </div>
             </div>
           </div>
@@ -848,17 +875,19 @@ const Profile = () => {
             <div className="flex items-start space-x-3">
               <FaInfoCircle className="mt-0.5 flex-shrink-0" />
               <div>
-                <div className="font-medium mb-1">Social Login Account Detected</div>
+                <div className="font-medium mb-1">Akun Login Sosial Terdeteksi</div>
                 <div className="text-sm text-blue-200/80">
-                  You signed in using your {getLoginMethodText(loginMethod)}. To change your email or password, 
-                  you'll need to use the password associated with your {loginMethod === 'google' ? 'Google' : 'Facebook'} account. 
-                  If you don't have a password set up, consider creating one through your social media account settings first.
+                  Anda login menggunakan {getLoginMethodText(loginMethod)}. Untuk mengubah email atau kata sandi, 
+                  Anda perlu menggunakan kata sandi yang terkait dengan akun {loginMethod === 'google' ? 'Google' : 'Facebook'} Anda. 
+                  Jika Anda belum memiliki kata sandi, pertimbangkan untuk membuatnya melalui pengaturan akun media sosial Anda terlebih dahulu.
                 </div>
               </div>
             </div>
           </div>
         )}
 
+        {/* Explanatory Comment for Admins */}
+        {/* Penjelasan untuk Admin: Bagian ini menampilkan formulir pengeditan profil pengguna (nama, email, kata sandi, foto profil). Setiap perubahan disimpan di Firestore dan Firebase Authentication. Log perubahan disimpan di koleksi 'profile_edits', dengan hanya log terbaru untuk setiap tipe (displayName, email, password, photoURL) yang dipertahankan, karena log sebelumnya dihapus secara otomatis. Batas panjang input diterapkan: nama (50 karakter), email (50 karakter), kata sandi (20 karakter). Batas 5 pengeditan per hari tetap diberlakukan. */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
@@ -868,7 +897,7 @@ const Profile = () => {
                     {profileImageURL ? (
                       <img
                         src={profileImageURL}
-                        alt="Profile"
+                        alt="Profil"
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                       />
                     ) : (
@@ -898,7 +927,7 @@ const Profile = () => {
                     className="hidden"
                   />
                 </div>
-                <h2 className="text-2xl font-bold text-white mt-4 text-center">{displayName || "User"}</h2>
+                <h2 className="text-2xl font-bold text-white mt-4 text-center">{displayName || "Pengguna"}</h2>
                 <p className="text-white/60 text-sm mt-1">{email}</p>
                 {isAdmin && (
                   <div className="flex items-center space-x-2 mt-2 px-3 py-1 bg-gradient-to-r from-amber-500/20 to-orange-500/20 rounded-full border border-amber-500/30">
@@ -910,49 +939,48 @@ const Profile = () => {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Login Method</span>
+                  <span className="text-white/60">Metode Login</span>
                   <div className="flex items-center space-x-2">
                     {getLoginMethodIcon(loginMethod)}
                     <span className="text-white font-medium">{getLoginMethodText(loginMethod)}</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Account Type</span>
+                  <span className="text-white/60">Tipe Akun</span>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     isAdmin 
                       ? 'bg-amber-500/20 text-amber-300' 
                       : 'bg-blue-500/20 text-blue-300'
                   }`}>
-                    {isAdmin ? 'Administrator' : 'Regular User'}
+                    {isAdmin ? 'Administrator' : 'Pengguna Biasa'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Member since</span>
+                  <span className="text-white/60">Anggota sejak</span>
                   <span className="text-white font-medium">
-                    {user?.metadata?.creationTime ? new Date(user.metadata.creationTime).toLocaleDateString() : 'N/A'}
+                    {user?.metadata?.creationTime ? new Date(user.metadata.creationTime).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) : 'N/A'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Email verified</span>
+                  <span className="text-white/60">Email diverifikasi</span>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${user?.emailVerified ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
-                    {user?.emailVerified ? 'Verified' : 'Unverified'}
+                    {user?.emailVerified ? 'Terverifikasi' : 'Belum Terverifikasi'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/60">Last login</span>
+                  <span className="text-white/60">Login terakhir</span>
                   <span className="text-white font-medium">
-                    {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString() : 'N/A'}
+                    {user?.metadata?.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) : 'N/A'}
                   </span>
                 </div>
 
-                
                 <div className="pt-4 border-t border-white/10 space-y-3">
                   {isAdmin && (
                     <button
                       onClick={() => navigate('/admin')}
                       className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700"
                     >
-                      <span className="font-medium">Admin Dashboard</span>
+                      <span className="font-medium">Dashboard Admin</span>
                       <div className="flex items-center space-x-2">
                         <FaShieldAlt className="text-lg group-hover:animate-bounce" />
                         <FaChartBar className="text-lg group-hover:animate-pulse" />
@@ -964,7 +992,7 @@ const Profile = () => {
                     onClick={() => navigate('/liked')}
                     className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700"
                   >
-                    <span className="font-medium">Go to Liked News</span>
+                    <span className="font-medium">Ke Berita yang Disukai</span>
                     <FaHeart className="text-lg group-hover:animate-bounce" />
                   </button>
                   
@@ -972,7 +1000,7 @@ const Profile = () => {
                     onClick={() => navigate('/saved')}
                     className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-100"
                   >
-                    <span className="font-medium">Go to Saved News</span>
+                    <span className="font-medium">Ke Berita yang Disimpan</span>
                     <FaBookmark className="text-lg group-hover:animate-bounce" />
                   </button>
                 </div>
@@ -985,7 +1013,7 @@ const Profile = () => {
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-2xl font-bold text-white flex items-center">
                   <FaUser className="mr-3 text-purple-400" />
-                  Account Information
+                  Informasi Akun
                 </h3>
                 {!isEditing ? (
                   <button
@@ -994,7 +1022,7 @@ const Profile = () => {
                     disabled={editLimitReached}
                   >
                     <FaEdit className="mr-2 group-hover:animate-bounce" />
-                    Edit Profile
+                    Edit Profil
                   </button>
                 ) : (
                   <div className="flex space-x-3">
@@ -1004,14 +1032,14 @@ const Profile = () => {
                       disabled={editLimitReached}
                     >
                       <FaSave className="mr-2 group-hover:animate-bounce" />
-                      Save Changes
+                      Simpan Perubahan
                     </button>
                     <button
                       onClick={handleCancelEdit}
                       className="group flex items-center px-4 py-2 bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-xl hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-xl"
                     >
                       <FaTimes className="mr-2 group-hover:animate-bounce" />
-                      Cancel
+                      Batal
                     </button>
                   </div>
                 )}
@@ -1021,15 +1049,16 @@ const Profile = () => {
                 <div className="space-y-2">
                   <label className="block text-white/80 font-medium">
                     <FaUser className="inline mr-2 text-purple-400" />
-                    Display Name
+                    Nama Tampilan (Maks. 50 karakter)
                   </label>
                   <input
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
+                    maxLength={50}
                     disabled={!isEditing || editLimitReached}
                     className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    placeholder="Enter your display name"
+                    placeholder="Masukkan nama tampilan Anda"
                     required
                   />
                 </div>
@@ -1037,15 +1066,16 @@ const Profile = () => {
                 <div className="space-y-2">
                   <label className="block text-white/80 font-medium">
                     <FaEnvelope className="inline mr-2 text-purple-400" />
-                    Email Address
+                    Alamat Email (Maks. 50 karakter)
                   </label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    maxLength={50}
                     disabled={!isEditing || editLimitReached}
                     className="w-full px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    placeholder="Enter your email address"
+                    placeholder="Masukkan alamat email Anda"
                     required
                   />
                 </div>
@@ -1054,24 +1084,24 @@ const Profile = () => {
                   <div className="space-y-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10">
                     <h4 className="text-lg font-semibold text-white flex items-center">
                       <FaKey className="mr-2 text-purple-400" />
-                      Password Settings
+                      Pengaturan Kata Sandi
                     </h4>
                     <p className="text-white/60 text-sm">
                       {isSocialLogin
-                        ? "Use your Google/Facebook account password to authenticate changes."
-                        : "Leave password fields empty if you don't want to change your password."
+                        ? "Gunakan kata sandi akun Google/Facebook Anda untuk mengautentikasi perubahan."
+                        : "Biarkan kolom kata sandi kosong jika Anda tidak ingin mengubah kata sandi."
                       }
                     </p>
 
                     <div className="space-y-2">
-                      <label className="block text-white/80 font-medium">Current Password</label>
+                      <label className="block text-white/80 font-medium">Kata Sandi Saat Ini</label>
                       <div className="relative">
                         <input
                           type={showCurrentPassword ? "text" : "password"}
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
-                          placeholder="Enter current password"
+                          className="w-full px-4 py-3 pr-12 bg-white/10Backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
+                          placeholder="Masukkan kata sandi saat ini"
                           disabled={editLimitReached}
                         />
                         <button
@@ -1086,14 +1116,15 @@ const Profile = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-white/80 font-medium">New Password</label>
+                      <label className="block text-white/80 font-medium">Kata Sandi Baru (Maks. 20 karakter)</label>
                       <div className="relative">
                         <input
                           type={showNewPassword ? "text" : "password"}
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
+                          maxLength={20}
                           className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
-                          placeholder="Enter new password (min 6 characters)"
+                          placeholder="Masukkan kata sandi baru (min 6 karakter)"
                           minLength="6"
                           disabled={editLimitReached}
                         />
@@ -1109,14 +1140,15 @@ const Profile = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-white/80 font-medium">Confirm New Password</label>
+                      <label className="block text-white/80 font-medium">Konfirmasi Kata Sandi Baru (Maks. 20 karakter)</label>
                       <div className="relative">
                         <input
                           type={showConfirmPassword ? "text" : "password"}
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
+                          maxLength={20}
                           className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
-                          placeholder="Confirm new password"
+                          placeholder="Konfirmasi kata sandi baru"
                           minLength="6"
                           disabled={editLimitReached}
                         />
@@ -1138,7 +1170,7 @@ const Profile = () => {
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
               <h3 className="text-2xl font-bold text-white mb-6 flex items-center">
                 <FaCog className="mr-3 text-purple-400" />
-                Account Actions
+                Aksi Akun
               </h3>
 
               <div className="space-y-4">
@@ -1148,8 +1180,8 @@ const Profile = () => {
                       .then(() => navigate('/'))
                       .catch((error) => {
                         console.error("Error signing out:", error);
-                        setError("Failed to sign out: " + error.message);
-                        toast.error("Failed to sign out: " + error.message, {
+                        setError("Gagal keluar: " + error.message);
+                        toast.error("Gagal keluar: " + error.message, {
                           position: "top-center",
                           autoClose: 5000,
                         });
@@ -1159,9 +1191,9 @@ const Profile = () => {
                 >
                   <div className="flex items-center">
                     <FaSignOutAlt className="mr-3 text-lg group-hover:animate-bounce" />
-                    <span className="font-medium">Sign Out</span>
+                    <span className="font-medium">Keluar</span>
                   </div>
-                  <div className="text-sm opacity-75">Log out of your account</div>
+                  <div className="text-sm opacity-75">Keluar dari akun Anda</div>
                 </button>
 
                 <button
@@ -1176,12 +1208,12 @@ const Profile = () => {
                       <FaTrash className="mr-3 text-lg group-hover:animate-bounce" />
                     )}
                     <span className="font-medium">
-                      {deleting ? "Deleting Account..." : "Delete Account"}
+                      {deleting ? "Menghapus Akun..." : "Hapus Akun"}
                     </span>
                   </div>
                   <div className="flex items-center">
                     <FaExclamationTriangle className="mr-2 text-yellow-400" />
-                    <div className="text-sm opacity-75">Permanent action</div>
+                    <div className="text-sm opacity-75">Aksi permanen</div>
                   </div>
                 </button>
               </div>
@@ -1190,10 +1222,10 @@ const Profile = () => {
                 <div className="flex items-start space-x-3">
                   <FaExclamationTriangle className="text-red-400 mt-1 flex-shrink-0" />
                   <div>
-                    <div className="font-medium text-red-200 mb-1">Warning</div>
+                    <div className="font-medium text-red-200 mb-1">Peringatan</div>
                     <div className="text-sm text-red-200/80">
-                      Deleting your account will permanently remove all your data, including liked and saved news, 
-                      profile information, and activity history. This action cannot be undone.
+                      Menghapus akun Anda akan menghapus semua data Anda secara permanen, termasuk berita yang disukai dan disimpan, 
+                      informasi profil, dan riwayat aktivitas. Tindakan ini tidak dapat dibatalkan.
                     </div>
                   </div>
                 </div>

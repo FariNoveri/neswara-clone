@@ -75,6 +75,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
   const [timeRange, setTimeRange] = useState(() => {
     return localStorage.getItem('trendsChartTimeRange') || '7days';
   });
+  const [showDecimal, setShowDecimal] = useState(false); // New state for toggling decimal display
   const [, forceUpdate] = useState();
 
   const forceRender = useCallback(() => {
@@ -648,6 +649,19 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
                 </motion.button>
               ))}
             </div>
+            {/* Toggle for Decimal Display */}
+            <motion.button
+              onClick={() => setShowDecimal(!showDecimal)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 transform hover:scale-105 ${
+                showDecimal
+                  ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-lg'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {showDecimal ? 'Tampilkan Bulat' : 'Tampilkan Desimal'}
+            </motion.button>
           </div>
         </div>
 
@@ -700,7 +714,7 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             >
               {metrics.slice(1).map((metric) => {
                 const total = chartData.reduce((sum, day) => sum + day[metric.key], 0);
-                const avg = Math.round(total / chartData.length);
+                const avg = showDecimal ? (total / chartData.length).toFixed(2) : Math.round(total / chartData.length);
                 return (
                   <motion.div
                     key={metric.key}
@@ -729,6 +743,30 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Explanatory Text for Admins */}
+        {!isLoading && chartData.length > 0 && (
+          <motion.div
+            className="mt-8 bg-gray-50 rounded-xl p-6 border border-gray-200"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <h4 className="text-lg font-semibold text-gray-800 mb-4">Penjelasan Perhitungan Rata-Rata</h4>
+            <p className="text-sm text-gray-600 mb-4">
+              <strong>Cara Menghitung Rata-Rata:</strong> Rata-rata dihitung dengan menjumlahkan total nilai untuk setiap metrik (misalnya, jumlah berita, komentar, tayangan, pengguna, atau laporan) selama periode waktu yang dipilih (7 hari, 30 hari, atau 1 tahun), lalu dibagi dengan jumlah hari dalam periode tersebut. Misalnya, jika total berita dalam 7 hari adalah 28, maka rata-rata per hari adalah 28 ÷ 7 = 4.
+            </p>
+            <p className="text-sm text-gray-600 mb-4">
+              <strong>Mengapa Dibulatkan:</strong> Secara default, rata-rata dibulatkan ke bilangan bulat (misalnya, 4.29 menjadi 4) untuk memudahkan pembacaan dan karena metrik seperti berita atau komentar biasanya berupa jumlah bulat. Pembulatan membuat angka lebih sederhana dan relevan untuk konteks data yang mewakili item diskrit (tidak ada "0.29 berita").
+            </p>
+            <p className="text-sm text-gray-600 mb-4">
+              <strong>Menampilkan Desimal:</strong> Jika Anda memerlukan presisi lebih, klik tombol "Tampilkan Desimal" di atas untuk menampilkan rata-rata dengan dua angka desimal (misalnya, 4.29). Ini berguna untuk analisis mendalam, terutama untuk metrik seperti tayangan yang mungkin memiliki nilai rata-rata yang lebih bervariasi.
+            </p>
+            <p className="text-sm text-gray-500 italic">
+              Catatan: Gunakan mode desimal dengan hati-hati, karena angka desimal mungkin kurang intuitif untuk beberapa metrik. Pastikan untuk memilih format yang paling sesuai dengan kebutuhan analisis Anda.
+            </p>
+          </motion.div>
+        )}
       </div>
     </div>
   );

@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, doc, updateDoc, deleteDoc, getDoc, setDoc, addDoc } from 'firebase/firestore';
 import { useAuth } from '../auth/useAuth';
-import { Edit3, Trash2, RefreshCw, CheckCircle, X } from 'lucide-react';
+import { Edit3, Trash2, RefreshCw, CheckCircle, X, History } from 'lucide-react';
 
-const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) => {
+// Komponen Popup untuk menampilkan pesan (sukses, error, konfirmasi, dll.)
+const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm, isAnimating }) => {
   if (!isOpen) return null;
+
+  const handleClose = (e) => {
+    e.stopPropagation();
+    onClose();
+  };
 
   const getButtonColor = () => {
     switch (type) {
@@ -28,45 +34,61 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-      <div className="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl transform animate-scaleIn" onClick={e => e.stopPropagation()}>
-        <div className="text-center">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${getIconColor()}`}>
-            {type === 'success' && <CheckCircle className="w-6 h-6" />}
-            {type === 'error' && <X className="w-6 h-6" />}
-            {type === 'warning' && <span>⚠</span>}
-            {type === 'confirm' && <span>?</span>}
-            {type === 'info' && <span>ℹ</span>}
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
-          <p className="text-gray-600 mb-6">{message}</p>
-          <div className="flex justify-center space-x-4">
-            {type === 'confirm' ? (
-              <>
-                <button
-                  onClick={onClose}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-all duration-200 font-medium hover:scale-105 transform"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={() => {
-                    onConfirm();
-                    onClose();
-                  }}
-                  className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
-                >
-                  Konfirmasi
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={onClose}
-                className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
-              >
-                OK
-              </button>
-            )}
+    <div 
+      className={`fixed inset-0 z-999999999999 overflow-y-auto transition-all duration-300 ${
+        isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'
+      }`}
+      onClick={handleClose} 
+      role="dialog" 
+      aria-labelledby="popup-title"
+    >
+      <div 
+        className={`relative w-full max-w-sm mx-auto my-8 transform transition-all duration-300 ${
+          isAnimating ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+          <div className="p-6">
+            <div className="text-center">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${getIconColor()}`}>
+                {type === 'success' && <CheckCircle className="w-6 h-6" />}
+                {type === 'error' && <X className="w-6 h-6" />}
+                {type === 'warning' && <span>⚠</span>}
+                {type === 'confirm' && <span>?</span>}
+                {type === 'info' && <span>ℹ</span>}
+              </div>
+              <h3 id="popup-title" className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+              <p className="text-gray-600 mb-6">{message}</p>
+              <div className="flex justify-center space-x-4">
+                {type === 'confirm' ? (
+                  <>
+                    <button
+                      onClick={handleClose}
+                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-all duration-200 font-medium hover:scale-105 transform"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={() => {
+                        onConfirm();
+                        handleClose();
+                      }}
+                      className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
+                    >
+                      Konfirmasi
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleClose}
+                    className={`px-6 py-3 text-white rounded-xl transition-all duration-200 font-medium hover:scale-105 transform shadow-lg ${getButtonColor()}`}
+                  >
+                    OK
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -74,6 +96,121 @@ const Popup = ({ isOpen, onClose, title, message, type = 'info', onConfirm }) =>
   );
 };
 
+// Komponen EditHistoryPopup yang menyerupai NewsModal
+const EditHistoryPopup = ({ isOpen, onClose, userId, profileEdits, isAnimating }) => {
+  if (!isOpen) return null;
+
+  const handleClose = (e) => {
+    e.stopPropagation();
+    console.log('Closing EditHistoryPopup, userId:', userId);
+    onClose();
+  };
+
+  const handleModalClick = (e) => {
+    e.stopPropagation();
+    console.log('Click inside EditHistoryPopup, preventing propagation');
+  };
+
+  const getEditDescription = (edit) => {
+    switch (edit.type) {
+      case 'displayName':
+        return edit.beforeName && edit.newName
+          ? `Nama diubah dari "${edit.beforeName}" ke "${edit.newName}"`
+          : 'Nama diubah';
+      case 'email':
+        return 'Email diubah';
+      case 'password':
+        return 'Password diubah';
+      case 'photoURL':
+        return 'Foto profil diubah';
+      default:
+        return edit.type.charAt(0).toUpperCase() + edit.type.slice(1);
+    }
+  };
+
+  const userEdits = profileEdits[userId] || [];
+
+  return (
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center transition-all duration-300 ${
+        isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'
+      }`}
+      onClick={handleClose}
+      role="dialog"
+      aria-labelledby="edit-history-title"
+    >
+      <div
+        className={`relative w-full max-w-4xl bg-white rounded-2xl p-8 shadow-2xl border border-gray-100 transform transition-all duration-300 ${
+          isAnimating ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'
+        }`}
+        onClick={handleModalClick}
+      >
+        <div className="flex justify-between items-center mb-6">
+          <h3 id="edit-history-title" className="text-xl font-bold text-gray-900 flex items-center">
+            <History className="w-6 h-6 mr-2 text-indigo-600" />
+            Riwayat Edit Pengguna
+          </h3>
+          <button
+            onClick={handleClose}
+            className="text-gray-500 hover:text-gray-700 transition-all duration-200"
+            aria-label="Tutup popup riwayat edit"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          {userEdits.length > 0 ? (
+            <table className="min-w-full divide-y divide-gray-200 edit-history-table">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis Edit</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Detail</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {userEdits
+                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                  .map((edit, idx) => {
+                    let formattedDate = 'N/A';
+                    if (edit.timestamp) {
+                      if (typeof edit.timestamp.toDate === 'function') {
+                        formattedDate = new Date(edit.timestamp.toDate()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                      } else if (typeof edit.timestamp === 'string') {
+                        formattedDate = new Date(edit.timestamp).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                      } else if (edit.timestamp instanceof Date) {
+                        formattedDate = edit.timestamp.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+                      }
+                    }
+                    return (
+                      <tr key={idx} className="hover:bg-gray-50 transition-all duration-200">
+                        <td className="px-4 py-3 text-sm text-gray-900">{edit.type.charAt(0).toUpperCase() + edit.type.slice(1)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{formattedDate}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{getEditDescription(edit)}</td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-gray-600 text-center py-4">Tidak ada riwayat edit untuk pengguna ini.</p>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={handleClose}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+            aria-label="Tutup popup"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Komponen utama UserManagement
 const UserManagement = ({ adminEmails }) => {
   const [users, setUsers] = useState([]);
   const [authUsers, setAuthUsers] = useState([]);
@@ -100,16 +237,73 @@ const UserManagement = ({ adminEmails }) => {
   });
   const [editUserId, setEditUserId] = useState(null);
   const [editForm, setEditForm] = useState({ email: '', displayName: '' });
+  const [editHistoryPopup, setEditHistoryPopup] = useState({
+    isOpen: false,
+    userId: null,
+  });
+  const [isAnimating, setIsAnimating] = useState(false);
 
-  const showPopup = (title, message, type = 'info', onConfirm = null) => {
+  // Fungsi untuk menampilkan popup
+  const showPopup = useCallback((title, message, type = 'info', onConfirm = null) => {
+    console.log('Opening Popup:', title);
     setPopup({ isOpen: true, title, message, type, onConfirm });
-  };
+    setIsAnimating(true);
+    // Fungsi setIsMobileMenuOpen dihapus karena menyebabkan error dan tidak berguna tanpa prop
+  }, []);
 
-  const closePopup = () => {
-    setPopup(prev => ({ ...prev, isOpen: false }));
-  };
+  // Fungsi untuk menutup popup
+  const closePopup = useCallback(() => {
+    console.log('Closing Popup');
+    setIsAnimating(false);
+    setTimeout(() => {
+      setPopup(prev => ({ ...prev, isOpen: false }));
+    }, 200);
+  }, []);
 
-  const fetchAuthUsers = async () => {
+  // Fungsi untuk menampilkan popup riwayat edit
+  const showEditHistoryPopup = useCallback((userId) => {
+    console.log('Opening EditHistoryPopup for userId:', userId);
+    setEditHistoryPopup({ isOpen: true, userId });
+    setIsAnimating(true);
+    // Fungsi setIsMobileMenuOpen dihapus karena menyebabkan error dan tidak berguna tanpa prop
+  }, []);
+
+  // Fungsi untuk menutup popup riwayat edit
+  const closeEditHistoryPopup = useCallback(() => {
+    console.log('Closing EditHistoryPopup');
+    setIsAnimating(false);
+    setTimeout(() => {
+      setEditHistoryPopup({ isOpen: false, userId: null });
+    }, 200);
+  }, []);
+
+  // Mencatat riwayat edit ke Firestore
+  const logProfileEdit = useCallback(async (userId, type, beforeName = null, newName = null) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const logData = {
+        userId,
+        type,
+        date: today,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (type === 'displayName' && beforeName && newName) {
+        logData.beforeName = beforeName;
+        logData.newName = newName;
+      }
+
+      await addDoc(collection(db, 'profile_edits'), logData);
+      return true;
+    } catch (error) {
+      console.error('Error logging profile edit:', error);
+      showPopup('Error', 'Gagal mencatat perubahan: ' + error.message, 'error');
+      return false;
+    }
+  }, [showPopup]);
+
+  // Mengambil daftar pengguna dari Firebase Authentication
+  const fetchAuthUsers = useCallback(async () => {
     if (!currentUser) return;
     try {
       const idToken = await currentUser.getIdToken();
@@ -123,39 +317,52 @@ const UserManagement = ({ adminEmails }) => {
       setAuthUsers(data.users || []);
     } catch (error) {
       console.error('Error fetching auth users:', error);
+      showPopup('Error', 'Gagal memuat pengguna dari Authentication: ' + error.message, 'error');
     }
-  };
+  }, [currentUser, showPopup]);
 
-  const fetchProfileEdits = async () => {
+  // Mengambil riwayat edit dari Firestore
+  const fetchProfileEdits = useCallback(async () => {
     if (!isAdmin) {
       setProfileEdits({});
       return () => {};
     }
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const editsQuery = query(
-        collection(db, 'profile_edits'),
-        where('date', '==', today)
-      );
-      const unsubscribe = onSnapshot(editsQuery, (snapshot) => {
-        const editsData = {};
-        snapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (!editsData[data.userId]) {
-            editsData[data.userId] = [];
+      const editsQuery = query(collection(db, 'profile_edits'));
+      const unsubscribe = onSnapshot(
+        editsQuery,
+        (snapshot) => {
+          const editsData = {};
+          snapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            if (!editsData[data.userId]) {
+              editsData[data.userId] = {};
+            }
+            const currentEdit = editsData[data.userId][data.type];
+            const hasNewerTimestamp =
+              data.timestamp &&
+              (!currentEdit?.timestamp ||
+               new Date(data.timestamp) > new Date(currentEdit.timestamp));
+            if (!currentEdit || hasNewerTimestamp) {
+              editsData[data.userId][data.type] = { ...data, id: doc.id };
+            }
+          });
+          const formattedEdits = {};
+          Object.keys(editsData).forEach((userId) => {
+            formattedEdits[userId] = Object.values(editsData[userId]);
+          });
+          setProfileEdits(formattedEdits);
+        },
+        (error) => {
+          console.error('Error in profile edits snapshot listener:', error);
+          if (error.code === 'permission-denied') {
+            showPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk mengakses riwayat edit.', 'error');
+          } else {
+            showPopup('Error', 'Gagal memuat riwayat edit: ' + error.message, 'error');
           }
-          editsData[data.userId].push({ ...data, id: doc.id });
-        });
-        setProfileEdits(editsData);
-      }, (error) => {
-        console.error('Error in profile edits snapshot listener:', error);
-        if (error.code === 'permission-denied') {
-          showPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk mengakses riwayat edit.', 'error');
-        } else {
-          showPopup('Error', 'Gagal memuat riwayat edit: ' + error.message, 'error');
+          setProfileEdits({});
         }
-        setProfileEdits({});
-      });
+      );
       return () => unsubscribe();
     } catch (error) {
       console.error('Error setting up profile edits listener:', error);
@@ -163,9 +370,10 @@ const UserManagement = ({ adminEmails }) => {
       setProfileEdits({});
       return () => {};
     }
-  };
+  }, [isAdmin, showPopup]);
 
-  const combineUsers = () => {
+  // Menggabungkan data pengguna dari Firestore dan Authentication
+  const combineUsers = useCallback(() => {
     const firestoreUserMap = new Map();
     const authUserMap = new Map();
 
@@ -201,8 +409,7 @@ const UserManagement = ({ adminEmails }) => {
         displayName: firestoreUser?.displayName || authUser?.displayName || 'N/A',
         isAdmin: firestoreUser?.isAdmin || false,
         emailVerified: firestoreUser?.emailVerified !== undefined ? firestoreUser.emailVerified : authUser?.emailVerified,
-        updatedAt: firestoreUser?.updatedAt || (authUser?.metadata?.creationTime ? new Date(authUser.metadata.creationTime).toISOString().split('T')[0] : null),
-        createdAt: authUser?.metadata?.creationTime || null,
+        createdAt: authUser?.metadata?.creationTime || firestoreUser?.createdAt || null,
         lastSignInTime: authUser?.metadata?.lastSignInTime || null,
         source: {
           inFirestore: !!firestoreUser,
@@ -214,8 +421,9 @@ const UserManagement = ({ adminEmails }) => {
     }).filter(user => user !== null);
 
     setCombinedUsers(combined);
-  };
+  }, [users, authUsers]);
 
+  // Memeriksa status admin pengguna saat ini
   useEffect(() => {
     setCurrentUserEmail(currentUser?.email || '');
     if (currentUser?.uid) {
@@ -256,6 +464,7 @@ const UserManagement = ({ adminEmails }) => {
     }
   }, [currentUser, adminEmails]);
 
+  // Mengambil data pengguna dari Firestore dengan filter
   useEffect(() => {
     setLoading(true);
     let q = query(collection(db, 'users'));
@@ -263,14 +472,14 @@ const UserManagement = ({ adminEmails }) => {
     if (filterDate === 'last7days') {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      q = query(q, where('updatedAt', '>=', sevenDaysAgo.toISOString().split('T')[0]));
+      q = query(q, where('createdAt', '>=', sevenDaysAgo.toISOString().split('T')[0]));
     } else if (filterDate === 'last30days') {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      q = query(q, where('updatedAt', '>=', thirtyDaysAgo.toISOString().split('T')[0]));
+      q = query(q, where('createdAt', '>=', thirtyDaysAgo.toISOString().split('T')[0]));
     } else if (filterDate === 'custom' && filterCustomDate) {
       const customDate = new Date(filterCustomDate).toISOString().split('T')[0];
-      q = query(q, where('updatedAt', '>=', customDate));
+      q = query(q, where('createdAt', '>=', customDate));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -280,33 +489,37 @@ const UserManagement = ({ adminEmails }) => {
     }, (error) => {
       console.error('Error fetching users:', error);
       setLoading(false);
+      showPopup('Error', 'Gagal memuat pengguna: ' + error.message, 'error');
     });
 
     return () => unsubscribe();
-  }, [filterDate, filterCustomDate]);
+  }, [filterDate, filterCustomDate, showPopup]);
 
+  // Mengambil data pengguna Authentication dan riwayat edit
   useEffect(() => {
     if (currentUser && isAdmin) {
       fetchAuthUsers();
       fetchProfileEdits();
     }
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, fetchAuthUsers, fetchProfileEdits]);
 
+  // Menggabungkan data pengguna saat data berubah
   useEffect(() => {
     if (users.length > 0 || authUsers.length > 0) {
       combineUsers();
     }
-  }, [users, authUsers]);
+  }, [users, authUsers, combineUsers]);
 
+  // Memfilter pengguna berdasarkan kriteria
   const filteredUsers = combinedUsers.filter(user => {
     const matchesEmail = !filterEmail || user.email?.toLowerCase().includes(filterEmail.toLowerCase());
     const matchesName = !filterName || user.displayName?.toLowerCase().includes(filterName.toLowerCase());
-    const matchesRole = filterRole === 'all' || 
-                       (filterRole === 'admin' && user.isAdmin === true) ||
-                       (filterRole === 'user' && user.isAdmin !== true);
+    const matchesRole = filterRole === 'all' ||
+                        (filterRole === 'admin' && user.isAdmin === true) ||
+                        (filterRole === 'user' && user.isAdmin !== true);
     const matchesEmailVerified = filterEmailVerified === 'all' ||
-                               (filterEmailVerified === 'verified' && user.emailVerified === true) ||
-                               (filterEmailVerified === 'unverified' && user.emailVerified !== true);
+                                (filterEmailVerified === 'verified' && user.emailVerified === true) ||
+                                (filterEmailVerified === 'unverified' && user.emailVerified !== true);
     const matchesSource = filterSource === 'all' ||
                          (filterSource === 'both' && user.source.inFirestore && user.source.inAuth) ||
                          (filterSource === 'firestore' && user.source.inFirestore) ||
@@ -316,7 +529,8 @@ const UserManagement = ({ adminEmails }) => {
     return matchesEmail && matchesName && matchesRole && matchesEmailVerified && matchesSource;
   }).sort((a, b) => a.email.localeCompare(b.email));
 
-  const handleFilterChange = (type, value) => {
+  // Menangani perubahan filter
+  const handleFilterChange = useCallback((type, value) => {
     switch (type) {
       case 'email': setFilterEmail(value); break;
       case 'name': setFilterName(value); break;
@@ -326,9 +540,10 @@ const UserManagement = ({ adminEmails }) => {
       case 'emailVerified': setFilterEmailVerified(value); break;
       case 'source': setFilterSource(value); break;
     }
-  };
+  }, []);
 
-  const handleSyncToFirestore = async (user) => {
+  // Menangani sinkronisasi pengguna ke Firestore
+  const handleSyncToFirestore = useCallback(async (user) => {
     if (!isAdmin) {
       showPopup('Akses Ditolak', 'Hanya admin yang bisa sinkronisasi pengguna.', 'error');
       return;
@@ -349,7 +564,7 @@ const UserManagement = ({ adminEmails }) => {
             updatedAt: new Date().toISOString().split('T')[0],
             createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           });
-          
+
           showPopup('Berhasil', 'Pengguna berhasil ditambahkan ke Firestore.', 'success');
         } catch (error) {
           console.error('Error syncing user to Firestore:', error);
@@ -357,9 +572,10 @@ const UserManagement = ({ adminEmails }) => {
         }
       }
     );
-  };
+  }, [isAdmin, showPopup]);
 
-  const handleDelete = async (userId) => {
+  // Menangani penghapusan pengguna
+  const handleDelete = useCallback(async (userId) => {
     if (!isAdmin) {
       showPopup('Akses Ditolak', 'Hanya admin yang bisa menghapus pengguna.', 'error');
       return;
@@ -372,7 +588,7 @@ const UserManagement = ({ adminEmails }) => {
 
     const user = combinedUsers.find(u => u.id === userId);
     const deleteOptions = [];
-    
+
     if (user.source.inFirestore) deleteOptions.push('Firestore');
     if (user.source.inAuth) deleteOptions.push('Authentication');
 
@@ -411,24 +627,26 @@ const UserManagement = ({ adminEmails }) => {
         }
       }
     );
-  };
+  }, [isAdmin, currentUser, combinedUsers, showPopup, fetchAuthUsers]);
 
-  const handleEditClick = (user) => {
+  // Menangani klik tombol edit
+  const handleEditClick = useCallback((user) => {
     if (!isAdmin && user.email !== currentUserEmail) {
       showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
       return;
     }
     setEditUserId(user.id);
     setEditForm({ email: user.email || '', displayName: user.displayName || '' });
-  };
+  }, [isAdmin, currentUserEmail, showPopup]);
 
-  const handleEditSave = async () => {
+  // Menangani penyimpanan perubahan edit
+  const handleEditSave = useCallback(async () => {
     const user = combinedUsers.find(u => u.id === editUserId);
     if (!isAdmin && user?.email !== currentUserEmail) {
       showPopup('Akses Ditolak', 'Hanya admin atau pemilik akun yang bisa mengedit.', 'error');
       return;
     }
-    
+
     try {
       const userRef = doc(db, 'users', editUserId);
       const originalDisplayName = user.displayName || '';
@@ -446,14 +664,14 @@ const UserManagement = ({ adminEmails }) => {
           isAdmin: false,
           emailVerified: user.emailVerified || false,
           updatedAt: new Date().toISOString().split('T')[0],
-          createdAt: new Date().toISOString().split('T')[0],
+          createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         });
       }
-      
+
       if (originalDisplayName !== newDisplayName) {
         await logProfileEdit(user.id, 'displayName', originalDisplayName, newDisplayName);
       }
-      
+
       const updatedDoc = await getDoc(userRef);
       if (updatedDoc.exists()) {
         const updatedData = updatedDoc.data();
@@ -461,7 +679,7 @@ const UserManagement = ({ adminEmails }) => {
           prevUsers.map(u => u.id === editUserId ? { ...u, email: updatedData.email, displayName: updatedData.displayName } : u)
         );
       }
-      
+
       setEditUserId(null);
       setEditForm({ email: '', displayName: '' });
       showPopup('Berhasil', 'Perubahan berhasil disimpan.', 'success');
@@ -469,17 +687,18 @@ const UserManagement = ({ adminEmails }) => {
       console.error('Error updating user:', error);
       showPopup('Error', 'Gagal menyimpan perubahan: ' + error.message, 'error');
     }
-  };
+  }, [isAdmin, currentUserEmail, editUserId, editForm, combinedUsers, showPopup, logProfileEdit]);
 
-  const handleEditRole = async (userId, isAdminRole) => {
+  // Menangani perubahan role pengguna
+  const handleEditRole = useCallback(async (userId, isAdminRole) => {
     const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
     const currentIsAdmin = userDoc.exists() ? userDoc.data().isAdmin : false;
-    
+
     if (!currentIsAdmin) {
       showPopup('Akses Ditolak', 'Hanya admin yang bisa mengedit role.', 'error');
       return;
     }
-    
+
     showPopup(
       'Konfirmasi Ubah Role',
       `Yakin ingin mengubah role pengguna ini menjadi ${isAdminRole ? 'Admin' : 'User'}?`,
@@ -488,7 +707,7 @@ const UserManagement = ({ adminEmails }) => {
         try {
           const user = combinedUsers.find(u => u.id === userId);
           const userRef = doc(db, 'users', userId);
-          
+
           if (user.source.inFirestore) {
             await updateDoc(userRef, {
               isAdmin: isAdminRole,
@@ -501,10 +720,10 @@ const UserManagement = ({ adminEmails }) => {
               isAdmin: isAdminRole,
               emailVerified: user.emailVerified || false,
               updatedAt: new Date().toISOString().split('T')[0],
-              createdAt: new Date().toISOString().split('T')[0],
+              createdAt: user.createdAt ? new Date(user.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
             });
           }
-          
+
           showPopup('Berhasil', 'Role berhasil diperbarui.', 'success');
         } catch (error) {
           console.error('Error updating role:', error);
@@ -512,14 +731,16 @@ const UserManagement = ({ adminEmails }) => {
         }
       }
     );
-  };
+  }, [currentUser, combinedUsers, showPopup]);
 
-  const handleEditCancel = () => {
+  // Membatalkan edit
+  const handleEditCancel = useCallback(() => {
     setEditUserId(null);
     setEditForm({ email: '', displayName: '' });
-  };
+  }, []);
 
-  const getVerificationStatus = (user) => {
+  // Mendapatkan status verifikasi email
+  const getVerificationStatus = useCallback((user) => {
     if (user.emailVerified === true) {
       return { text: 'Verified', color: 'text-green-600 bg-green-100' };
     } else if (user.emailVerified === false) {
@@ -527,9 +748,10 @@ const UserManagement = ({ adminEmails }) => {
     } else {
       return { text: 'Unknown', color: 'text-gray-600 bg-gray-100' };
     }
-  };
+  }, []);
 
-  const getSourceStatus = (user) => {
+  // Mendapatkan status sumber data
+  const getSourceStatus = useCallback((user) => {
     if (user.source.inFirestore && user.source.inAuth) {
       return { text: 'Both', color: 'text-green-600 bg-green-100' };
     } else if (user.source.inFirestore) {
@@ -539,36 +761,12 @@ const UserManagement = ({ adminEmails }) => {
     } else {
       return { text: 'Unknown', color: 'text-gray-600 bg-gray-100' };
     }
-  };
+  }, []);
 
-  const getRoleText = (user) => {
+  // Mendapatkan teks role
+  const getRoleText = useCallback((user) => {
     return user.isAdmin ? 'Admin' : 'User';
-  };
-
-  // Log profile edit function to match Profile.jsx
-  const logProfileEdit = async (userId, type, beforeName = null, newName = null) => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const logData = {
-        userId,
-        type,
-        date: today,
-        timestamp: new Date().toISOString(),
-      };
-
-      if (type === 'displayName' && beforeName && newName) {
-        logData.beforeName = beforeName;
-        logData.newName = newName;
-      }
-
-      await addDoc(collection(db, 'profile_edits'), logData);
-      return true;
-    } catch (error) {
-      console.error('Error logging profile edit:', error);
-      showPopup('Error', 'Gagal mencatat perubahan: ' + error.message, 'error');
-      return false;
-    }
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
@@ -685,7 +883,7 @@ const UserManagement = ({ adminEmails }) => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sumber Data</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Registrasi</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Riwayat Edit</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
@@ -714,7 +912,7 @@ const UserManagement = ({ adminEmails }) => {
                     }
                     const verificationStatus = getVerificationStatus(user);
                     const sourceStatus = getSourceStatus(user);
-                    const userEdits = profileEdits[user.id] || [];
+                    const hasEdits = profileEdits[user.id]?.length > 0;
                     return (
                       <tr key={user.id} className={`hover:bg-gray-50 transition-all duration-300 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} transform hover:scale-[1.01] animate-fadeInUp`} style={{ animationDelay: `${index * 0.1}s` }}>
                         <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
@@ -767,39 +965,24 @@ const UserManagement = ({ adminEmails }) => {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {user.updatedAt || 'N/A'}
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) : 'N/A'}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-500 max-w-md">
-                          {userEdits.length > 0 ? (
-                            <div className="max-h-32 overflow-y-auto">
-                              <ul className="list-disc list-inside space-y-1">
-                                {userEdits.map((edit, idx) => {
-                                  let editDescription = '';
-                                  if (edit.type === 'displayName' && edit.beforeName && edit.newName) {
-                                    editDescription = `${edit.beforeName} → ${edit.newName}`;
-                                  } else {
-                                    editDescription = edit.type || 'Unknown edit';
-                                  }
-                                  let formattedDate = 'N/A';
-                                  if (edit.timestamp) {
-                                    if (typeof edit.timestamp.toDate === 'function') {
-                                      formattedDate = new Date(edit.timestamp.toDate()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-                                    } else if (typeof edit.timestamp === 'string') {
-                                      formattedDate = new Date(edit.timestamp).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-                                    } else if (edit.timestamp instanceof Date) {
-                                      formattedDate = edit.timestamp.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-                                    }
-                                  }
-                                  return (
-                                    <li key={idx} className="text-sm break-words">
-                                      {editDescription} - {formattedDate}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
+                        <td className="px-6 py-4 text-sm riwayat-edit-cell">
+                          {hasEdits ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                showEditHistoryPopup(user.id);
+                              }}
+                              className="p-2 hover:bg-purple-50 rounded-lg transition-all duration-200 group"
+                              disabled={!isAdmin}
+                              title="Lihat riwayat edit"
+                              aria-label="Lihat riwayat edit pengguna"
+                            >
+                              <History className="w-5 h-5 text-purple-600 group-hover:text-purple-800" />
+                            </button>
                           ) : (
-                            'No edits today'
+                            <span className="text-gray-500 text-sm">Tidak ada riwayat</span>
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm">
@@ -810,12 +993,14 @@ const UserManagement = ({ adminEmails }) => {
                                   onClick={handleEditSave}
                                   className="p-2 hover:bg-green-50 rounded-lg transition-all duration-200 group"
                                   disabled={!isAdmin && user.email !== currentUserEmail}
+                                  aria-label="Simpan perubahan"
                                 >
                                   <CheckCircle className="w-5 h-5 text-green-600 group-hover:text-green-800" />
                                 </button>
                                 <button
                                   onClick={handleEditCancel}
                                   className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
+                                  aria-label="Batal edit"
                                 >
                                   <X className="w-5 h-5 text-red-600 group-hover:text-red-800" />
                                 </button>
@@ -823,24 +1008,36 @@ const UserManagement = ({ adminEmails }) => {
                             ) : (
                               <>
                                 <button
-                                  onClick={() => handleEditClick(user)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditClick(user);
+                                  }}
                                   className="p-2 hover:bg-indigo-50 rounded-lg transition-all duration-200 group"
                                   disabled={!isAdmin && user.email !== currentUserEmail}
+                                  aria-label="Edit pengguna"
                                 >
                                   <Edit3 className="w-5 h-5 text-indigo-600 group-hover:text-indigo-800" />
                                 </button>
                                 {!user.source.inFirestore && user.source.inAuth && isAdmin && (
                                   <button
-                                    onClick={() => handleSyncToFirestore(user)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSyncToFirestore(user);
+                                    }}
                                     className="p-2 hover:bg-purple-50 rounded-lg transition-all duration-200 group"
+                                    aria-label="Sinkronisasi ke Firestore"
                                   >
                                     <RefreshCw className="w-5 h-5 text-purple-600 group-hover:text-purple-800" />
                                   </button>
                                 )}
                                 <button
-                                  onClick={() => handleDelete(user.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(user.id);
+                                  }}
                                   className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
                                   disabled={!isAdmin}
+                                  aria-label="Hapus pengguna"
                                 >
                                   <Trash2 className="w-5 h-5 text-red-600 group-hover:text-red-800" />
                                 </button>
@@ -864,6 +1061,14 @@ const UserManagement = ({ adminEmails }) => {
           message={popup.message}
           type={popup.type}
           onConfirm={popup.onConfirm}
+          isAnimating={isAnimating}
+        />
+        <EditHistoryPopup
+          isOpen={editHistoryPopup.isOpen}
+          onClose={closeEditHistoryPopup}
+          userId={editHistoryPopup.userId}
+          profileEdits={profileEdits}
+          isAnimating={isAnimating}
         />
       </div>
     </div>
@@ -877,40 +1082,45 @@ export default UserManagement;
     from { opacity: 0; }
     to { opacity: 1; }
   }
-  
+
   @keyframes slideUp {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
-  
+
   @keyframes scaleIn {
     from { transform: scale(0.9); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
   }
-  
+
   @keyframes slideRight {
     from { transform: translateX(-20px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
   }
-  
+
+  @keyframes fadeInUp {
+    from { transform: translateY(10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
   .animate-fadeIn {
     animation: fadeIn 0.3s ease-out;
   }
-  
+
   .animate-slideUp {
     animation: slideUp 0.3s ease-out;
   }
-  
+
   .animate-scaleIn {
     animation: scaleIn 0.3s ease-out;
   }
-  
+
   .animate-slideRight {
     animation: slideRight 0.3s ease-out;
   }
-  
+
   .animate-fadeInUp {
-    animation: fadeIn 0.3s ease-out;
+    animation: fadeInUp 0.3s ease-out;
   }
 
   /* Table responsiveness */
@@ -955,14 +1165,52 @@ export default UserManagement;
     appearance: auto;
   }
 
-  td:nth-child(7) {
-    max-width: 300px;
-    overflow-x: hidden;
+  /* Riwayat Edit column */
+  td:nth-child(7).riwayat-edit-cell {
+    white-space: nowrap;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Action column */
   td:nth-child(8) {
     white-space: nowrap;
+  }
+
+  /* Edit history table in popup */
+  .edit-history-table th,
+  .edit-history-table td {
+    padding: 12px 16px;
+    text-align: left;
+  }
+
+  .edit-history-table th {
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+    text-transform: uppercase;
+  }
+
+  .edit-history-table td {
+    font-size: 14px;
+    color: #1f2937;
+  }
+
+  .edit-history-table tr:hover {
+    background-color: #f9fafb;
+  }
+
+  .popup{
+    z-index: 9999999;
+  }
+
+  /* Sticky header for edit history table */
+  .edit-history-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: #f9fafb;
   }
 
   /* Loading spinner */

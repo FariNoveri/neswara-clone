@@ -79,10 +79,13 @@ const NotificationModal = React.memo(({
   const modalRef = useRef(null);
   const titleInputRef = useRef(null);
 
-  const handleClose = useCallback(() => {
-    setShowModal(false);
+const handleClose = useCallback(() => {
+  setShowModal(false);
+  // Delay resetForm hingga animasi modal selesai
+  setTimeout(() => {
     resetForm();
-  }, [setShowModal, resetForm]);
+  }, 300); // 300ms sesuai dengan duration animasi
+}, [setShowModal, resetForm]);
 
   const handleModalClick = useCallback((e) => {
     e.stopPropagation();

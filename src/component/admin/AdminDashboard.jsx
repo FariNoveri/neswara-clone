@@ -40,7 +40,7 @@ import NotificationManagement from './NotificationManagement';
 import ManageViews from './ManageViews';
 import LogActivity from './LogActivity';
 import ReportManagement from './ReportManagement';
-import NewsManagement from './NewsManagement'; // Import NewsManagement
+import NewsManagement from './NewsManagement';
 
 const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
 
@@ -116,7 +116,6 @@ const AdminDashboard = () => {
         timestamp: serverTimestamp(),
         ipAddress: null
       });
-      console.log(`Logged ${action}:`, cleanedDetails);
     } catch (error) {
       console.error('Error logging activity:', error);
       toast.error('Gagal mencatat aktivitas.');
@@ -199,6 +198,32 @@ const AdminDashboard = () => {
     }
   };
 
+  // Fetch total news and views from the 'news' collection
+  const fetchNews = () => {
+    const unsubscribe = onSnapshot(collection(db, 'news'), (snapshot) => {
+      try {
+        let totalNews = snapshot.size;
+        let totalViews = 0;
+        snapshot.forEach(doc => {
+          totalViews += doc.data().views || 0;
+        });
+        setStats(prev => ({
+          ...prev,
+          totalNews,
+          totalViews
+        }));
+      } catch (error) {
+        console.error('Error fetching news:', error);
+        toast.error('Gagal memuat data berita.');
+      }
+    }, (error) => {
+      console.error('Error in news snapshot:', error);
+      toast.error('Gagal memuat pembaruan berita.');
+    });
+
+    return unsubscribe;
+  };
+
   const fetchUsers = () => {
     const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
       try {
@@ -209,12 +234,10 @@ const AdminDashboard = () => {
         }));
       } catch (error) {
         console.error('Error fetching users:', error);
-        logActivity('FETCH_USERS_ERROR', { error: error.message });
         toast.error('Gagal memuat data pengguna.');
       }
     }, (error) => {
       console.error('Error in users snapshot:', error);
-      logActivity('FETCH_USERS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan pengguna.');
     });
 
@@ -235,12 +258,10 @@ const AdminDashboard = () => {
         if (error.message.includes('index')) {
           console.log('Missing index for comments collection group. Please create it in Firebase Console.');
         }
-        logActivity('FETCH_COMMENTS_ERROR', { error: error.message });
         toast.error('Gagal memuat komentar.');
       }
     }, (error) => {
       console.error('Error in comments snapshot:', error);
-      logActivity('FETCH_COMMENTS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan komentar.');
     });
 
@@ -257,12 +278,10 @@ const AdminDashboard = () => {
         }));
       } catch (error) {
         console.error('Error fetching notifications:', error);
-        logActivity('FETCH_NOTIFICATIONS_ERROR', { error: error.message });
         toast.error('Gagal memuat notifikasi.');
       }
     }, (error) => {
       console.error('Error in notifications snapshot:', error);
-      logActivity('FETCH_NOTIFICATIONS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan notifikasi.');
     });
 
@@ -279,12 +298,10 @@ const AdminDashboard = () => {
         }));
       } catch (error) {
         console.error('Error fetching breaking news:', error);
-        logActivity('FETCH_BREAKING_NEWS_ERROR', { error: error.message });
         toast.error('Gagal memuat breaking news.');
       }
     }, (error) => {
       console.error('Error in breaking news snapshot:', error);
-      logActivity('FETCH_BREAKING_NEWS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan breaking news.');
     });
 
@@ -301,12 +318,10 @@ const AdminDashboard = () => {
         }));
       } catch (error) {
         console.error('Error fetching reports:', error);
-        logActivity('FETCH_REPORTS_ERROR', { error: error.message });
         toast.error('Gagal memuat laporan.');
       }
     }, (error) => {
       console.error('Error in reports snapshot:', error);
-      logActivity('FETCH_REPORTS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan laporan.');
     });
 
@@ -319,9 +334,11 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    let unsubscribeUsers, unsubscribeComments, unsubscribeNotifications, unsubscribeBreakingNews, unsubscribeReports;
+    let unsubscribeNews, unsubscribeUsers, unsubscribeComments, unsubscribeNotifications, unsubscribeBreakingNews, unsubscribeReports;
 
     if (isAuthorized) {
+      // Fetch all stats immediately when the dashboard loads
+      unsubscribeNews = fetchNews(); // Added to fetch news and views
       unsubscribeUsers = fetchUsers();
       unsubscribeComments = fetchComments();
       unsubscribeNotifications = fetchNotifications();
@@ -330,6 +347,8 @@ const AdminDashboard = () => {
     }
 
     return () => {
+      // Cleanup all listeners to prevent memory leaks
+      if (unsubscribeNews) unsubscribeNews();
       if (unsubscribeUsers) unsubscribeUsers();
       if (unsubscribeComments) unsubscribeComments();
       if (unsubscribeNotifications) unsubscribeNotifications();
@@ -474,6 +493,8 @@ const AdminDashboard = () => {
           </nav>
         </div>
 
+        {/* Explanatory Comment for Admins */}
+        {/* Penjelasan untuk Admin: Bagian ini menampilkan kartu statistik (StatCard) untuk total berita, komentar, tayangan, pengguna, notifikasi, breaking news, dan laporan. Semua data diambil secara real-time menggunakan onSnapshot dari Firestore untuk memastikan angka selalu terbaru tanpa perlu navigasi ke tab lain (misalnya, "Kelola Berita"). Fungsi fetchNews, fetchUsers, dll., dijalankan saat dashboard dimuat (isAuthorized=true) untuk sinkronisasi data langsung. */}
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -513,7 +534,7 @@ const AdminDashboard = () => {
                   ))}
                 </div>
                 <div className="animate-slideUp">
-                  <TrendsChart isAuthorized={isAuthorized} activeTab={activeTab} />
+                  <TrendsChart isAuthorized={isAuthorized} activeTab={activeTab} logActivity={logActivity} />
                 </div>
               </div>
             )}
@@ -543,7 +564,7 @@ const AdminDashboard = () => {
         <ConfirmationModal
           isOpen={confirmationModal.isOpen}
           onClose={() => setConfirmationModal({ isOpen: false, id: null, title: '', message: '' })}
-          onConfirm={() => setConfirmationModal({ isOpen: false, id: null, title: '', message: '' })} // Empty confirm as delete logic is in NewsManagement
+          onConfirm={() => setConfirmationModal({ isOpen: false, id: null, title: '', message: '' })}
           title={confirmationModal.title}
           message={confirmationModal.message}
         />
