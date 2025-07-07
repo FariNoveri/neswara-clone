@@ -184,20 +184,17 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           setTrends(prev => ({ ...prev, news: { ...newsTrends }, views: { ...viewsTrends } }));
           setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_NEWS_SUCCESS', { timeRange, newsCount, totalDocs: snapshot.size });
           }
           forceRender();
         } catch (error) {
           console.error('Error fetching news trends:', error);
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_NEWS_ERROR', { error: error.message, timeRange });
           }
           toast.error('Gagal memuat tren berita.');
         }
       }, (error) => {
         console.error('Error in news snapshot:', error);
         if (typeof logActivity === 'function') {
-          logActivity('FETCH_TRENDS_NEWS_SNAPSHOT_ERROR', { error: error.message, timeRange });
         }
         toast.error('Gagal memuat pembaruan tren berita.');
       });
@@ -229,7 +226,6 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           setTrends(prev => ({ ...prev, comments: { ...commentsTrends } }));
           setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_COMMENTS_SUCCESS', { timeRange, commentsCount, totalDocs: snapshot.size });
           }
           forceRender();
         } catch (error) {
@@ -238,14 +234,12 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
             console.log('Missing index for comments collection group. Create it in Firebase Console.');
           }
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_COMMENTS_ERROR', { error: error.message, timeRange });
           }
           toast.error('Gagal memuat tren komentar.');
         }
       }, (error) => {
         console.error('Error in comments snapshot:', error);
         if (typeof logActivity === 'function') {
-          logActivity('FETCH_TRENDS_COMMENTS_SNAPSHOT_ERROR', { error: error.message, timeRange });
         }
         toast.error('Gagal memuat pembaruan tren komentar.');
       });
@@ -277,20 +271,17 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           setTrends(prev => ({ ...prev, users: { ...usersTrends } }));
           setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_USERS_SUCCESS', { timeRange, usersCount, totalDocs: snapshot.size });
           }
           forceRender();
         } catch (error) {
           console.error('Error fetching users trends:', error);
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_USERS_ERROR', { error: error.message, timeRange });
           }
           toast.error('Gagal memuat tren pengguna.');
         }
       }, (error) => {
         console.error('Error in users snapshot:', error);
         if (typeof logActivity === 'function') {
-          logActivity('FETCH_TRENDS_USERS_SNAPSHOT_ERROR', { error: error.message, timeRange });
         }
         toast.error('Gagal memuat pembaruan tren pengguna.');
       });
@@ -322,20 +313,17 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           setTrends(prev => ({ ...prev, reports: { ...reportsTrends } }));
           setChartData(JSON.parse(JSON.stringify(data)));
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_REPORTS_SUCCESS', { timeRange, reportCount, totalDocs: snapshot.size });
           }
           forceRender();
         } catch (error) {
           console.error('Error fetching reports trends:', error);
           if (typeof logActivity === 'function') {
-            logActivity('FETCH_TRENDS_REPORTS_ERROR', { error: error.message, timeRange });
           }
           toast.error('Gagal memuat tren laporan.');
         }
       }, (error) => {
         console.error('Error in reports snapshot:', error);
         if (typeof logActivity === 'function') {
-          logActivity('FETCH_TRENDS_REPORTS_SNAPSHOT_ERROR', { error: error.message, timeRange });
         }
         toast.error('Gagal memuat pembaruan tren laporan.');
       });

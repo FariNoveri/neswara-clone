@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Reply, Heart, Trash2, MessageCircle, Flag, X, AlertTriangle, Edit2, Eye, EyeOff } from "lucide-react";
-import { db } from "../../firebaseconfig";
+import { db, auth } from "../../firebaseconfig";
 import { 
   collection, 
   addDoc, 
@@ -14,13 +14,13 @@ import {
   setDoc,
   getDocs,
   getDoc,
-  updateDoc
+  updateDoc,
+  runTransaction
 } from "firebase/firestore";
 import { toast } from "react-toastify";
 import { ADMIN_EMAILS } from "../config/Constants";
 import DOMPurify from 'dompurify';
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../../firebaseconfig";
 
 // Modal Component with smooth animations
 const Modal = ({ isOpen, onClose, children, title }) => {
@@ -439,7 +439,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             </button>
             <button
               onClick={() => handleReplyClick(cmt.id, cmt.author)}
-              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate- feuille cursor-not-allowed'}`}
+              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate-400 cursor-not-allowed'}`}
               disabled={!currentUser}
             >
               <Reply className="w-4 h-4" />
@@ -573,6 +573,28 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
     return total;
   }, []);
 
+  const updateNewsCommentCount = useCallback(async (newsId, increment) => {
+    const newsRef = doc(db, 'news', newsId);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const newsDoc = await transaction.get(newsRef);
+        if (!newsDoc.exists()) {
+          throw new Error("News document does not exist");
+        }
+        const currentCount = newsDoc.data().comments || 0;
+        transaction.update(newsRef, { comments: Math.max(0, currentCount + increment) });
+      });
+      console.log(`Updated comment count for news ${newsId} by ${increment}`);
+    } catch (error) {
+      console.error("Error updating news comment count:", error);
+      toast.error("Gagal memperbarui jumlah komentar.", {
+        position: 'top-center',
+        autoClose: 3000,
+        toastId: 'update-comment-count-error'
+      });
+    }
+  }, []);
+
   const areRepliesHidden = useCallback((commentId) => {
     return !!hiddenReplies[commentId];
   }, [hiddenReplies]);
@@ -584,6 +606,18 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
       return newHiddenReplies;
     });
   }, [newsId]);
+
+  const formatTimeAgo = useCallback((date) => {
+    if (!date || !date.toDate) return "Baru saja";
+    const now = new Date();
+    const diff = now - date.toDate();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (minutes < 60) return `${minutes} menit lalu`;
+    if (hours < 24) return `${hours} jam lalu`;
+    return `${days} hari lalu`;
+  }, []);
 
   useEffect(() => {
     let unsubscribeComments = () => {};
@@ -633,11 +667,11 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
           }
         }
 
-        snapshot.docs.forEach(doc => {
+        for (const doc of snapshot.docs) {
           const commentData = doc.data();
           const userData = userMap[commentData.userId] || (commentData.userId === currentUser?.uid ? {
-            displayName: sanitizeInput(currentUser.displayName || currentUser.email || "User"),
-            photoURL: currentUser.photoURL || null
+            displayName: sanitizeInput(currentUser?.displayName || currentUser?.email || "User"),
+            photoURL: currentUser?.photoURL || null
           } : null);
           const authorName = userData ? userData.displayName : (commentData.author || "User");
           const photoURL = userData ? userData.photoURL : (commentData.photoURL || null);
@@ -648,14 +682,15 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
             author: sanitizeInput(authorName),
             photoURL: photoURL,
             createdAt: commentData.createdAt,
-            replies: commentData.replies || []
+            replies: [] // Initialize replies as empty
           });
-        });
+        }
 
         const commentMap = {};
         commentsData.forEach(comment => {
-          commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
+          commentMap[comment.id] = { ...comment, replies: [] };
         });
+
         commentsData.forEach(comment => {
           if (comment.parentId && commentMap[comment.parentId]) {
             commentMap[comment.parentId].replies.push(commentMap[comment.id]);
@@ -664,7 +699,8 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
 
         const rootComments = commentsData.filter(comment => !comment.parentId);
         setComments(rootComments);
-        if (onCommentCountChange) onCommentCountChange(countAllComments(rootComments));
+        const totalComments = countAllComments(rootComments);
+        if (onCommentCountChange) onCommentCountChange(totalComments);
         setLoading(false);
 
         if (currentUser) {
@@ -709,23 +745,21 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
             const count = likesSnapshot.size;
             const userLiked = currentUser ? !!likesSnapshot.docs.find(doc => doc.data().userId === currentUser.uid) : false;
             likesData[commentDoc.id] = { count, userLiked };
+            setCommentLikes(prev => ({ ...prev, ...likesData }));
           }, (err) => {
             console.error("Error fetching likes:", err);
           });
         });
-        setCommentLikes(likesData);
       }, (err) => {
         console.error("Error setting up likes listener:", err);
       });
     };
 
-    if (currentUser) {
+    if (propCurrentUser !== undefined) {
+      setCurrentUser(propCurrentUser);
+    } else {
       unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-        if (user) {
-          setCurrentUser(user);
-        } else {
-          setCurrentUser(null);
-        }
+        setCurrentUser(user);
       });
     }
 
@@ -736,7 +770,7 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
       unsubscribeLikes();
       unsubscribeAuth && unsubscribeAuth();
     };
-  }, [newsId, onCommentCountChange, sanitizeInput, countAllComments, currentUser]);
+  }, [newsId, propCurrentUser, onCommentCountChange, sanitizeInput, countAllComments]);
 
   const checkSpamLimit = useCallback(() => {
     const now = Date.now();
@@ -789,16 +823,28 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
       const authorName = sanitizeInput(currentUser.displayName || userData.displayName || currentUser.email || "User");
       const photoURL = userData.photoURL || currentUser.photoURL || null;
 
-      await addDoc(commentsRef, {
-        text: textToSubmit,
-        author: authorName,
-        userId: currentUser.uid,
-        userEmail: currentUser.email,
-        photoURL: photoURL,
-        createdAt: serverTimestamp(),
-        parentId: parentId || null,
-        ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) }),
-        isEdited: false
+      await runTransaction(db, async (transaction) => {
+        const newsRef = doc(db, 'news', newsId);
+        const newsDoc = await transaction.get(newsRef);
+        if (!newsDoc.exists()) {
+          throw new Error("News document does not exist");
+        }
+
+        const newCommentRef = doc(commentsRef);
+        await transaction.set(newCommentRef, {
+          text: textToSubmit,
+          author: authorName,
+          userId: currentUser.uid,
+          userEmail: currentUser.email,
+          photoURL: photoURL,
+          createdAt: serverTimestamp(),
+          parentId: parentId || null,
+          ...(parentId && { replyToAuthor: sanitizeInput(replyToAuthor) }),
+          isEdited: false
+        });
+
+        const currentCount = newsDoc.data().comments || 0;
+        transaction.update(newsRef, { comments: currentCount + 1 });
       });
 
       if (parentId) {
@@ -990,18 +1036,42 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
     setDeleteModal(prev => ({ ...prev, isDeleting: true }));
 
     try {
-      const deleteNestedComments = async (commentId) => {
-        const comment = findCommentById(comments, commentId);
-        if (comment && comment.replies && comment.replies.length > 0) {
+      const countNestedComments = (comment) => {
+        let count = 1; // Count the comment itself
+        if (comment.replies && comment.replies.length > 0) {
           for (const reply of comment.replies) {
-            await deleteNestedComments(reply.id);
-            await deleteDoc(doc(db, `news/${newsId}/comments`, reply.id));
+            count += countNestedComments(reply);
           }
         }
+        return count;
       };
 
-      await deleteNestedComments(commentId);
-      await deleteDoc(doc(db, `news/${newsId}/comments`, commentId));
+      const totalDeleted = countNestedComments(comment);
+
+      await runTransaction(db, async (transaction) => {
+        const newsRef = doc(db, 'news', newsId);
+        const newsDoc = await transaction.get(newsRef);
+        if (!newsDoc.exists()) {
+          throw new Error("News document does not exist");
+        }
+
+        const deleteNestedComments = async (commentId) => {
+          const comment = findCommentById(comments, commentId);
+          if (comment && comment.replies && comment.replies.length > 0) {
+            for (const reply of comment.replies) {
+              await deleteNestedComments(reply.id);
+              transaction.delete(doc(db, `news/${newsId}/comments`, reply.id));
+            }
+          }
+        };
+
+        await deleteNestedComments(commentId);
+        transaction.delete(doc(db, `news/${newsId}/comments`, commentId));
+
+        const currentCount = newsDoc.data().comments || 0;
+        transaction.update(newsRef, { comments: Math.max(0, currentCount - totalDeleted) });
+      });
+
       setDeleteModal({ isOpen: false, commentId: null, isDeleting: false, commentText: '' });
       toast.success("Komentar berhasil dihapus.", {
         position: 'top-center',
@@ -1160,102 +1230,72 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
       });
       return;
     }
-    setReplyTo(replyTo?.id === commentId ? null : { id: commentId, author: author || "User" });
-  }, [currentUser, replyTo]);
 
-  const formatTimeAgo = useCallback((date) => {
-    if (!date || !date.toDate) return "Baru saja";
-    const now = new Date();
-    const diff = now - date.toDate();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-    if (minutes < 1) return "Baru saja";
-    if (minutes < 60) return `${minutes} menit lalu`;
-    if (hours < 24) return `${hours} jam lalu`;
-    return `${days} hari lalu`;
-  }, []);
-
-  const organizeComments = useCallback((comments) => {
-    const commentMap = {};
-    const rootComments = [];
-
-    comments.forEach(comment => {
-      commentMap[comment.id] = { ...comment, replies: comment.replies || [] };
-    });
-
-    comments.forEach(comment => {
-      if (comment.parentId && commentMap[comment.parentId]) {
-        commentMap[comment.parentId].replies.push(commentMap[comment.id]);
-      } else if (!comment.parentId) {
-        rootComments.push(commentMap[comment.id]);
+    setReplyTo({ id: commentId, author });
+    setReplyComment("");
+    setTimeout(() => {
+      const commentRef = commentRefs.current[commentId];
+      if (commentRef.current) {
+        commentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-    });
+    }, 100);
+  }, [currentUser, commentRefs]);
 
-    rootComments.sort((a, b) => {
-      const timeA = a.createdAt?.toDate?.() || new Date(0);
-      const timeB = b.createdAt?.toDate?.() || new Date(0);
-      return timeB - timeA;
-    });
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Memuat komentar...</p>
+      </div>
+    );
+  }
 
-    return rootComments;
-  }, []);
-
-  const organizedComments = organizeComments(comments);
-  const canComment = !!currentUser;
+  if (error) {
+    return (
+      <div className="text-center py-8 bg-red-50 rounded-lg">
+        <p className="text-red-600">{error}</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <style>
-  {`
-    .toastify {
-      z-index: 100001 !important;
-      position: fixed !important;
-      top: 10px !important;
-      width: 320px !important;
-      font-family: Arial, sans-serif !important;
-    }
-    .Toastify__toast--success {
-      background: #06b6d4 !important;
-      color: white !important;
-    }
-    .Toastify__toast--error {
-      background: #ef4444 !important;
-      color: white !important;
-    }
-    .Toastify__toast--warn {
-      background: #f59e0b !important;
-      color: white !important;
-    }
-    .Toastify__toast--info {
-      background: #3b82f6 !important;
-      color: white !important;
-    }
-    @keyframes scaleIn {
-      from {
-        transform: scale(0.95);
-        opacity: 0;
-      }
-      to {
-        transform: scale(1);
-        opacity: 1;
-      }
-    }
-    textarea {
-      color: #ffffff !important; /* white text */
-      background-color: #0f172a !important; /* slate-900 for contrast */
-    }
-    @media (max-width: 640px) {
-      textarea {
-        font-size: 14px !important; /* Smaller font size for mobile */
-      }
-      .comment-container {
-        padding: 12px !important; /* Adjust padding for mobile */
-      }
-    }
-  `}
-</style>
-      <SpamWarningModal 
+    <div className="max-w-4xl mx-auto py-8">
+      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+        <MessageCircle className="w-6 h-6 mr-2 text-blue-600" />
+        Komentar ({countAllComments(comments)})
+      </h2>
+
+      {/* Comment Input Form */}
+      <div className="mb-8 bg-white rounded-xl shadow-sm p-6 border border-slate-200">
+        <form onSubmit={handleSubmit}>
+          <textarea
+            className="w-full p-4 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
+            rows="4"
+            placeholder={currentUser ? "Tulis komentar Anda..." : "Silakan masuk untuk mengirim komentar"}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            maxLength={500}
+            disabled={!currentUser || isSubmitting}
+          />
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-slate-500">{comment.length}/500</span>
+            <button
+              type="submit"
+              disabled={!currentUser || isSubmitting || comment.trim() === ""}
+              className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                !currentUser || isSubmitting || comment.trim() === ""
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                  : 'bg-cyan-600 text-white hover:bg-cyan-700'
+              }`}
+            >
+              {isSubmitting ? "Mengirim..." : "Kirim Komentar"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Modals */}
+      <SpamWarningModal
         isOpen={spamWarning.isOpen}
         onClose={() => setSpamWarning({ isOpen: false, remainingTime: 0 })}
         remainingTime={spamWarning.remainingTime}
@@ -1286,60 +1326,18 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
         isSubmitting={reportModal.isSubmitting}
         commentText={reportModal.commentText}
       />
-      <div className="flex items-center gap-3">
-        <MessageCircle className="w-6 h-6 text-cyan-600" />
-        <h3 className="text-xl font-bold text-slate-800">Komentar ({countAllComments(comments)})</h3>
-      </div>
-      <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-        <h4 className="font-bold text-blue-800 mb-2">Rules Berkomentar</h4>
-        <div className="text-sm text-blue-700 space-y-1">
-          <p>Harap gunakan bahasa yang sopan</p>
-          <p>Jangan spam, tunggu 5 detik antara komentar</p>
-          <p>Gunakan fitur laporkan untuk konten yang tidak pantas</p>
+
+      {/* Comments List */}
+      {comments.length === 0 ? (
+        <div className="text-center py-8 bg-white rounded-xl shadow-sm border border-slate-200">
+          <p className="text-gray-600">Belum ada komentar. Jadilah yang pertama!</p>
         </div>
-      </div>
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>
-      )}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
-        <div className="space-y-4">
-          <textarea
-            className="w-full p-4 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 text-slate-800 resize-none transition-all"
-            rows="4"
-            placeholder={canComment ? "Tulis komentar Anda..." : "Silakan masuk untuk mengirim komentar"}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            disabled={!canComment || isSubmitting}
-            maxLength={500}
-          />
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-500">{comment.length}/500</span>
-            <button
-              onClick={(e) => handleSubmit(e)}
-              disabled={!canComment || comment.trim() === "" || isSubmitting}
-              className={`px-6 py-2 rounded-lg font-medium transition-all ${!canComment || comment.trim() === "" || isSubmitting ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 text-white hover:bg-cyan-700'}`}
-            >
-              {isSubmitting ? "Mengirim..." : "Kirim Komentar"}
-            </button>
-          </div>
-        </div>
-      </div>
-      <div className="space-y-6">
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <div className="w-8 h-8 border-4 border-cyan-200 border-t-cyan-600 rounded-full animate-spin"></div>
-          </div>
-        ) : organizedComments.length === 0 ? (
-          <div className="text-center py-12 bg-slate-50 rounded-xl">
-            <MessageCircle className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-            <p className="text-slate-600 font-medium">Belum ada komentar</p>
-            <p className="text-slate-500 text-sm mt-1">Jadilah yang pertama untuk berkomentar!</p>
-          </div>
-        ) : (
-          organizedComments.map(comment => (
+      ) : (
+        <div className="space-y-6">
+          {comments.map(cmt => (
             <Comment
-              key={comment.id}
-              cmt={{ ...comment, replies: comment.replies || [] }}
+              key={cmt.id}
+              cmt={{ ...cmt, replies: cmt.replies || [] }}
               depth={0}
               currentUser={currentUser}
               commentLikes={commentLikes}
@@ -1365,9 +1363,9 @@ const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange
               commentRefs={commentRefs}
               comments={comments}
             />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

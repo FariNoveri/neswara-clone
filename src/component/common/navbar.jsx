@@ -300,7 +300,7 @@ const Navbar = () => {
         }
       `}</style>
 
-      <nav className={`w-full sticky top-0 z-30 navbar-transition ${
+      <nav className={`w-full top-0 z-30 navbar-transition ${
         isScrolled ? "glass-effect shadow-lg" : "bg-white shadow-md"
       }`}>
         <div className="container mx-auto px-4">
