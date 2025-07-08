@@ -621,54 +621,56 @@ const ReportManagement = () => {
   };
 
   const confirmResolveReport = async (action) => {
-    const { id } = confirmationModal;
-    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
-    try {
-      if (action === 'delete') {
-        const report = reports.find(r => r.id === id);
-        if (report.commentId && report.newsId) {
-          const commentRef = doc(db, `news/${report.newsId}/comments`, report.commentId);
-          const commentDoc = await getDoc(commentRef);
-          let commentText = 'N/A';
-          if (commentDoc.exists()) {
-            commentText = commentDoc.data().text || 'N/A';
-            await deleteDoc(commentRef);
+  const { id } = confirmationModal;
+  setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
+  try {
+    if (action === 'delete') {
+      const report = reports.find(r => r.id === id);
+      if (report.commentId && report.newsId) {
+        const commentRef = doc(db, `news/${report.newsId}/comments`, report.commentId);
+        const commentDoc = await getDoc(commentRef);
+        let commentText = 'N/A';
+        let totalRepliesDeleted = 0; // Initialize variable to track deleted replies
+        if (commentDoc.exists()) {
+          commentText = commentDoc.data().text || 'N/A';
+          await deleteDoc(commentRef);
 
-            const repliesQuery = query(collection(db, `news/${report.newsId}/comments`), where('parentId', '==', report.commentId));
-            const replySnapshot = await getDocs(repliesQuery);
-            const deleteReplies = replySnapshot.docs.map(reply => deleteDoc(reply.ref));
-            await Promise.all(deleteReplies);
-          }
-          await deleteDoc(doc(db, 'reports', id));
-          setReports(prev => prev.filter(report => report.id !== id));
-          await logActivity('DELETE_COMMENT_AND_RESOLVE', {
-            reportId: id,
-            commentId: report.commentId,
-            newsId: report.newsId,
-            commentText,
-            totalRepliesDeleted: replySnapshot.docs.length
-          });
-          toast.success('Komentar dan laporan berhasil dihapus!');
+          const repliesQuery = query(collection(db, `news/${report.newsId}/comments`), where('parentId', '==', report.commentId));
+          const replySnapshot = await getDocs(repliesQuery); // Store replySnapshot
+          totalRepliesDeleted = replySnapshot.docs.length; // Capture the count
+          const deleteReplies = replySnapshot.docs.map(reply => deleteDoc(reply.ref));
+          await Promise.all(deleteReplies);
         }
-      } else if (action === 'keep') {
-        await updateDoc(doc(db, 'reports', id), {
-          status: 'resolved',
-          resolvedAt: serverTimestamp(),
-          resolvedBy: currentUser.email,
-          resolutionAction: 'kept'
+        await deleteDoc(doc(db, 'reports', id));
+        setReports(prev => prev.filter(report => report.id !== id));
+        await logActivity('DELETE_COMMENT_AND_RESOLVE', {
+          reportId: id,
+          commentId: report.commentId,
+          newsId: report.newsId,
+          commentText,
+          totalRepliesDeleted // Use the captured count
         });
-        await logActivity('MARK_REPORT_RESOLVED', { reportId: id, action: 'kept' });
-        toast.success('Laporan ditandai sebagai selesai dengan komentar dibiarkan.');
+        toast.success('Komentar dan laporan berhasil dihapus!');
       }
-    } catch (error) {
-      console.error('Error resolving report:', error);
-      setError('Gagal menangani laporan: ' + error.message);
-      await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId: id, error: error.message });
-      toast.error('Gagal menangani laporan.');
-    } finally {
-      setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red', options: null });
+    } else if (action === 'keep') {
+      await updateDoc(doc(db, 'reports', id), {
+        status: 'resolved',
+        resolvedAt: serverTimestamp(),
+        resolvedBy: currentUser.email,
+        resolutionAction: 'kept'
+      });
+      await logActivity('MARK_REPORT_RESOLVED', { reportId: id, action: 'kept' });
+      toast.success('Laporan ditandai sebagai selesai dengan komentar dibiarkan.');
     }
-  };
+  } catch (error) {
+    console.error('Error resolving report:', error);
+    setError('Gagal menangani laporan: ' + error.message);
+    await logActivity('MARK_REPORT_RESOLVED_ERROR', { reportId: id, error: error.message });
+    toast.error('Gagal menangani laporan.');
+  } finally {
+    setConfirmationModal({ isOpen: false, type: '', id: null, isProcessing: false, confirmLabel: 'Konfirmasi', confirmColor: 'red', options: null });
+  }
+};
 
   const handleViewNews = (newsSlug) => {
     if (newsSlug) {

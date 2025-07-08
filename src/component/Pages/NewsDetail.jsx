@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../../firebaseconfig";
 import { doc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, onSnapshot, setDoc } from "firebase/firestore";
@@ -50,12 +50,12 @@ const NewsDetail = () => {
   const [error, setError] = useState(null);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [bookmarkId, setBookmarkId] = useState(null);
-  const [likeCount, setLikeCount] = useState(0);
-  const [userLiked, setUserLiked] = useState(false);
   const [newsId, setNewsId] = useState(null);
-  const [commentCount, setCommentCount] = useState(0);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [spamWarning, setSpamWarning] = useState(false);
+  const [spamTimer, setSpamTimer] = useState(0);
   const initialFetchRef = useRef(false);
+  const hasViewedRef = useRef(false);
 
   useEffect(() => {
     const ensureUserDocument = async (user) => {
@@ -115,7 +115,7 @@ const NewsDetail = () => {
           category: "Umum",
           slug: "",
           likeCount: 0,
-          hideProfilePicture: false
+          hideProfilePicture: false,
         });
         return;
       }
@@ -159,7 +159,7 @@ const NewsDetail = () => {
             category: newsData.kategori || newsData.category || "Umum",
             slug: newsData.slug || slug,
             likeCount: newsData.likeCount || 0,
-            hideProfilePicture: newsData.hideProfilePicture || false
+            hideProfilePicture: newsData.hideProfilePicture || false,
           });
 
           if (newsData.slug && newsData.slug !== slug) {
@@ -176,16 +176,36 @@ const NewsDetail = () => {
             return;
           }
 
-          if (currentUser && newsData.id && userDocCreated) {
+          if (currentUser && newsData.id && userDocCreated && !hasViewedRef.current) {
             try {
-              const docRef = doc(db, "news", newsData.id);
-              await updateDoc(docRef, { views: increment(1) });
+              // Check if user has already viewed this article
+              const viewDocRef = doc(db, "news", newsData.id, "views", currentUser.uid);
+              const viewSnap = await getDoc(viewDocRef);
+              if (!viewSnap.exists()) {
+                // Increment views and mark user as having viewed
+                const newsDocRef = doc(db, "news", newsData.id);
+                await updateDoc(newsDocRef, { views: increment(1) });
+                await setDoc(viewDocRef, {
+                  userId: currentUser.uid,
+                  userEmail: currentUser.email || "anonymous",
+                  viewedAt: serverTimestamp(),
+                });
+                hasViewedRef.current = true;
+                await addDoc(collection(db, "logs"), {
+                  action: "VIEW_NEWS",
+                  userEmail: currentUser?.email || "anonymous",
+                  details: { newsId: newsData.id, slug },
+                  timestamp: serverTimestamp(),
+                });
+              } else {
+                hasViewedRef.current = true; // User already viewed, no increment
+              }
             } catch (updateErr) {
               console.warn("Error updating views (non-critical):", updateErr);
               toast.warn("Gagal memperbarui jumlah tampilan.", {
                 position: 'top-center',
                 autoClose: 3000,
-                toastId: 'views-error'
+                toastId: 'views-error',
               });
               await addDoc(collection(db, "logs"), {
                 action: "VIEWS_UPDATE_ERROR",
@@ -210,7 +230,7 @@ const NewsDetail = () => {
             category: "Umum",
             slug: "",
             likeCount: 0,
-            hideProfilePicture: false
+            hideProfilePicture: false,
           });
           if (currentUser) {
             await addDoc(collection(db, "logs"), {
@@ -245,7 +265,7 @@ const NewsDetail = () => {
           category: "Umum",
           slug: "",
           likeCount: 0,
-          hideProfilePicture: false
+          hideProfilePicture: false,
         });
       }
       setLoading(false);
@@ -253,7 +273,7 @@ const NewsDetail = () => {
     };
 
     fetchNews();
-  }, [slug, currentUser]);
+  }, [slug, currentUser, navigate]);
 
   useEffect(() => {
     if (!newsId || !initialFetchRef.current) return;
@@ -272,20 +292,8 @@ const NewsDetail = () => {
           slug: updatedData.slug || prev.slug,
           views: updatedData.views || prev.views,
           likeCount: updatedData.likeCount || prev.likeCount,
-          hideProfilePicture: updatedData.hideProfilePicture || false
+          hideProfilePicture: updatedData.hideProfilePicture || false,
         }));
-        if (updatedData.slug && updatedData.slug !== slug) {
-          console.log(`Slug changed from ${slug} to ${updatedData.slug}, redirecting...`);
-          navigate(`/berita/${updatedData.slug}`, { replace: true });
-          if (currentUser) {
-            addDoc(collection(db, "logs"), {
-              action: "SLUG_REDIRECT",
-              userEmail: currentUser?.email || "anonymous",
-              details: { newsId, oldSlug: slug, newSlug: updatedData.slug },
-              timestamp: serverTimestamp(),
-            });
-          }
-        }
       } else {
         console.warn(`News document ${newsId} no longer exists`);
         setError("Berita telah dihapus.");
@@ -305,6 +313,51 @@ const NewsDetail = () => {
       if (currentUser) {
         addDoc(collection(db, "logs"), {
           action: "ONSNAPSHOT_ERROR",
+          userEmail: currentUser?.email || "anonymous",
+          details: { newsId, slug, error: err.message },
+          timestamp: serverTimestamp(),
+        });
+      }
+    });
+
+    const unsubscribeLikes = onSnapshot(query(collection(db, "news", newsId, "likes")), (snapshot) => {
+      const newLikeCount = snapshot.size;
+      setNews((prev) => ({
+        ...prev,
+        likeCount: newLikeCount,
+      }));
+      if (currentUser) {
+        const userLike = snapshot.docs.find((doc) => doc.data().userId === currentUser.uid);
+        setNews((prev) => ({
+          ...prev,
+          userLiked: !!userLike,
+        }));
+      }
+    }, (err) => {
+      console.error("Error fetching likes:", err);
+      toast.error("Gagal memuat jumlah suka.");
+      if (currentUser) {
+        addDoc(collection(db, "logs"), {
+          action: "FETCH_LIKES_ERROR",
+          userEmail: currentUser?.email || "anonymous",
+          details: { newsId, slug, error: err.message },
+          timestamp: serverTimestamp(),
+        });
+      }
+    });
+
+    const unsubscribeComments = onSnapshot(query(collection(db, "news", newsId, "comments")), (snapshot) => {
+      const newCommentCount = snapshot.size;
+      setNews((prev) => ({
+        ...prev,
+        commentCount: newCommentCount,
+      }));
+    }, (err) => {
+      console.error("Error fetching comments count:", err);
+      toast.error("Gagal memuat jumlah komentar.");
+      if (currentUser) {
+        addDoc(collection(db, "logs"), {
+          action: "FETCH_COMMENTS_COUNT_ERROR",
           userEmail: currentUser?.email || "anonymous",
           details: { newsId, slug, error: err.message },
           timestamp: serverTimestamp(),
@@ -339,40 +392,6 @@ const NewsDetail = () => {
     };
 
     checkBookmark();
-
-    const unsubscribeLikes = onSnapshot(query(collection(db, "news", newsId, "likes")), (snapshot) => {
-      setLikeCount(snapshot.size);
-      if (currentUser) {
-        const userLike = snapshot.docs.find((doc) => doc.data().userId === currentUser.uid);
-        setUserLiked(!!userLike);
-      }
-    }, (err) => {
-      console.error("Error fetching likes:", err);
-      toast.error("Gagal memuat jumlah suka.");
-      if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "FETCH_LIKES_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
-      }
-    });
-
-    const unsubscribeComments = onSnapshot(query(collection(db, "news", newsId, "comments")), (snapshot) => {
-      setCommentCount(snapshot.size);
-    }, (err) => {
-      console.error("Error fetching comments count:", err);
-      toast.error("Gagal memuat jumlah komentar.");
-      if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "FETCH_COMMENTS_COUNT_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
-      }
-    });
 
     return () => {
       unsubscribeNews();
@@ -409,7 +428,7 @@ const NewsDetail = () => {
         await navigator.share({
           title: news.title,
           url: `${window.location.origin}/berita/${news.slug || slug}`,
-          text: news.content ? news.content.replace(/<[^>]+>/g, "").substring(0, 200) : "Baca berita ini!"
+          text: news.content ? news.content.replace(/<[^>]+>/g, "").substring(0, 200) : "Baca berita ini!",
         });
         toast.success("Berita dibagikan!");
         if (currentUser) {
@@ -501,49 +520,6 @@ const NewsDetail = () => {
     }
   };
 
-  const handleLike = async () => {
-    if (!currentUser) {
-      toast.warn("Silakan masuk untuk menyukai berita.");
-      return false;
-    }
-    if (!newsId) {
-      toast.error("ID berita tidak valid.");
-      return false;
-    }
-    try {
-      const likeRef = doc(db, "news", newsId, "likes", currentUser.uid);
-      const newsDocRef = doc(db, "news", newsId);
-      const actionType = userLiked ? "unlike" : "like";
-      const isAdmin = ADMIN_EMAILS.includes(currentUser.email);
-      if (userLiked) {
-        await deleteDoc(likeRef);
-        await updateDoc(newsDocRef, { likeCount: increment(-1) });
-      } else {
-        await setDoc(likeRef, { userId: currentUser.uid, timestamp: serverTimestamp() });
-        await updateDoc(newsDocRef, { likeCount: increment(1) });
-      }
-      await addDoc(collection(db, "logs"), {
-        action: "LIKE_NEWS",
-        userEmail: currentUser?.email || "anonymous",
-        details: { newsId, title: news.title, slug: news.slug || slug, actionType, isAdmin },
-        timestamp: serverTimestamp(),
-      });
-      return true;
-    } catch (err) {
-      console.error("Error toggling like:", err);
-      toast.error("Gagal mengubah status suka.");
-      if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "LIKE_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
-      }
-      return false;
-    }
-  };
-
   const handleReportClick = () => {
     if (!currentUser) {
       toast.warn("Silakan masuk untuk melaporkan berita.");
@@ -630,17 +606,17 @@ const NewsDetail = () => {
       />
 
       {news.image && (
-  <div className="w-full py-8 mt-16">
-    <div className="max-w-7xl mx-auto px-4">
-      <div className="relative w-full max-w-[995px] mx-auto bg-slate-200 rounded-2xl overflow-hidden shadow-lg" style={{ aspectRatio: "16/9" }}>
-        <img src={news.image} alt={news.imageDescription} className="absolute inset-0 w-full h-full object-cover object-center" onError={(e) => (e.target.src = "https://via.placeholder.com/640x360?text=Berita")} style={{ objectFit: "cover", objectPosition: "center" }} />
-        <div className="absolute top-4 left-4 bg-cyan-600 text-white text-sm font-semibold px-3 py-1 rounded-full">
-          {news.category}
+        <div className="w-full py-8 mt-16">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="relative w-full max-w-[995px] mx-auto bg-slate-200 rounded-2xl overflow-hidden shadow-lg" style={{ aspectRatio: "16/9" }}>
+              <img src={news.image} alt={news.imageDescription} className="absolute inset-0 w-full h-full object-cover object-center" onError={(e) => (e.target.src = "https://via.placeholder.com/640x360?text=Berita")} style={{ objectFit: "cover", objectPosition: "center" }} />
+              <div className="absolute top-4 left-4 bg-cyan-600 text-white text-sm font-semibold px-3 py-1 rounded-full">
+                {news.category}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
       <div className={`${news.image ? "bg-white" : "bg-gradient-to-r from-cyan-600 to-purple-600"} py-8 md:py-12`}>
         <div className="max-w-7xl mx-auto px-4">
@@ -664,7 +640,7 @@ const NewsDetail = () => {
             </div>
             <div className="flex items-center space-x-2">
               <MessageCircle className="w-4 h-4 flex-shrink-0" />
-              <span className="text-sm">{commentCount} komentar</span>
+              <span className="text-sm">{news.commentCount || 0} komentar</span>
             </div>
           </div>
         </div>
@@ -677,7 +653,6 @@ const NewsDetail = () => {
               <div className="prose prose-lg max-w-none prose-headings:text-slate-900 prose-p:text-slate-800 prose-p:leading-relaxed prose-a:text-cyan-600 prose-strong:text-slate-900 prose-li:text-slate-800 text-slate-800" style={{ wordWrap: "break-word", overflowWrap: "break-word", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: news.content }} />
             </div>
 
-            {/* Author and Stats for Mobile (before Comments) */}
             <div className="md:hidden space-y-6">
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h4 className="font-bold text-slate-800 mb-4">Tentang Penulis</h4>
@@ -721,21 +696,26 @@ const NewsDetail = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Suka</span>
-                    <span className="font-semibold text-slate-800">{likeCount}</span>
+                    <span className="font-semibold text-slate-800 break-words">{news.likeCount}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Komentar</span>
-                    <span className="font-semibold text-slate-800">{commentCount}</span>
+                    <span className="font-semibold text-slate-800 break-words">{news.commentCount || 0}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Kata</span>
-                    <span className="font-semibold text-slate-800">{news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0}</span>
+                    <span className="font-semibold text-slate-800 break-words">{news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Waktu Baca</span>
                     <span className="font-semibold text-slate-800">{Math.ceil((news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0) / 200)} min</span>
                   </div>
                 </div>
+                {spamWarning && (
+                  <div className="mt-4 text-red-500 text-sm">
+                    Jika spam anda mengklik terlalu cepat! Harap tunggu {spamTimer} detik
+                  </div>
+                )}
               </div>
             </div>
 
@@ -743,16 +723,15 @@ const NewsDetail = () => {
               <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
                 <h3 className="text-xl font-bold text-slate-800">Berikan Reaksi</h3>
                 <div className="flex items-center space-x-4">
-                  {newsId && <LikeButton newsId={newsId} currentUserId={currentUser?.uid} onLike={handleLike} liked={userLiked} likeCount={likeCount} />}
+                  {newsId && <LikeButton newsId={newsId} />}
                 </div>
               </div>
               <div className="border-t border-slate-200 pt-6">
-                <CommentBox newsId={newsId} currentUser={currentUser} onCommentCountChange={setCommentCount} />
+                <CommentBox newsId={newsId} currentUser={currentUser} onCommentCountChange={(count) => setNews((prev) => ({ ...prev, commentCount: count }))} />
               </div>
             </div>
           </div>
 
-          {/* Author and Stats for Desktop (Sidebar) */}
           <div className="hidden md:block lg:col-span-1 space-y-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h4 className="font-bold text-slate-800 mb-4">Tentang Penulis</h4>
@@ -796,21 +775,26 @@ const NewsDetail = () => {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Suka</span>
-                  <span className="font-semibold text-slate-800">{likeCount}</span>
+                  <span className="font-semibold text-slate-800 break-words">{news.likeCount}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Komentar</span>
-                  <span className="font-semibold text-slate-800">{commentCount}</span>
+                  <span className="font-semibold text-slate-800 break-words">{news.commentCount || 0}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Kata</span>
-                  <span className="font-semibold text-slate-800">{news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0}</span>
+                  <span className="font-semibold text-slate-800 break-words">{news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Waktu Baca</span>
                   <span className="font-semibold text-slate-800">{Math.ceil((news.content ? news.content.replace(/<[^>]+>/g, "").split(/\s+/).filter(word => word.length > 0).length : 0) / 200)} min</span>
                 </div>
               </div>
+              {spamWarning && (
+                <div className="mt-4 text-red-500 text-sm">
+                  Jika spam anda mengklik terlalu cepat! Harap tunggu {spamTimer} detik
+                </div>
+              )}
             </div>
           </div>
         </div>

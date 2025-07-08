@@ -315,6 +315,7 @@ const useCommentAvatar = (cmt) => {
 };
 
 // Comment Component
+// Comment Component
 const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, isSubmitting, replyTo, setReplyTo, replyComment, setReplyComment, handleSubmit, handleLikeComment, handleReplyClick, handleDeleteClick, handleReportClick, handleEditClick, handleShowOriginalClick, handleToggleReplies, areRepliesHidden, setFocusedComment, focusedComment, sanitizeInput, formatTimeAgo, commentRefs, comments }) => {
   const isAdmin = ADMIN_EMAILS.includes(currentUser?.email || "");
   const isOwner = cmt.userId === currentUser?.uid;
@@ -335,7 +336,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
   const replyIndicator = cmt.parentId ? (
     cmt.replyToAuthor === (currentUser?.displayName || currentUser?.email) 
       ? "membalas komentar Anda" 
-      : `membalas komentar ${sanitizeInput(cmt.replyToAuthor || "user12345")}`
+      : `membalas ${sanitizeInput(cmt.replyToAuthor || "user12345")}`
   ) : null;
 
   return (
@@ -345,39 +346,49 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
         onClose={() => setIsAdminModalOpen(false)}
       />
       <div
-        className={`group relative bg-white rounded-xl p-6 shadow-sm border border-slate-200 transition-all duration-300 hover:shadow-md hover:border-cyan-300 ${focusedComment === cmt.id ? 'ring-2 ring-cyan-300' : ''} ${depth > 0 ? 'ml-8 border-l-4 border-cyan-200' : ''}`}
+        className={`group relative rounded-2xl p-5 shadow-md border transition-all duration-300 ease-out hover:shadow-lg ${
+          depth > 0 
+            ? 'ml-10 bg-gray-50 border-gray-200 border-l-4 hover:border-gray-300'
+            : 'bg-white border-gray-200 hover:border-cyan-200'
+        } ${focusedComment === cmt.id ? 'ring-2 ring-cyan-400' : ''}`}
         ref={commentRef}
         onMouseEnter={() => setFocusedComment(cmt.id)}
         onMouseLeave={() => setFocusedComment(null)}
       >
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3">
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-4">
             {renderAvatar()}
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-slate-800">{sanitizeInput(cmt.author || "User")}</span>
-                {replyIndicator && <span className="text-xs text-slate-500">({replyIndicator})</span>}
+                <span className="font-medium text-gray-900 transition-colors group-hover:text-cyan-600">{sanitizeInput(cmt.author || "User")}</span>
+                {replyIndicator && (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    depth > 0 ? 'bg-cyan-100 text-cyan-800' : 'bg-gray-100 text-gray-600'
+                  } transition-all duration-200 group-hover:bg-cyan-200`}>
+                    {replyIndicator}
+                  </span>
+                )}
                 {ADMIN_EMAILS.includes(cmt.userEmail) && (
                   <button
                     onClick={() => setIsAdminModalOpen(true)}
-                    className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full hover:from-purple-600 hover:to-pink-600 transition-colors"
+                    className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-0.5 rounded-full hover:from-purple-600 hover:to-pink-600 transition-all duration-200"
                     aria-label="Lihat informasi admin"
                   >
                     Admin
                   </button>
                 )}
                 {isOwner && (
-                  <span className="text-xs bg-slate-400 text-white px-2 py-0.5 rounded-full">(You)</span>
+                  <span className="text-xs bg-gray-400 text-white px-2 py-0.5 rounded-full animate-pulse-once">(You)</span>
                 )}
               </div>
-              <span className="text-xs text-slate-500">{formatTimeAgo(cmt.createdAt)}</span>
+              <span className="text-xs text-gray-500 transition-colors group-hover:text-gray-600">{formatTimeAgo(cmt.createdAt)}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
             {hasReplies && currentUser && (
               <button
                 onClick={() => handleToggleReplies(cmt.id)}
-                className="text-gray-500 hover:text-gray-700 hover:bg-gray-50 p-2 rounded-lg transition-colors"
+                className="text-gray-500 hover:text-gray-700 bg-gray-50 p-2 rounded-lg transition-all duration-200 hover:bg-gray-100"
                 title={repliesHidden ? "Tampilkan balasan" : "Sembunyikan balasan"}
               >
                 {repliesHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
@@ -386,7 +397,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             {currentUser && !isOwner && (
               <button
                 onClick={() => handleReportClick(cmt.id)}
-                className={`text-orange-500 hover:text-orange-700 hover:bg-orange-50 p-2 rounded-lg transition-colors ${isReported ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`text-orange-500 hover:text-orange-700 bg-orange-50 p-2 rounded-lg transition-all duration-200 hover:bg-orange-100 ${isReported ? 'opacity-50 cursor-not-allowed' : ''}`}
                 title="Laporkan komentar"
                 disabled={isReported}
               >
@@ -396,7 +407,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             {canDelete && (
               <button
                 onClick={() => handleDeleteClick(cmt.id)}
-                className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                className="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition-all duration-200 hover:bg-red-100"
                 title="Hapus komentar"
               >
                 <Trash2 className="w-4 h-4" />
@@ -405,7 +416,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
             {canEdit && (
               <button
                 onClick={() => handleEditClick(cmt.id, cmt.text)}
-                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-colors"
+                className="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg transition-all duration-200 hover:bg-blue-100"
                 title="Edit komentar"
               >
                 <Edit2 className="w-4 h-4" />
@@ -414,12 +425,12 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
           </div>
         </div>
         <div className="mb-4">
-          <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+          <p className={`text-gray-800 leading-relaxed whitespace-pre-wrap break-words transition-colors duration-200 ${depth > 0 ? 'font-medium' : ''} group-hover:text-gray-900 !text-gray-800`}>
             {sanitizeInput(cmt.text)}
             {cmt.isEdited && (
               <button
                 onClick={() => handleShowOriginalClick(cmt.id, cmt.originalText)}
-                className="text-xs text-slate-500 italic ml-2 hover:text-slate-700"
+                className="text-xs text-gray-500 italic ml-2 hover:text-gray-700 transition-colors duration-200"
                 aria-label="Lihat komentar asli"
               >
                 (edited)
@@ -431,43 +442,44 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
           <div className="flex items-center gap-4">
             <button
               onClick={() => handleLikeComment(cmt.id)}
-              className={`flex items-center gap-1 text-sm transition-colors ${likes.userLiked ? 'text-red-500 font-semibold' : 'text-slate-500 hover:text-red-500'}`}
+              className={`flex items-center gap-1 text-sm transition-all duration-200 ${likes.userLiked ? 'text-red-500 font-medium' : 'text-gray-500 hover:text-red-500'}`}
               disabled={isSubmitting}
             >
-              <Heart className={`w-4 h-4 ${likes.userLiked ? 'fill-current' : ''}`} />
-              <span>{likes.count}</span>
+              <Heart className={`w-4 h-4 transition-transform ${likes.userLiked ? 'fill-current scale-110' : ''}`} />
+              <span className="transition-colors">{likes.count}</span>
             </button>
             <button
               onClick={() => handleReplyClick(cmt.id, cmt.author)}
-              className={`flex items-center gap-1 text-sm transition-colors ${currentUser ? 'text-slate-500 hover:text-cyan-600' : 'text-slate-400 cursor-not-allowed'}`}
+              className={`flex items-center gap-1 text-sm transition-all duration-200 ${currentUser ? 'text-gray-500 hover:text-cyan-600' : 'text-gray-400 cursor-not-allowed'}`}
               disabled={!currentUser}
             >
-              <Reply className="w-4 h-4" />
-              <span>Balas</span>
+              <Reply className="w-4 h-4 transition-transform hover:scale-110" />
+              <span className="transition-colors">Balas</span>
             </button>
           </div>
         </div>
         {replyTo && replyTo.id === cmt.id && (
           <div
-            className="mt-4 p-4 bg-slate-50 rounded-lg transform transition-all duration-300 scale-95 opacity-0 animate-[scaleIn_0.3s_ease-out_forwards]"
+            className="mt-6 p-4 rounded-xl border border-gray-300 bg-gray-100 shadow-md transition-all duration-300 ease-in-out"
           >
-            <div className="space-y-3">
+            <div className="space-y-4">
               <textarea
-                className="w-full p-3 rounded-lg border border-slate-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm"
+                className="w-full p-3 rounded-lg border border-gray-200 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200 resize-none text-sm text-white !text-white"
                 rows="3"
                 placeholder={currentUser ? `Balas ${sanitizeInput(cmt.author || "User")}...` : "Silakan masuk untuk membalas komentar"}
+                style={{ color: '#ffffff !important' }} // Hanya warna teks, tanpa background override
                 value={replyComment}
                 onChange={(e) => setReplyComment(e.target.value)}
                 maxLength={500}
                 disabled={!currentUser || isSubmitting}
               />
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">{replyComment.length}/500</span>
+                <span className="text-xs text-white">{replyComment.length}/500</span>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => { setReplyTo(null); setReplyComment(""); }}
-                    className="px-3 py-1 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+                    className="px-3 py-1.5 text-sm text-white hover:text-gray-200 bg-gray-700/50 rounded-lg transition-all duration-200 hover:bg-gray-700"
                     disabled={isSubmitting}
                   >
                     Batal
@@ -475,7 +487,11 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
                   <button
                     onClick={(e) => handleSubmit(e, cmt.id, cmt.author)}
                     disabled={!currentUser || isSubmitting || replyComment.trim() === ""}
-                    className={`px-4 py-1 rounded-lg text-sm font-medium transition-all ${!currentUser || isSubmitting || replyComment.trim() === "" ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-cyan-600 text-white hover:bg-cyan-700'}`}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      !currentUser || isSubmitting || replyComment.trim() === ""
+                        ? 'bg-gray-700/50 text-white/50 cursor-not-allowed'
+                        : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                    }`}
                   >
                     {isSubmitting ? "Mengirim..." : "Kirim"}
                   </button>
@@ -486,7 +502,7 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
         )}
       </div>
       {hasReplies && (
-        <div className={`space-y-4 ${repliesHidden ? 'hidden' : ''}`}>
+        <div className={`space-y-4 ${repliesHidden ? 'hidden' : 'transition-opacity duration-300 opacity-100'}`}>
           {cmt.replies.sort((a, b) => {
             const timeA = a.createdAt?.toDate?.() || new Date(0);
             const timeB = b.createdAt?.toDate?.() || new Date(0);
@@ -526,7 +542,6 @@ const Comment = ({ cmt, depth = 0, currentUser, commentLikes, reportedComments, 
     </div>
   );
 };
-
 const CommentBox = ({ newsId, currentUser: propCurrentUser, onCommentCountChange }) => {
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState([]);

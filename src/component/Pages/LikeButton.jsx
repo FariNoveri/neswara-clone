@@ -4,8 +4,9 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc, increment } from "firebase/f
 import { useAuth } from "../auth/useAuth";
 import { FaHeart } from "react-icons/fa";
 import { debounce } from "lodash";
+import { motion } from "framer-motion";
 
-const LikeButton = ({ newsId }) => {
+const LikeButton = ({ newsId, onLikeStatusChange }) => {
   const { currentUser } = useAuth();
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -17,12 +18,10 @@ const LikeButton = ({ newsId }) => {
 
     const checkLikeStatus = async () => {
       try {
-        // Check if user has liked this news
         const likeDoc = doc(db, "news", newsId, "likes", currentUser.uid);
         const likeSnap = await getDoc(likeDoc);
         setLiked(likeSnap.exists());
 
-        // Get current like count
         const newsDoc = doc(db, "news", newsId);
         const newsSnap = await getDoc(newsDoc);
         if (newsSnap.exists()) {
@@ -54,29 +53,34 @@ const LikeButton = ({ newsId }) => {
         const newsDocRef = doc(db, "news", newsId);
 
         if (liked) {
-          // Unlike: Remove like document and decrement count
           await deleteDoc(likeDocRef);
           await updateDoc(newsDocRef, {
-            likeCount: increment(-1)
+            likeCount: increment(-1),
           });
           setLiked(false);
-          setLikeCount(prev => Math.max(0, prev - 1));
+          setLikeCount((prev) => {
+            const newCount = Math.max(0, prev - 1);
+            onLikeStatusChange?.(newCount, false);
+            return newCount;
+          });
         } else {
-          // Like: Add like document and increment count
           await setDoc(likeDocRef, {
             userId: currentUser.uid,
             userEmail: currentUser.email,
             likedAt: new Date(),
-            newsId: newsId
+            newsId: newsId,
           });
           await updateDoc(newsDocRef, {
-            likeCount: increment(1)
+            likeCount: increment(1),
           });
           setLiked(true);
-          setLikeCount(prev => prev + 1);
+          setLikeCount((prev) => {
+            const newCount = prev + 1;
+            onLikeStatusChange?.(newCount, true);
+            return newCount;
+          });
         }
 
-        // Optional: Log the action (only if logs collection allows it)
         try {
           await setDoc(doc(db, "logs", `like_${newsId}_${currentUser.uid}_${Date.now()}`), {
             action: "LIKE_NEWS",
@@ -89,26 +93,17 @@ const LikeButton = ({ newsId }) => {
           });
         } catch (logError) {
           console.warn("Could not log action:", logError);
-          // Don't show error to user for logging issues
         }
-
       } catch (err) {
         console.error("Error handling like:", err);
         setError("Gagal menyukai berita");
-        
-        // Revert optimistic update
-        if (liked) {
-          setLiked(true);
-          setLikeCount(prev => prev + 1);
-        } else {
-          setLiked(false);
-          setLikeCount(prev => Math.max(0, prev - 1));
-        }
+        setLiked((prev) => prev);
+        setLikeCount((prev) => prev);
       } finally {
         setIsProcessing(false);
       }
     }, 300),
-    [currentUser, newsId, liked, isProcessing]
+    [currentUser, newsId, liked, isProcessing, onLikeStatusChange]
   );
 
   if (!currentUser) {
@@ -136,13 +131,26 @@ const LikeButton = ({ newsId }) => {
         onClick={handleLike}
         disabled={isProcessing}
         className={`flex items-center space-x-1 p-2 rounded transition-all duration-200 ${
-          liked 
-            ? "text-red-500 bg-red-50 hover:bg-red-100" 
+          liked
+            ? "text-red-500 bg-red-50 hover:bg-red-100"
             : "text-gray-500 hover:text-red-500 hover:bg-gray-100"
         } ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
       >
-        <FaHeart className={liked ? "text-red-500" : ""} />
-        <span>{likeCount}</span>
+        <motion.div
+          animate={{
+            scale: liked ? [1, 1.2, 1] : 1,
+            transition: { duration: 0.3 },
+          }}
+        >
+          <FaHeart className={liked ? "text-red-500" : ""} />
+        </motion.div>
+        <motion.span
+          key={likeCount}
+          animate={{ scale: [1, 1.2, 1] }}
+          transition={{ duration: 0.3 }}
+        >
+          {likeCount}
+        </motion.span>
         {isProcessing && <span className="text-xs">...</span>}
       </button>
     </div>
