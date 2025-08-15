@@ -1,14 +1,28 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { db } from "../../firebaseconfig";
-import { doc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  increment,
+  collection,
+  addDoc,
+  serverTimestamp,
+  getDocs,
+  query,
+  where,
+  setDoc,
+  writeBatch,
+  onSnapshot,
+  deleteDoc,
+} from "firebase/firestore";
 import LikeButton from "./LikeButton";
 import CommentBox from "./CommentBox";
 import ReportModal from "./ReportModal";
 import { useAuth } from "../auth/useAuth";
 import { ArrowLeft, Eye, User, Calendar, Share2, Bookmark, MessageCircle, Flag } from "lucide-react";
 import { toast } from "react-toastify";
-import { ADMIN_EMAILS } from "../config/Constants";
 
 const findNewsById = async (newsId, currentUser) => {
   try {
@@ -19,21 +33,25 @@ const findNewsById = async (newsId, currentUser) => {
     }
     console.warn("No document found for ID:", newsId);
     if (currentUser) {
-      await addDoc(collection(db, "logs"), {
+      const tokenResult = await currentUser.getIdTokenResult(true);
+      const userEmail = tokenResult.claims.email || "anonymous";
+      await setDoc(doc(collection(db, "logs")), {
         action: "NEWS_NOT_FOUND_BY_ID",
-        userEmail: currentUser?.email || "anonymous",
-        details: { newsId, error: "No news found with matching ID" },
+        userEmail,
+        details: JSON.stringify({ newsId, error: "No news found with matching ID" }).slice(0, 1000),
         timestamp: serverTimestamp(),
       });
     }
     return null;
   } catch (error) {
-    console.error("Error finding news by ID:", error);
+    console.error("Error finding news by ID:", error, { code: error.code, message: error.message });
     if (currentUser) {
-      await addDoc(collection(db, "logs"), {
+      const tokenResult = await currentUser.getIdTokenResult(true);
+      const userEmail = tokenResult.claims.email || "anonymous";
+      await setDoc(doc(collection(db, "logs")), {
         action: "ERROR_NEWS_FETCH_BY_ID",
-        userEmail: currentUser?.email || "anonymous",
-        details: { newsId, error: error.message },
+        userEmail,
+        details: JSON.stringify({ newsId, error: error.message, errorCode: error.code }).slice(0, 1000),
         timestamp: serverTimestamp(),
       });
     }
@@ -44,8 +62,9 @@ const findNewsById = async (newsId, currentUser) => {
 const NewsDetail = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin, loading: authLoading } = useAuth();
   const [news, setNews] = useState(null);
+  const [commentCount, setCommentCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isBookmarked, setIsBookmarked] = useState(false);
@@ -57,20 +76,40 @@ const NewsDetail = () => {
   const initialFetchRef = useRef(false);
   const hasViewedRef = useRef(false);
 
-  useEffect(() => {
-    const ensureUserDocument = async (user) => {
-      if (!user) return false;
+  const ensureUserDocument = async (user, retries = 3) => {
+    if (!user || !user.uid || !user.getIdToken) {
+      console.error("Invalid user object:", user);
+      return false;
+    }
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
       try {
+        const tokenResult = await user.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
+
         if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            email: user.email || "anonymous",
-            isAdmin: ADMIN_EMAILS.includes(user.email) || false,
+          const userData = {
+            email: userEmail,
             createdAt: serverTimestamp(),
-          });
-          console.log("Created user document for:", user.uid);
-          await new Promise(resolve => setTimeout(resolve, 500));
+            emailVerified: user.emailVerified || false,
+            lastLogin: serverTimestamp(),
+            isAdmin: false,
+            role: "user",
+          };
+
+          if (user.displayName && user.displayName.trim().length <= 50) {
+            userData.displayName = user.displayName.trim();
+          }
+          if (user.photoURL && user.photoURL.trim().length <= 500) {
+            userData.photoURL = user.photoURL.trim();
+          }
+
+          await setDoc(userRef, userData);
+          console.log(`User document created for UID: ${user.uid}`);
+
+          // Verify creation
           const verifySnap = await getDoc(userRef);
           if (!verifySnap.exists()) {
             throw new Error("Failed to verify user document creation");
@@ -79,27 +118,324 @@ const NewsDetail = () => {
         }
         return true;
       } catch (err) {
-        console.error("Error creating/verifying user document:", err);
-        await addDoc(collection(db, "logs"), {
-          action: "USER_DOCUMENT_ERROR",
-          userEmail: user.email || "anonymous",
-          details: { uid: user.uid, error: err.message },
+        console.error(`Attempt ${attempt} - Error creating/verifying user document:`, err);
+        if (attempt === retries) {
+          console.error("Max retries reached for user document creation");
+          return false;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    return false;
+  };
+
+  const debounce = (func, wait) => {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  };
+
+  const updateViews = async (newsId, user) => {
+    if (!user || hasViewedRef.current || !user.getIdToken) {
+      console.warn("Skipping views update: user missing or already viewed", { user: user?.uid, hasViewed: hasViewedRef.current });
+      return;
+    }
+    try {
+      await user.getIdToken(true);
+      const batch = writeBatch(db);
+      const viewDocRef = doc(db, "news", newsId, "views", user.uid);
+      const viewSnap = await getDoc(viewDocRef);
+      if (!viewSnap.exists()) {
+        const newsDocRef = doc(db, "news", newsId);
+        batch.update(newsDocRef, { views: increment(1) });
+        const tokenResult = await user.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
+        batch.set(viewDocRef, {
+          userId: user.uid,
+          userEmail,
+          viewedAt: serverTimestamp(),
+        });
+        await batch.commit();
+        hasViewedRef.current = true;
+        console.log("View updated for newsId:", newsId, "user:", user.uid);
+      } else {
+        hasViewedRef.current = true;
+      }
+    } catch (updateErr) {
+      console.warn("Error updating views:", updateErr, { code: updateErr.code, message: updateErr.message });
+      toast.warn("Gagal memperbarui jumlah tampilan.", {
+        position: "top-center",
+        autoClose: 3000,
+        toastId: "views-error",
+      });
+      if (user) {
+        const tokenResult = await user.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
+        await setDoc(doc(collection(db, "logs")), {
+          action: "VIEWS_UPDATE_ERROR",
+          userEmail,
+          details: JSON.stringify({ newsId, slug, error: updateErr.message, errorCode: updateErr.code }).slice(0, 1000),
           timestamp: serverTimestamp(),
         });
-        return false;
       }
-    };
+    }
+  };
 
+  const debouncedUpdateViews = debounce(updateViews, 1000);
+
+  const handleCommentCountChange = useCallback((count) => {
+    setCommentCount(count);
+  }, []);
+
+  const checkBookmark = async () => {
+    if (!currentUser || !currentUser.getIdToken || !newsId) {
+      console.warn("Skipping bookmark check: missing user or newsId", { user: currentUser?.uid, newsId });
+      setIsBookmarked(false);
+      setBookmarkId(null);
+      return;
+    }
+
+    try {
+      const tokenResult = await currentUser.getIdTokenResult(true);
+      const userEmail = tokenResult.claims.email || "anonymous";
+      console.log("Checking bookmark for:", {
+        userId: currentUser.uid,
+        userEmail,
+        newsId,
+        tokenSnippet: tokenResult.token.substring(0, 20) + "...",
+        emailVerified: tokenResult.claims.email_verified,
+      });
+      const qDoc = query(
+        collection(db, "savedArticles"),
+        where("userId", "==", currentUser.uid),
+        where("newsId", "==", newsId)
+      );
+      const snapshot = await getDocs(qDoc);
+      console.log("Bookmark query result:", {
+        userId: currentUser.uid,
+        newsId,
+        docCount: snapshot.size,
+        docs: snapshot.docs.map(doc => ({ id: doc.id, data: doc.data() })),
+      });
+
+      if (!snapshot.empty) {
+        const bookmarkDoc = snapshot.docs[0];
+        const bookmarkData = bookmarkDoc.data();
+        if (bookmarkData.userId !== currentUser.uid) {
+          console.error("Bookmark userId mismatch:", {
+            bookmarkUserId: bookmarkData.userId,
+            currentUserId: currentUser.uid,
+            bookmarkId: bookmarkDoc.id,
+          });
+          setIsBookmarked(false);
+          setBookmarkId(null);
+          return;
+        }
+        setIsBookmarked(true);
+        setBookmarkId(bookmarkDoc.id);
+        console.log("Bookmark found:", { bookmarkId: bookmarkDoc.id, data: bookmarkData });
+      } else {
+        setIsBookmarked(false);
+        setBookmarkId(null);
+        console.log("No bookmark found for user and newsId");
+      }
+    } catch (error) {
+      console.error("Error checking bookmark:", error, {
+        code: error.code,
+        message: error.message,
+        userId: currentUser.uid,
+        newsId,
+      });
+      toast.error("Gagal memeriksa status bookmark.");
+      try {
+        const tokenResult = await currentUser.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
+        await setDoc(doc(collection(db, "logs")), {
+          action: "CHECK_BOOKMARK_ERROR",
+          userEmail,
+          details: JSON.stringify({
+            newsId,
+            slug,
+            error: error.message,
+            errorCode: error.code,
+          }).slice(0, 1000),
+          timestamp: serverTimestamp(),
+        });
+      } catch (logError) {
+        console.error("Failed to log bookmark check error:", logError);
+      }
+      setIsBookmarked(false);
+      setBookmarkId(null);
+    }
+  };
+
+  const toggleBookmark = async () => {
+    if (!currentUser || !currentUser.uid || !currentUser.getIdToken) {
+      console.error("Invalid or missing user object:", currentUser);
+      toast.warn("Silakan masuk untuk menyimpan artikel.");
+      return;
+    }
+
+    if (!newsId || typeof newsId !== "string" || !newsId.match(/^[a-zA-Z0-9_-]{1,128}$/)) {
+      console.error("Invalid newsId:", newsId);
+      toast.error("ID berita tidak valid.");
+      return;
+    }
+
+    try {
+      const tokenResult = await currentUser.getIdTokenResult(true);
+      const userEmail = tokenResult.claims.email || "anonymous";
+      console.log("Authentication details:", {
+        uid: currentUser.uid,
+        email: userEmail,
+        emailVerified: tokenResult.claims.email_verified,
+        tokenSnippet: tokenResult.token.substring(0, 20) + "...",
+      });
+
+      if (!userEmail || userEmail === "anonymous") {
+        console.error("No valid email in auth token:", userEmail);
+        toast.error("Email autentikasi tidak ditemukan.");
+        return;
+      }
+
+      const userDocCreated = await ensureUserDocument(currentUser);
+      if (!userDocCreated) {
+        console.error("Failed to ensure user document for UID:", currentUser.uid);
+        toast.error("Gagal memverifikasi akun pengguna.");
+        return;
+      }
+
+      const bookmarkData = {
+        userId: currentUser.uid,
+        userEmail,
+        newsId: String(newsId).slice(0, 128),
+        title: String(news.title || "Untitled").slice(0, 500),
+        slug: String(news.slug || slug || "").slice(0, 200),
+        summary: news.content
+          ? String(news.content.replace(/<[^>]+>/g, "")).slice(0, 200)
+          : "No summary available",
+        imageUrl: String(news.image || "https://via.placeholder.com/640x360").slice(0, 500),
+        category: String(news.category || "Umum").slice(0, 100),
+        author: String(news.author || "Unknown").slice(0, 100),
+        timestamp: serverTimestamp(),
+      };
+
+      const logAction = async (action, bookmarkId) => {
+        if (!["SAVE_NEWS", "UNSAVE_NEWS"].includes(action)) {
+          console.error("Invalid action:", action);
+          return;
+        }
+
+        const logData = {
+          action,
+          userEmail,
+          details: JSON.stringify({
+            newsId,
+            title: bookmarkData.title,
+            slug: bookmarkData.slug,
+            bookmarkId,
+          }).slice(0, 1000),
+          timestamp: serverTimestamp(),
+        };
+
+        try {
+          console.log("Attempting to log action:", { action, logData });
+          await setDoc(doc(collection(db, "logs")), logData);
+          console.log(`${action} action logged successfully`);
+        } catch (logError) {
+          console.error(`Failed to log ${action} action:`, logError, { logData });
+        }
+      };
+
+      if (isBookmarked && bookmarkId) {
+        if (!bookmarkId.match(/^[a-zA-Z0-9_-]{1,128}$/)) {
+          console.error("Invalid bookmarkId format:", bookmarkId);
+          toast.error("ID bookmark tidak valid.");
+          setIsBookmarked(false);
+          setBookmarkId(null);
+          await checkBookmark();
+          return;
+        }
+
+        const bookmarkRef = doc(db, "savedArticles", bookmarkId);
+        const bookmarkSnap = await getDoc(bookmarkRef);
+        if (!bookmarkSnap.exists()) {
+          console.error("Bookmark document does not exist:", bookmarkId);
+          setIsBookmarked(false);
+          setBookmarkId(null);
+          toast.error("Bookmark tidak ditemukan.");
+          await checkBookmark();
+          return;
+        }
+        if (bookmarkSnap.data().userId !== currentUser.uid) {
+          console.error("Bookmark userId mismatch:", {
+            bookmarkUserId: bookmarkSnap.data().userId,
+            currentUserId: currentUser.uid,
+            bookmarkId,
+          });
+          toast.error("Anda tidak memiliki izin untuk menghapus bookmark ini.");
+          setIsBookmarked(false);
+          setBookmarkId(null);
+          await checkBookmark();
+          return;
+        }
+
+        await deleteDoc(bookmarkRef);
+        await logAction("UNSAVE_NEWS", bookmarkId);
+        setIsBookmarked(false);
+        setBookmarkId(null);
+        toast.success("Bookmark dihapus!");
+      } else {
+        const bookmarkRef = await addDoc(collection(db, "savedArticles"), bookmarkData);
+        await logAction("SAVE_NEWS", bookmarkRef.id);
+        setIsBookmarked(true);
+        setBookmarkId(bookmarkRef.id);
+        toast.success("Artikel disimpan!");
+      }
+    } catch (err) {
+      console.error("Error toggling bookmark:", err, {
+        code: err.code,
+        message: err.message,
+        stack: err.stack,
+      });
+      toast.error(`Gagal mengelola bookmark: ${err.message}`);
+      try {
+        const tokenResult = await currentUser.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
+        await setDoc(doc(collection(db, "logs")), {
+          action: "BOOKMARK_ERROR",
+          userEmail,
+          details: JSON.stringify({
+            newsId,
+            slug,
+            error: err.message,
+            errorCode: err.code,
+            isBookmarked,
+            bookmarkId,
+          }).slice(0, 1000),
+          timestamp: serverTimestamp(),
+        });
+      } catch (logError) {
+        console.error("Failed to log bookmark error:", logError);
+      }
+    }
+  };
+
+  useEffect(() => {
     const fetchNews = async () => {
       if (!slug || slug.trim() === "") {
         console.error("Invalid or empty slug:", slug);
         setError("Slug berita tidak valid.");
         setLoading(false);
         if (currentUser) {
-          await addDoc(collection(db, "logs"), {
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          await setDoc(doc(collection(db, "logs")), {
             action: "INVALID_SLUG",
-            userEmail: currentUser?.email || "anonymous",
-            details: { slug, error: "Slug is undefined or empty" },
+            userEmail,
+            details: JSON.stringify({ slug, error: "Slug is undefined or empty" }).slice(0, 1000),
             timestamp: serverTimestamp(),
           });
         }
@@ -120,11 +456,27 @@ const NewsDetail = () => {
         return;
       }
 
+      if (authLoading) {
+        console.log("Waiting for auth to resolve...");
+        return;
+      }
+
       setLoading(true);
       setError(null);
       try {
         let userDocCreated = true;
         if (currentUser) {
+          if (!currentUser.getIdToken) {
+            console.error("currentUser missing getIdToken method", { uid: currentUser.uid });
+            throw new Error("Invalid user object");
+          }
+          await currentUser.getIdToken(true);
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          console.log("Authentication details for fetchNews:", {
+            uid: currentUser.uid,
+            email: tokenResult.claims.email,
+            emailVerified: tokenResult.claims.email_verified,
+          });
           userDocCreated = await ensureUserDocument(currentUser);
           if (!userDocCreated) {
             console.warn("Skipping views update due to user document creation failure");
@@ -166,54 +518,20 @@ const NewsDetail = () => {
             console.log(`Initial fetch detected slug mismatch: redirecting from ${slug} to ${newsData.slug}`);
             navigate(`/berita/${newsData.slug}`, { replace: true });
             if (currentUser) {
-              await addDoc(collection(db, "logs"), {
+              const tokenResult = await currentUser.getIdTokenResult(true);
+              const userEmail = tokenResult.claims.email || "anonymous";
+              await setDoc(doc(collection(db, "logs")), {
                 action: "INITIAL_SLUG_REDIRECT",
-                userEmail: currentUser?.email || "anonymous",
-                details: { newsId: newsData.id, oldSlug: slug, newSlug: newsData.slug },
+                userEmail,
+                details: JSON.stringify({ newsId: newsData.id, oldSlug: slug, newSlug: newsData.slug }).slice(0, 1000),
                 timestamp: serverTimestamp(),
               });
             }
             return;
           }
 
-          if (currentUser && newsData.id && userDocCreated && !hasViewedRef.current) {
-            try {
-              // Check if user has already viewed this article
-              const viewDocRef = doc(db, "news", newsData.id, "views", currentUser.uid);
-              const viewSnap = await getDoc(viewDocRef);
-              if (!viewSnap.exists()) {
-                // Increment views and mark user as having viewed
-                const newsDocRef = doc(db, "news", newsData.id);
-                await updateDoc(newsDocRef, { views: increment(1) });
-                await setDoc(viewDocRef, {
-                  userId: currentUser.uid,
-                  userEmail: currentUser.email || "anonymous",
-                  viewedAt: serverTimestamp(),
-                });
-                hasViewedRef.current = true;
-                await addDoc(collection(db, "logs"), {
-                  action: "VIEW_NEWS",
-                  userEmail: currentUser?.email || "anonymous",
-                  details: { newsId: newsData.id, slug },
-                  timestamp: serverTimestamp(),
-                });
-              } else {
-                hasViewedRef.current = true; // User already viewed, no increment
-              }
-            } catch (updateErr) {
-              console.warn("Error updating views (non-critical):", updateErr);
-              toast.warn("Gagal memperbarui jumlah tampilan.", {
-                position: 'top-center',
-                autoClose: 3000,
-                toastId: 'views-error',
-              });
-              await addDoc(collection(db, "logs"), {
-                action: "VIEWS_UPDATE_ERROR",
-                userEmail: currentUser?.email || "anonymous",
-                details: { newsId: newsData.id, slug, error: updateErr.message },
-                timestamp: serverTimestamp(),
-              });
-            }
+          if (currentUser && newsData.id && userDocCreated) {
+            debouncedUpdateViews(newsData.id, currentUser);
           }
         } else {
           console.warn("No news found for slug:", slug);
@@ -233,23 +551,27 @@ const NewsDetail = () => {
             hideProfilePicture: false,
           });
           if (currentUser) {
-            await addDoc(collection(db, "logs"), {
+            const tokenResult = await currentUser.getIdTokenResult(true);
+            const userEmail = tokenResult.claims.email || "anonymous";
+            await setDoc(doc(collection(db, "logs")), {
               action: "NEWS_NOT_FOUND",
-              userEmail: currentUser?.email || "anonymous",
-              details: { slug, error: "No news found for slug" },
+              userEmail,
+              details: JSON.stringify({ slug, error: "No news found for slug" }).slice(0, 1000),
               timestamp: serverTimestamp(),
             });
           }
         }
       } catch (err) {
-        console.error("Error fetching news:", err);
+        console.error("Error fetching news:", err, { code: err.code, message: err.message });
         setError("Gagal memuat berita: " + err.message);
         toast.error("Gagal memuat berita.");
         if (currentUser) {
-          await addDoc(collection(db, "logs"), {
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          await setDoc(doc(collection(db, "logs")), {
             action: "FETCH_NEWS_ERROR",
-            userEmail: currentUser?.email || "anonymous",
-            details: { slug, error: err.message },
+            userEmail,
+            details: JSON.stringify({ slug, error: err.message, errorCode: err.code }).slice(0, 1000),
             timestamp: serverTimestamp(),
           });
         }
@@ -273,10 +595,16 @@ const NewsDetail = () => {
     };
 
     fetchNews();
-  }, [slug, currentUser, navigate]);
+  }, [slug, currentUser, isAdmin, authLoading, navigate]);
 
   useEffect(() => {
     if (!newsId || !initialFetchRef.current) return;
+
+    if (typeof onSnapshot !== "function") {
+      console.error("onSnapshot is not defined. Check Firebase Firestore import.");
+      setError("Gagal memuat pembaruan berita: Konfigurasi Firebase salah.");
+      return;
+    }
 
     const unsubscribeNews = onSnapshot(doc(db, "news", newsId), (doc) => {
       if (doc.exists()) {
@@ -299,24 +627,36 @@ const NewsDetail = () => {
         setError("Berita telah dihapus.");
         navigate('/news', { replace: true });
         if (currentUser) {
-          addDoc(collection(db, "logs"), {
-            action: "NEWS_DELETED",
-            userEmail: currentUser?.email || "anonymous",
-            details: { newsId, slug },
-            timestamp: serverTimestamp(),
-          });
+          try {
+            const tokenResult = currentUser.getIdTokenResult(true);
+            const userEmail = tokenResult.claims.email || "anonymous";
+            setDoc(doc(collection(db, "logs")), {
+              action: "NEWS_DELETED",
+              userEmail,
+              details: JSON.stringify({ newsId, slug }).slice(0, 1000),
+              timestamp: serverTimestamp(),
+            });
+          } catch (logError) {
+            console.error("Failed to log news deleted error:", logError);
+          }
         }
       }
     }, (err) => {
-      console.error("Error in news onSnapshot:", err);
+      console.error("Error in news onSnapshot:", err, { code: err.code, message: err.message });
       toast.error("Gagal memuat pembaruan berita.");
       if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "ONSNAPSHOT_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
+        try {
+          const tokenResult = currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          setDoc(doc(collection(db, "logs")), {
+            action: "ONSNAPSHOT_ERROR",
+            userEmail,
+            details: JSON.stringify({ newsId, slug, error: err.message, errorCode: err.code }).slice(0, 1000),
+            timestamp: serverTimestamp(),
+          });
+        } catch (logError) {
+          console.error("Failed to log onSnapshot error:", logError);
+        }
       }
     });
 
@@ -334,86 +674,52 @@ const NewsDetail = () => {
         }));
       }
     }, (err) => {
-      console.error("Error fetching likes:", err);
+      console.error("Error fetching likes:", err, { code: err.code, message: err.message });
       toast.error("Gagal memuat jumlah suka.");
       if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "FETCH_LIKES_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
-      }
-    });
-
-    const unsubscribeComments = onSnapshot(query(collection(db, "news", newsId, "comments")), (snapshot) => {
-      const newCommentCount = snapshot.size;
-      setNews((prev) => ({
-        ...prev,
-        commentCount: newCommentCount,
-      }));
-    }, (err) => {
-      console.error("Error fetching comments count:", err);
-      toast.error("Gagal memuat jumlah komentar.");
-      if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "FETCH_COMMENTS_COUNT_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
-          timestamp: serverTimestamp(),
-        });
-      }
-    });
-
-    const checkBookmark = async () => {
-      if (!currentUser) return;
-      try {
-        const q = query(collection(db, "savedArticles"), where("userId", "==", currentUser.uid), where("articleId", "==", newsId));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          setIsBookmarked(true);
-          setBookmarkId(snapshot.docs[0].id);
-        } else {
-          setIsBookmarked(false);
-          setBookmarkId(null);
-        }
-      } catch (err) {
-        console.error("Error checking bookmark:", err);
-        toast.error("Gagal memeriksa status bookmark.");
-        if (currentUser) {
-          addDoc(collection(db, "logs"), {
-            action: "CHECK_BOOKMARK_ERROR",
-            userEmail: currentUser?.email || "anonymous",
-            details: { newsId, slug, error: err.message },
+        try {
+          const tokenResult = currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          setDoc(doc(collection(db, "logs")), {
+            action: "FETCH_LIKES_ERROR",
+            userEmail,
+            details: JSON.stringify({ newsId, slug, error: err.message, errorCode: err.code }).slice(0, 1000),
             timestamp: serverTimestamp(),
           });
+        } catch (logError) {
+          console.error("Failed to log fetch likes error:", logError);
         }
       }
-    };
+    });
 
     checkBookmark();
 
     return () => {
       unsubscribeNews();
       unsubscribeLikes();
-      unsubscribeComments();
     };
-  }, [newsId, currentUser, slug, navigate]);
+  }, [newsId, currentUser, slug]);
 
   useEffect(() => {
     const handleNewsEdited = (event) => {
       const { newsId: editedNewsId, newSlug, oldSlug } = event.detail;
       console.log(`NewsDetail: newsEdited event received: newsId=${editedNewsId}, newSlug=${newSlug}, oldSlug=${oldSlug}, currentSlug=${slug}`);
       if (editedNewsId && editedNewsId === newsId && oldSlug === slug && newSlug !== slug) {
-        console.log(`Redirecting from /berita/${slug} to /berita/${newSlug}`);
+        console.log(`Redirecting from ${slug} to ${newSlug}`);
         navigate(`/berita/${newSlug}`, { replace: true });
         if (currentUser) {
-          addDoc(collection(db, "logs"), {
-            action: "SLUG_REDIRECT_EVENT",
-            userEmail: currentUser?.email || "anonymous",
-            details: { newsId: editedNewsId, oldSlug, newSlug },
-            timestamp: serverTimestamp(),
-          });
+          try {
+            const tokenResult = currentUser.getIdTokenResult(true);
+            const userEmail = tokenResult.claims.email || "anonymous";
+            setDoc(doc(collection(db, "logs")), {
+              action: "SLUG_REDIRECT_EVENT",
+              userEmail,
+              details: JSON.stringify({ newsId: editedNewsId, oldSlug, newSlug }).slice(0, 1000),
+              timestamp: serverTimestamp(),
+            });
+          } catch (logError) {
+            console.error("Failed to log slug redirect event:", logError);
+          }
         }
       }
     };
@@ -432,21 +738,25 @@ const NewsDetail = () => {
         });
         toast.success("Berita dibagikan!");
         if (currentUser) {
-          await addDoc(collection(db, "logs"), {
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          await setDoc(doc(collection(db, "logs")), {
             action: "SHARE_NEWS",
-            userEmail: currentUser?.email || "anonymous",
-            details: { newsId, title: news.title, slug: news.slug || slug, isAdmin: ADMIN_EMAILS.includes(currentUser.email) },
+            userEmail,
+            details: JSON.stringify({ newsId, title: news.title, slug: news.slug || slug, isAdmin }).slice(0, 1000),
             timestamp: serverTimestamp(),
           });
         }
       } catch (err) {
-        console.error("Error sharing:", err);
+        console.error("Error sharing:", err, { code: err.code, message: err.message });
         toast.error("Gagal membagikan berita.");
         if (currentUser) {
-          await addDoc(collection(db, "logs"), {
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          const userEmail = tokenResult.claims.email || "anonymous";
+          await setDoc(doc(collection(db, "logs")), {
             action: "SHARE_NEWS_ERROR",
-            userEmail: currentUser?.email || "anonymous",
-            details: { newsId, slug, error: err.message },
+            userEmail,
+            details: JSON.stringify({ newsId, slug, error: err.message, errorCode: err.code }).slice(0, 1000),
             timestamp: serverTimestamp(),
           });
         }
@@ -455,65 +765,12 @@ const NewsDetail = () => {
       navigator.clipboard.writeText(`${window.location.origin}/berita/${news.slug || slug}`);
       toast.success("Link berita disalin ke clipboard!");
       if (currentUser) {
-        await addDoc(collection(db, "logs"), {
+        const tokenResult = await currentUser.getIdTokenResult(true);
+        const userEmail = tokenResult.claims.email || "anonymous";
+        await setDoc(doc(collection(db, "logs")), {
           action: "COPY_LINK",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, title: news.title, slug: news.slug || slug, isAdmin: ADMIN_EMAILS.includes(currentUser.email) },
-          timestamp: serverTimestamp(),
-        });
-      }
-    }
-  };
-
-  const toggleBookmark = async () => {
-    if (!currentUser) {
-      toast.warn("Silakan masuk untuk menyimpan artikel.");
-      return;
-    }
-    if (!newsId) {
-      toast.error("ID berita tidak valid.");
-      return;
-    }
-    try {
-      if (isBookmarked) {
-        await deleteDoc(doc(db, "savedArticles", bookmarkId));
-        await addDoc(collection(db, "logs"), {
-          action: "UNSAVE_NEWS",
-          userEmail: currentUser?.email || "anonymous",
-          details: { articleId: newsId, title: news.title, slug: news.slug || slug, isAdmin: ADMIN_EMAILS.includes(currentUser.email) },
-          timestamp: serverTimestamp(),
-        });
-        setIsBookmarked(false);
-        setBookmarkId(null);
-        toast.success("Bookmark dihapus!");
-      } else {
-        const bookmarkRef = await addDoc(collection(db, "savedArticles"), {
-          userId: currentUser.uid,
-          articleId: newsId,
-          title: news.title,
-          slug: news.slug || slug,
-          summary: news.content ? news.content.replace(/<[^>]+>/g, "").substring(0, 200) : "No summary available",
-          imageUrl: news.image || "https://via.placeholder.com/640x360",
-          savedAt: serverTimestamp(),
-        });
-        await addDoc(collection(db, "logs"), {
-          action: "SAVE_NEWS",
-          userEmail: currentUser?.email || "anonymous",
-          details: { articleId: newsId, title: news.title, slug: news.slug || slug, isAdmin: ADMIN_EMAILS.includes(currentUser.email) },
-          timestamp: serverTimestamp(),
-        });
-        setIsBookmarked(true);
-        setBookmarkId(bookmarkRef.id);
-        toast.success("Artikel disimpan!");
-      }
-    } catch (err) {
-      console.error("Error toggling bookmark:", err);
-      toast.error("Gagal mengelola bookmark.");
-      if (currentUser) {
-        addDoc(collection(db, "logs"), {
-          action: "BOOKMARK_ERROR",
-          userEmail: currentUser?.email || "anonymous",
-          details: { newsId, slug, error: err.message },
+          userEmail,
+          details: JSON.stringify({ newsId, title: news.title, slug: news.slug || slug, isAdmin }).slice(0, 1000),
           timestamp: serverTimestamp(),
         });
       }
@@ -640,7 +897,7 @@ const NewsDetail = () => {
             </div>
             <div className="flex items-center space-x-2">
               <MessageCircle className="w-4 h-4 flex-shrink-0" />
-              <span className="text-sm">{news.commentCount || 0} komentar</span>
+              <span className="text-sm">{commentCount} komentar</span>
             </div>
           </div>
         </div>
@@ -700,7 +957,7 @@ const NewsDetail = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Komentar</span>
-                    <span className="font-semibold text-slate-800 break-words">{news.commentCount || 0}</span>
+                    <span className="font-semibold text-slate-800 break-words">{commentCount}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Kata</span>
@@ -727,7 +984,7 @@ const NewsDetail = () => {
                 </div>
               </div>
               <div className="border-t border-slate-200 pt-6">
-                <CommentBox newsId={newsId} currentUser={currentUser} onCommentCountChange={(count) => setNews((prev) => ({ ...prev, commentCount: count }))} />
+                <CommentBox newsId={newsId} currentUser={currentUser} onCommentCountChange={handleCommentCountChange} />
               </div>
             </div>
           </div>
@@ -779,7 +1036,7 @@ const NewsDetail = () => {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Komentar</span>
-                  <span className="font-semibold text-slate-800 break-words">{news.commentCount || 0}</span>
+                  <span className="font-semibold text-slate-800 break-words">{commentCount}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-600">Kata</span>
@@ -793,7 +1050,7 @@ const NewsDetail = () => {
               {spamWarning && (
                 <div className="mt-4 text-red-500 text-sm">
                   Jika spam anda mengklik terlalu cepat! Harap tunggu {spamTimer} detik
-                </div>
+                  </div>
               )}
             </div>
           </div>

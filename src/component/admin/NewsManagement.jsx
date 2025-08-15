@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, PlusCircle, Eye, Edit3, Trash2, MessageCircle } from 'lucide-react';
-import { collection, getDocs, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc, where, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../firebaseconfig';
+import { collection, getDocs, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, where, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from '../../firebaseconfig';
 import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
 import NewsModal from './NewsModal';
-import { createNews } from '../config/createNews.js';
 
 const NewsManagement = ({ logActivity, setStats }) => {
   const [news, setNews] = useState([]);
@@ -25,14 +24,67 @@ const NewsManagement = ({ logActivity, setStats }) => {
     konten: '',
     kategori: '',
     author: '',
+    authorId: '',
     gambar: '',
     ringkasan: '',
     gambarDeskripsi: '',
-    slug: ''
+    slug: '',
+    hideProfilePicture: false,
+    views: 0,
+    komentar: 0,
   });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, id: null, title: '', message: '' });
-
+  const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
+
+  // Monitor admin status using Firestore
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const checkAdminStatus = async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists() && userDoc.data().isAdmin === true) {
+          setIsAdmin(true);
+          console.log('[NewsManagement] User is admin via Firestore');
+          await logActivity('NEWS_MANAGEMENT_ACCESS', { userEmail: user.email });
+        } else {
+          setIsAdmin(false);
+          console.warn('[NewsManagement] User is not an admin or document missing', {
+            userId: user.uid,
+            userEmail: user.email,
+            exists: userDoc.exists(),
+            isAdmin: userDoc.exists() ? userDoc.data().isAdmin : null,
+          });
+          await logActivity('NEWS_MANAGEMENT_ACCESS_DENIED', {
+            userEmail: user.email,
+            error: 'User is not an admin or document missing',
+          });
+        }
+      } catch (error) {
+        console.error('[NewsManagement] Error checking admin status:', error);
+        setIsAdmin(false);
+        toast.error('Gagal memverifikasi status admin. Silakan coba lagi.');
+        await logActivity('CHECK_ADMIN_STATUS_ERROR', { error: error.message });
+      }
+    };
+
+    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      if (currentUser) {
+        checkAdminStatus();
+      } else {
+        setIsAdmin(false);
+        navigate('/');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate, logActivity]);
 
   const fetchNews = () => {
     setNewsLoading(true);
@@ -101,17 +153,17 @@ const NewsManagement = ({ logActivity, setStats }) => {
           ...prev,
           totalNews,
           totalViews,
-          totalComments
+          totalComments,
         }));
       } catch (error) {
-        console.error('Error fetching news:', error);
-        logActivity('FETCH_NEWS_ERROR', { error: error.message });
+        console.error('[NewsManagement] Error fetching news:', error);
+        await logActivity('FETCH_NEWS_ERROR', { error: error.message });
         toast.error('Gagal memuat berita.');
       } finally {
         setNewsLoading(false);
       }
     }, (error) => {
-      console.error('Error in news snapshot:', error);
+      console.error('[NewsManagement] Error in news snapshot:', error);
       logActivity('FETCH_NEWS_SNAPSHOT_ERROR', { error: error.message });
       toast.error('Gagal memuat pembaruan berita.');
       setNewsLoading(false);
@@ -130,72 +182,17 @@ const NewsManagement = ({ logActivity, setStats }) => {
     };
   }, [filterTitle, filterCategory, filterAuthor, filterDate, filterCustomDate, filterSortBy]);
 
-  const handleSubmit = async (formData) => {
-    setNewsLoading(true);
-
-    if (!formData.judul || !formData.konten || !formData.kategori || !formData.author) {
-      toast.error('Mohon lengkapi semua field yang wajib diisi.');
-      setNewsLoading(false);
-      return null;
+  const handleDeleteNews = async (id) => {
+    if (!isAdmin) {
+      toast.error('Hanya admin yang dapat menghapus berita.');
+      await logActivity('DELETE_NEWS_DENIED', { newsId: id, error: 'User is not an admin' });
+      return;
     }
-
-    try {
-      let newsId;
-      if (editingNews) {
-        const newsRef = doc(db, 'news', editingNews.id);
-        await updateDoc(newsRef, {
-          ...formData,
-          updatedAt: serverTimestamp()
-        });
-        const bookmarkQuery = query(
-          collection(db, 'savedArticles'),
-          where('articleId', '==', editingNews.id)
-        );
-        const bookmarkSnapshot = await getDocs(bookmarkQuery);
-        for (const bookmarkDoc of bookmarkSnapshot.docs) {
-          await updateDoc(doc(db, 'savedArticles', bookmarkDoc.id), {
-            slug: formData.slug,
-            title: formData.judul
-          });
-        }
-        await logActivity('EDIT_NEWS', { 
-          newsId: editingNews.id, 
-          title: formData.judul, 
-          slug: formData.slug,
-          oldSlug: editingNews.slug
-        });
-        toast.success('Berita berhasil diperbarui.');
-        newsId = editingNews.id;
-      } else {
-        newsId = await createNews({ ...formData, createdAt: serverTimestamp(), views: 0, likeCount: 0 });
-        await logActivity('ADD_NEWS', { 
-          newsId, 
-          title: formData.judul, 
-          category: formData.kategori, 
-          slug: formData.slug 
-        });
-        toast.success('Berita berhasil ditambahkan.');
-      }
-
-      resetForm();
-      setShowModal(false);
-      return newsId;
-    } catch (error) {
-      console.error('Error saving news:', error);
-      await logActivity('SAVE_NEWS_ERROR', { error: error.message, title: formData.judul, slug: formData.slug });
-      toast.error(`Gagal menyimpan berita: ${error.message}`);
-      throw error;
-    } finally {
-      setNewsLoading(false);
-    }
-  };
-
-  const handleDeleteNews = (id) => {
     setConfirmationModal({
       isOpen: true,
       id,
       title: 'Hapus Berita',
-      message: 'Apakah Anda yakin ingin menghapus berita ini? Tindakan ini tidak dapat dibatalkan.'
+      message: 'Apakah Anda yakin ingin menghapus berita ini? Tindakan ini tidak dapat dibatalkan.',
     });
   };
 
@@ -205,54 +202,96 @@ const NewsManagement = ({ logActivity, setStats }) => {
       toast.error('ID tidak valid.');
       return;
     }
-    try {
-      if (title === 'Hapus Berita') {
-        setNewsLoading(true);
-        const newsDoc = await getDoc(doc(db, 'news', id));
-        if (newsDoc.exists()) {
-          const newsData = newsDoc.data();
-          await deleteDoc(doc(db, 'news', id));
-          const bookmarkQuery = query(
-            collection(db, 'savedArticles'),
-            where('articleId', '==', id)
-          );
-          const bookmarkSnapshot = await getDocs(bookmarkQuery);
-          for (const bookmarkDoc of bookmarkSnapshot.docs) {
-            await deleteDoc(doc(db, 'savedArticles', bookmarkDoc.id));
-          }
-          await logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || 'N/A' });
-          toast.success('Berita berhasil dihapus.');
+    let retries = 2;
+    const attemptDelete = async () => {
+      try {
+        if (!isAdmin) {
+          throw new Error('Hanya admin yang dapat menghapus berita.');
         }
+
+        const user = auth.currentUser;
+        if (!user) {
+          throw new Error('No authenticated user.');
+        }
+
+        if (title === 'Hapus Berita') {
+          setNewsLoading(true);
+          const newsDoc = await getDoc(doc(db, 'news', id));
+          if (newsDoc.exists()) {
+            const newsData = newsDoc.data();
+            await deleteDoc(doc(db, 'news', id));
+            const bookmarkQuery = query(
+              collection(db, 'savedArticles'),
+              where('articleId', '==', id)
+            );
+            const bookmarkSnapshot = await getDocs(bookmarkQuery);
+            for (const bookmarkDoc of bookmarkSnapshot.docs) {
+              await deleteDoc(doc(db, 'savedArticles', bookmarkDoc.id));
+            }
+            await logActivity('DELETE_NEWS', { newsId: id, title: newsData.judul || 'N/A' });
+            toast.success('Berita berhasil dihapus.');
+          }
+        }
+      } catch (error) {
+        console.error('[NewsManagement] Error deleting news:', error);
+        if (error.code === 'permission-denied' && retries > 0) {
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return attemptDelete();
+        }
+        let userMessage = 'Gagal menghapus berita: ';
+        if (error.code === 'permission-denied' || error.message.includes('not an admin')) {
+          userMessage += 'Anda tidak memiliki izin admin.';
+        } else {
+          userMessage += `${error.message}. Silakan coba lagi.`;
+        }
+        await logActivity('DELETE_NEWS_ERROR', { id, error: error.message });
+        toast.error(userMessage);
+      } finally {
+        setNewsLoading(false);
+        setConfirmationModal({ isOpen: false, id: null, title: '', message: '' });
       }
-    } catch (error) {
-      console.error('Error deleting:', error);
-      await logActivity('DELETE_NEWS_ERROR', { id, error: error.message });
-      toast.error('Gagal menghapus berita.');
-    } finally {
-      setNewsLoading(false);
-      setConfirmationModal({ isOpen: false, id: null, title: '', message: '' });
-    }
+    };
+
+    await attemptDelete();
   };
 
-  const handleEdit = (newsItem) => {
-    setEditingNews(newsItem);
-    setFormData({
-      judul: newsItem.judul || '',
-      konten: newsItem.konten || '',
-      kategori: newsItem.kategori || '',
-      author: newsItem.author || '',
-      gambar: newsItem.gambar || '',
-      ringkasan: newsItem.ringkasan || '',
-      gambarDeskripsi: newsItem.gambarDeskripsi || '',
-      slug: newsItem.slug || ''
-    });
-    setShowModal(true);
+  const handleEdit = async (newsItem) => {
+    if (!isAdmin) {
+      toast.error('Hanya admin yang dapat mengedit berita.');
+      await logActivity('EDIT_NEWS_DENIED', { newsId: newsItem.id, error: 'User is not an admin' });
+      return;
+    }
+    try {
+      setEditingNews(newsItem);
+      setFormData({
+        judul: newsItem.judul || '',
+        konten: newsItem.konten || '',
+        kategori: newsItem.kategori || '',
+        author: newsItem.author || '',
+        authorId: newsItem.authorId || '',
+        gambar: newsItem.gambar || '',
+        ringkasan: newsItem.ringkasan || '',
+        gambarDeskripsi: newsItem.gambarDeskripsi || '',
+        slug: newsItem.slug || '',
+        hideProfilePicture: newsItem.hideProfilePicture || false,
+        views: newsItem.views || 0,
+        komentar: newsItem.komentar || 0,
+        createdAt: newsItem.createdAt || serverTimestamp(),
+      });
+      setShowModal(true);
+      await logActivity('EDIT_NEWS_INIT', { newsId: newsItem.id, title: newsItem.judul || 'N/A' });
+    } catch (error) {
+      console.error('[NewsManagement] Error preparing edit:', error);
+      await logActivity('EDIT_NEWS_ERROR', { newsId: newsItem.id, error: error.message });
+      toast.error('Gagal mempersiapkan edit berita.');
+    }
   };
 
   const handleViewNews = (slug, judul) => {
     if (slug) {
       navigate(`/berita/${slug}`);
-      logActivity('VIEW_NEWS', { slug, title: judul });
+      logActivity('VIEW_NEWS', { title: judul, slug });
     } else {
       toast.error('Slug berita tidak tersedia.');
       logActivity('VIEW_NEWS_ERROR', { title: judul, error: 'Missing slug' });
@@ -265,20 +304,24 @@ const NewsManagement = ({ logActivity, setStats }) => {
       konten: '',
       kategori: '',
       author: '',
+      authorId: '',
       gambar: '',
       ringkasan: '',
       gambarDeskripsi: '',
-      slug: ''
+      slug: '',
+      hideProfilePicture: false,
+      views: 0,
+      komentar: 0,
     });
     setEditingNews(null);
   };
 
   const formatDate = (timestamp) => {
     if (!timestamp) return 'Baru';
-    const date = timestamp.toDate();
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     const months = [
       'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
     ];
     const day = date.getDate().toString().padStart(2, '0');
     const month = months[date.getMonth()];
@@ -297,7 +340,14 @@ const NewsManagement = ({ logActivity, setStats }) => {
             <h2 className="text-xl font-bold text-gray-900">Kelola Berita</h2>
           </div>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => {
+              if (!isAdmin) {
+                toast.error('Hanya admin yang dapat menambah berita.');
+                logActivity('ADD_NEWS_DENIED', { error: 'User is not an admin' });
+                return;
+              }
+              setShowModal(true);
+            }}
             className="flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg hover:shadow-xl"
           >
             <PlusCircle className="w-5 h-5" />
@@ -410,8 +460,8 @@ const NewsManagement = ({ logActivity, setStats }) => {
                   </tr>
                 ) : (
                   filteredNews.map((item, index) => (
-                    <motion.tr 
-                      key={item.id} 
+                    <motion.tr
+                      key={item.id}
                       className={`transition-all duration-300 transform hover:scale-[1.01] ${
                         index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
                       }`}
@@ -429,7 +479,7 @@ const NewsManagement = ({ logActivity, setStats }) => {
                             />
                           )}
                           <div>
-                            <div 
+                            <div
                               className="text-sm font-medium text-blue-600 hover:underline cursor-pointer max-w-xs truncate"
                               onClick={() => handleViewNews(item.slug, item.judul)}
                             >
@@ -495,17 +545,55 @@ const NewsManagement = ({ logActivity, setStats }) => {
         </div>
       </div>
 
+      {confirmationModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">{confirmationModal.title}</h3>
+            <p className="text-sm text-gray-600 mb-6">{confirmationModal.message}</p>
+            <div className="flex justify-center space-x-4">
+              <button
+                onClick={() => setConfirmationModal({ isOpen: false, id: null, title: '', message: '' })}
+                className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-300"
+              >
+                Batal
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all duration-300"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <NewsModal
         showModal={showModal}
         setShowModal={setShowModal}
         editingNews={editingNews}
         formData={formData}
         setFormData={setFormData}
-        handleSubmit={handleSubmit}
         resetForm={resetForm}
         loading={newsLoading}
         logActivity={logActivity}
       />
+
+      <style jsx>{`
+        .animate-slideUp {
+          animation: slideUp 0.3s ease-out;
+        }
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
     </div>
   );
 };

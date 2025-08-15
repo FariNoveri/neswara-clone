@@ -13,35 +13,10 @@ const Login = ({ onSwitchForm, onClose }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState(null);
   const [isUnverifiedPopupOpen, setIsUnverifiedPopupOpen] = useState(false);
-  const [isRateLimited, setIsRateLimited] = useState(false);
-  const [remainingTime, setRemainingTime] = useState(0);
-  const [isDailyLimitReached, setIsDailyLimitReached] = useState(false);
-  const [dailyAttemptsRemaining, setDailyAttemptsRemaining] = useState(5);
-  const [failedPasswordAttempts, setFailedPasswordAttempts] = useState(0);
 
   const auth = getAuth();
   const navigate = useNavigate();
   const recaptchaRef = useRef(null);
-
-  const MAX_ATTEMPTS = 5; // Temporary rate limit
-  const DAILY_LIMIT = 5; // Total login attempts per day
-  const MAX_FAILED_PASSWORD_ATTEMPTS = 5; // Failed password attempts per day
-  const COOLDOWN_PERIODS = [60, 300, 600]; // 1 min, 5 min, 10 min
-
-  // Calculate time until midnight
-  const getSecondsUntilMidnight = useCallback(() => {
-    const now = new Date();
-    const midnight = new Date(now);
-    midnight.setHours(24, 0, 0, 0);
-    return Math.ceil((midnight - now) / 1000);
-  }, []);
-
-  // Check if it's a new day
-  const isNewDay = useCallback((lastAttemptDate) => {
-    const today = new Date().toDateString();
-    const lastDate = lastAttemptDate ? new Date(lastAttemptDate).toDateString() : null;
-    return !lastAttemptDate || today !== lastDate;
-  }, []);
 
   // Monitor auth state
   useEffect(() => {
@@ -52,33 +27,6 @@ const Login = ({ onSwitchForm, onClose }) => {
           signOut(auth);
         } else {
           setSuccess("Login berhasil!");
-          // PERBAIKAN: Hanya reset temporary rate limit, bukan daily attempts
-          const loginAttempts = JSON.parse(localStorage.getItem('loginAttempts')) || {
-            count: 0,
-            timestamp: null,
-            blockCount: 0,
-            dailyAttempts: 0,
-            lastAttemptDate: new Date().toDateString()
-          };
-          const failedPasswordAttempts = JSON.parse(localStorage.getItem('failedPasswordAttempts')) || {
-            count: 0,
-            lastAttemptDate: new Date().toDateString()
-          };
-          
-          // Reset hanya temporary rate limit, preserve daily attempts
-          localStorage.setItem('loginAttempts', JSON.stringify({
-            ...loginAttempts,
-            count: 0,
-            timestamp: null,
-            blockCount: 0
-          }));
-          localStorage.setItem('failedPasswordAttempts', JSON.stringify({
-            ...failedPasswordAttempts,
-            count: 0
-          }));
-          
-          setIsRateLimited(false);
-          setRemainingTime(0);
           navigate("/");
           if (typeof onClose === 'function') onClose();
         }
@@ -89,74 +37,6 @@ const Login = ({ onSwitchForm, onClose }) => {
     });
     return () => unsubscribe();
   }, [auth, navigate, onClose]);
-
-  // Initialize rate limiter state
-  useEffect(() => {
-    const checkRateLimits = () => {
-      const loginAttempts = JSON.parse(localStorage.getItem('loginAttempts')) || {
-        count: 0,
-        timestamp: null,
-        blockCount: 0,
-        dailyAttempts: 0,
-        lastAttemptDate: null
-      };
-      const failedPasswordAttempts = JSON.parse(localStorage.getItem('failedPasswordAttempts')) || {
-        count: 0,
-        lastAttemptDate: null
-      };
-      const now = Date.now();
-      const today = new Date().toDateString();
-
-      // Reset daily counters if it's a new day
-      if (isNewDay(loginAttempts.lastAttemptDate)) {
-        loginAttempts.dailyAttempts = 0;
-        loginAttempts.lastAttemptDate = today;
-        loginAttempts.count = 0;
-        loginAttempts.timestamp = null;
-        loginAttempts.blockCount = 0;
-        localStorage.setItem('loginAttempts', JSON.stringify(loginAttempts));
-      }
-      if (isNewDay(failedPasswordAttempts.lastAttemptDate)) {
-        failedPasswordAttempts.count = 0;
-        failedPasswordAttempts.lastAttemptDate = today;
-        localStorage.setItem('failedPasswordAttempts', JSON.stringify(failedPasswordAttempts));
-      }
-
-      setDailyAttemptsRemaining(DAILY_LIMIT - loginAttempts.dailyAttempts);
-      setFailedPasswordAttempts(failedPasswordAttempts.count);
-
-      // Check daily limits
-      if (loginAttempts.dailyAttempts >= DAILY_LIMIT || failedPasswordAttempts.count >= MAX_FAILED_PASSWORD_ATTEMPTS) {
-        setIsDailyLimitReached(true);
-        setRemainingTime(getSecondsUntilMidnight());
-      } else {
-        setIsDailyLimitReached(false);
-      }
-
-      // Check temporary rate limit
-      if (loginAttempts.timestamp) {
-        const cooldownPeriod = COOLDOWN_PERIODS[Math.min(loginAttempts.blockCount, COOLDOWN_PERIODS.length - 1)] * 1000;
-        const timeElapsed = now - loginAttempts.timestamp;
-        if (timeElapsed < cooldownPeriod) {
-          setIsRateLimited(true);
-          setRemainingTime(Math.ceil((cooldownPeriod - timeElapsed) / 1000));
-        } else {
-          localStorage.setItem('loginAttempts', JSON.stringify({
-            ...loginAttempts,
-            count: 0,
-            timestamp: null,
-            blockCount: loginAttempts.blockCount
-          }));
-          setIsRateLimited(false);
-          setRemainingTime(0);
-        }
-      }
-    };
-
-    checkRateLimits();
-    const interval = setInterval(checkRateLimits, 1000);
-    return () => clearInterval(interval);
-  }, [getSecondsUntilMidnight, isNewDay]);
 
   const verifyRecaptcha = useCallback(async (token, action) => {
     try {
@@ -196,82 +76,6 @@ const Login = ({ onSwitchForm, onClose }) => {
     }
   }, []);
 
-  const updateRateLimits = useCallback((isFailedPassword = false, isSuccess = false) => {
-    const loginAttempts = JSON.parse(localStorage.getItem('loginAttempts')) || {
-      count: 0,
-      timestamp: null,
-      blockCount: 0,
-      dailyAttempts: 0,
-      lastAttemptDate: null
-    };
-    const failedPasswordAttempts = JSON.parse(localStorage.getItem('failedPasswordAttempts')) || {
-      count: 0,
-      lastAttemptDate: null
-    };
-    const today = new Date().toDateString();
-
-    // PERBAIKAN: Jika sukses, hanya reset temporary rate limit
-    if (isSuccess) {
-      localStorage.setItem('loginAttempts', JSON.stringify({
-        ...loginAttempts,
-        count: 0,
-        timestamp: null,
-        blockCount: 0
-      }));
-      localStorage.setItem('failedPasswordAttempts', JSON.stringify({
-        ...failedPasswordAttempts,
-        count: 0
-      }));
-      setIsRateLimited(false);
-      setRemainingTime(0);
-      // Tidak reset daily attempts dan failed password attempts
-      return;
-    }
-
-    // Update daily attempts
-    if (isNewDay(loginAttempts.lastAttemptDate)) {
-      loginAttempts.dailyAttempts = 1;
-      loginAttempts.lastAttemptDate = today;
-      loginAttempts.count = 1;
-    } else {
-      loginAttempts.dailyAttempts += 1;
-      loginAttempts.count += 1;
-    }
-
-    // Update failed password attempts
-    if (isFailedPassword) {
-      if (isNewDay(failedPasswordAttempts.lastAttemptDate)) {
-        failedPasswordAttempts.count = 1;
-        failedPasswordAttempts.lastAttemptDate = today;
-      } else {
-        failedPasswordAttempts.count += 1;
-      }
-    }
-
-    // Apply temporary rate limit
-    if (loginAttempts.count >= MAX_ATTEMPTS) {
-      loginAttempts.count = 0;
-      loginAttempts.timestamp = Date.now();
-      loginAttempts.blockCount = Math.min(loginAttempts.blockCount + 1, COOLDOWN_PERIODS.length - 1);
-      setIsRateLimited(true);
-      setRemainingTime(COOLDOWN_PERIODS[loginAttempts.blockCount]);
-    }
-
-    // Apply daily limits
-    if (loginAttempts.dailyAttempts >= DAILY_LIMIT || failedPasswordAttempts.count >= MAX_FAILED_PASSWORD_ATTEMPTS) {
-      setIsDailyLimitReached(true);
-      setRemainingTime(getSecondsUntilMidnight());
-    }
-
-    setDailyAttemptsRemaining(DAILY_LIMIT - loginAttempts.dailyAttempts);
-    setFailedPasswordAttempts(failedPasswordAttempts.count);
-
-    localStorage.setItem('loginAttempts', JSON.stringify(loginAttempts));
-    localStorage.setItem('failedPasswordAttempts', JSON.stringify(failedPasswordAttempts));
-
-    console.log('Updated login attempts:', loginAttempts, 'Failed password attempts:', failedPasswordAttempts);
-  }, [getSecondsUntilMidnight, isNewDay]);
-
   const validateEmail = useCallback((email) => {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
@@ -280,44 +84,30 @@ const Login = ({ onSwitchForm, onClose }) => {
   const handleLogin = useCallback(async (e) => {
     e.preventDefault();
 
-    if (isDailyLimitReached) {
-      setError(`Batas percobaan login harian (${DAILY_LIMIT} kali) atau gagal password (${MAX_FAILED_PASSWORD_ATTEMPTS} kali) telah tercapai. Silakan coba lagi dalam ${remainingTime} detik.`);
-      return;
-    }
-
-    if (isRateLimited) {
-      setError(`Terlalu banyak percobaan login. Silakan tunggu ${remainingTime} detik.`);
-      return;
-    }
-
     setLoading(true);
     setError("");
 
     if (!email || !password) {
       setError("Email dan password harus diisi.");
       setLoading(false);
-      updateRateLimits();
       return;
     }
 
     if (!validateEmail(email)) {
       setError("Format email tidak valid.");
       setLoading(false);
-      updateRateLimits();
       return;
     }
 
     if (!recaptchaToken) {
       setError("Harap selesaikan reCAPTCHA.");
       setLoading(false);
-      updateRateLimits();
       return;
     }
 
     const isRecaptchaValid = await verifyRecaptcha(recaptchaToken, "login");
     if (!isRecaptchaValid) {
       setLoading(false);
-      updateRateLimits();
       return;
     }
 
@@ -328,32 +118,18 @@ const Login = ({ onSwitchForm, onClose }) => {
         setIsUnverifiedPopupOpen(true);
         await signOut(auth);
         setLoading(false);
-        updateRateLimits();
         return;
       }
-      updateRateLimits(false, true);
     } catch (err) {
       console.error('Firebase error:', err.code, err.message);
-      updateRateLimits(err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential');
-      setError(`${err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' ? 'Email atau password salah' : err.message || 'Login gagal'}. Sisa percobaan hari ini: ${Math.max(0, dailyAttemptsRemaining - 1)}, gagal password: ${Math.max(0, MAX_FAILED_PASSWORD_ATTEMPTS - failedPasswordAttempts - (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' ? 1 : 0))}.`);
+      setError(err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' ? 'Email atau password salah' : err.message || 'Login gagal');
       setLoading(false);
     }
-  }, [email, password, recaptchaToken, isRateLimited, isDailyLimitReached, remainingTime, dailyAttemptsRemaining, failedPasswordAttempts, validateEmail, updateRateLimits]);
+  }, [email, password, recaptchaToken, validateEmail]);
 
   const handleSocialLogin = useCallback(async (providerType) => {
-    if (isDailyLimitReached) {
-      setError(`Batas percobaan login harian (${DAILY_LIMIT} kali) atau gagal password (${MAX_FAILED_PASSWORD_ATTEMPTS} kali) telah tercapai. Silakan coba lagi dalam ${remainingTime} detik.`);
-      return;
-    }
-
-    if (isRateLimited) {
-      setError(`Terlalu banyak percobaan login. Silakan tunggu ${remainingTime} detik.`);
-      return;
-    }
-
     setLoading(true);
     setError("");
-    updateRateLimits();
 
     let provider;
     if (providerType === 'google') {
@@ -373,7 +149,6 @@ const Login = ({ onSwitchForm, onClose }) => {
         setLoading(false);
         return;
       }
-      updateRateLimits(false, true);
     } catch (err) {
       console.error(`${providerType} login failed:`, err);
       if (err.code === 'auth/popup-blocked' || err.message.includes('Cross-Origin-Opener-Policy') || err.message.includes('window.closed') || err.message.includes('COOP')) {
@@ -382,21 +157,21 @@ const Login = ({ onSwitchForm, onClose }) => {
           await signInWithRedirect(auth, provider);
           setSuccess(`Mengalihkan untuk login dengan ${providerType === 'google' ? 'Google' : 'Facebook'}...`);
         } catch (redirectErr) {
-          setError(`Gagal mengalihkan login. Coba gunakan login email atau browser lain. Sisa percobaan hari ini: ${Math.max(0, dailyAttemptsRemaining - 1)}.`);
+          setError(`Gagal mengalihkan login. Coba gunakan login email atau browser lain.`);
         }
       } else if (err.code === 'auth/popup-closed-by-user') {
-        setError(`Popup ditutup sebelum login selesai. Sisa percobaan hari ini: ${Math.max(0, dailyAttemptsRemaining - 1)}.`);
+        setError(`Popup ditutup sebelum login selesai.`);
       } else {
-        setError(`${err.message || `Login dengan ${providerType === 'google' ? 'Google' : 'Facebook'} gagal.`} Sisa percobaan hari ini: ${Math.max(0, dailyAttemptsRemaining - 1)}.`);
+        setError(err.message || `Login dengan ${providerType === 'google' ? 'Google' : 'Facebook'} gagal.`);
       }
       setLoading(false);
     }
-  }, [isRateLimited, isDailyLimitReached, remainingTime, dailyAttemptsRemaining, updateRateLimits]);
+  }, []);
 
   const handleGoogleLogin = () => handleSocialLogin('google');
   const handleFacebookLogin = () => handleSocialLogin('facebook');
 
-  const isLoginDisabled = loading || !recaptchaToken || isRateLimited || isDailyLimitReached;
+  const isLoginDisabled = loading || !recaptchaToken;
 
   return (
     <>
@@ -408,11 +183,6 @@ const Login = ({ onSwitchForm, onClose }) => {
       {success && (
         <div className="bg-green-50 border-b border-green-600 text-green-600 px-4 py-2 rounded-lg mb-2 text-sm">
           {success}
-        </div>
-      )}
-      {!isDailyLimitReached && (
-        <div className="bg-blue-50 border-b border-blue-600 text-blue-600 px-4 py-2 rounded-lg mb-2 text-sm">
-          Sisa percobaan login hari ini: {dailyAttemptsRemaining}, gagal password: {Math.max(0, MAX_FAILED_PASSWORD_ATTEMPTS - failedPasswordAttempts)}
         </div>
       )}
       <form onSubmit={handleLogin}>
@@ -522,38 +292,6 @@ const Login = ({ onSwitchForm, onClose }) => {
             </p>
             <button
               onClick={() => setIsUnverifiedPopupOpen(false)}
-              className="w-full bg-blue-500 text-white py-2 rounded-md mt-4 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              Tutup
-            </button>
-          </div>
-        </div>
-      )}
-      {isRateLimited && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-          <div className="bg-white w-full max-w-md mx-4 p-6 rounded-lg shadow-lg animate-bounce-in">
-            <h2 className="text-lg font-bold text-red-600">Login Dibatasi Sementara</h2>
-            <p className="text-gray-600 mt-2">
-              Anda telah mencapai batas percobaan login sementara. Silakan tunggu {remainingTime} detik.
-            </p>
-            <button
-              onClick={() => setIsRateLimited(false)}
-              className="w-full bg-blue-500 text-white py-2 rounded-md mt-4 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              Tutup
-            </button>
-          </div>
-        </div>
-      )}
-      {isDailyLimitReached && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-          <div className="bg-white w-full max-w-md mx-4 p-6 rounded-lg shadow-lg animate-bounce-in">
-            <h2 className="text-lg font-bold text-red-600">Batas Harian Tercapai</h2>
-            <p className="text-gray-600 mt-2">
-              Anda telah mencapai batas percobaan login harian ({DAILY_LIMIT - dailyAttemptsRemaining}/{DAILY_LIMIT} total, {failedPasswordAttempts}/{MAX_FAILED_PASSWORD_ATTEMPTS} gagal password). Silakan coba lagi dalam {remainingTime} detik atau hubungi admin.
-            </p>
-            <button
-              onClick={() => setIsDailyLimitReached(false)}
               className="w-full bg-blue-500 text-white py-2 rounded-md mt-4 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               Tutup

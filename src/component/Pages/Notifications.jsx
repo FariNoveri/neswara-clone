@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FaBell } from "react-icons/fa";
-import { Link } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { db } from "../../firebaseconfig.js";
 import { collection, query, orderBy, onSnapshot, updateDoc, doc } from "firebase/firestore";
 import { toast } from "react-toastify";
+import { createSlug } from "../config/slug"; // Import createSlug from NewsSection.jsx
 
 const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
@@ -17,46 +18,54 @@ const Notifications = () => {
   // Fetch news articles
   useEffect(() => {
     const q = query(collection(db, "news"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      try {
-        const newsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          title: doc.data().judul || doc.data().title || "Tanpa Judul",
-          slug: doc.data().slug || `berita-${doc.id}`,
-        }));
-        setNewsArticles(newsData);
-      } catch (error) {
-        console.error("Error fetching news articles:", error);
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        try {
+          const newsData = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            title: doc.data().judul || doc.data().title || "Tanpa Judul",
+            slug: doc.data().slug || createSlug(doc.data().judul || doc.data().title || "untitled"),
+          }));
+          setNewsArticles(newsData);
+        } catch (error) {
+          console.error("Error fetching news articles:", error);
+          toast.error("Gagal memuat artikel berita.");
+        }
+      },
+      (error) => {
+        console.error("Snapshot error for news:", error);
         toast.error("Gagal memuat artikel berita.");
       }
-    }, (error) => {
-      console.error("Snapshot error for news:", error);
-      toast.error("Gagal memuat artikel berita.");
-    });
+    );
     return () => unsubscribe();
   }, []);
 
   // Fetch all notifications (read and unread)
   useEffect(() => {
     const q = query(collection(db, "notifications"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      try {
-        const notificationsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setNotifications(notificationsData);
-        const hasUnread = notificationsData.some(notif => !notif.isRead);
-        setHasNewNotifications(hasUnread);
-      } catch (error) {
-        console.error("Error fetching notifications:", {
-          message: error.message || "Unknown error",
-          code: error.code || "No code",
-          stack: error.stack || "No stack trace",
-        });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        try {
+          const notificationsData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+          setNotifications(notificationsData);
+          const hasUnread = notificationsData.some((notif) => !notif.isRead);
+          setHasNewNotifications(hasUnread);
+        } catch (error) {
+          console.error("Error fetching notifications:", {
+            message: error.message || "Unknown error",
+            code: error.code || "No code",
+            stack: error.stack || "No stack trace",
+          });
+          toast.error("Gagal memuat notifikasi.");
+        }
+      },
+      (error) => {
+        console.error("Snapshot error:", error);
         toast.error("Gagal memuat notifikasi.");
       }
-    }, (error) => {
-      console.error("Snapshot error:", error);
-      toast.error("Gagal memuat notifikasi.");
-    });
+    );
     return () => unsubscribe();
   }, []);
 
@@ -66,10 +75,8 @@ const Notifications = () => {
     if (!isNotificationOpen && hasNewNotifications) {
       try {
         const updatePromises = notifications
-          .filter(notif => !notif.isRead)
-          .map(notif =>
-            updateDoc(doc(db, "notifications", notif.id), { isRead: true })
-          );
+          .filter((notif) => !notif.isRead)
+          .map((notif) => updateDoc(doc(db, "notifications", notif.id), { isRead: true }));
         await Promise.all(updatePromises);
         setHasNewNotifications(false);
       } catch (error) {
@@ -82,24 +89,38 @@ const Notifications = () => {
   // Mark single notification as read and navigate if linked
   const handleNotificationItemClick = async (notificationId) => {
     try {
-      const notification = notifications.find(n => n.id === notificationId);
+      const notification = notifications.find((n) => n.id === notificationId);
+      if (!notification) {
+        console.error(`Notification not found: ${notificationId}`);
+        toast.error("Notifikasi tidak ditemukan.");
+        return;
+      }
+
+      // Mark notification as read
       if (!notification.isRead) {
         await updateDoc(doc(db, "notifications", notificationId), { isRead: true });
       }
 
+      // Handle navigation if newsSlug exists
       if (notification.newsSlug) {
-        navigate(`/berita/${notification.newsSlug}`);
+        const article = newsArticles.find((article) => article.slug === notification.newsSlug);
+        if (article) {
+          navigate(`/berita/${notification.newsSlug}`);
+        } else {
+          console.warn(`News article not found for slug: ${notification.newsSlug}`);
+          toast.error("Berita tidak ditemukan atau telah dihapus.");
+        }
       } else {
         const element = document.querySelector(`[data-notification-id="${notificationId}"]`);
         if (element) {
-          element.classList.add('bounce-animation');
-          setTimeout(() => element.classList.remove('bounce-animation'), 500);
+          element.classList.add("bounce-animation");
+          setTimeout(() => element.classList.remove("bounce-animation"), 500);
         }
       }
       setIsNotificationOpen(false);
     } catch (error) {
       console.error("Error handling notification click:", error);
-      toast.error("Gagal memproses notifikasi.");
+      toast.error("Gagal memproses notifikasi: " + error.message);
     }
   };
 
@@ -133,12 +154,12 @@ const Notifications = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Notifikasi</h3>
               <span className="text-sm text-blue-500 font-medium">
-                {notifications.filter(n => !n.isRead).length} baru
+                {notifications.filter((n) => !n.isRead).length} baru
               </span>
             </div>
           </div>
 
-          <div className="notification-scroll" style={{ maxHeight: '400px', minHeight: '200px' }}>
+          <div className="notification-scroll" style={{ maxHeight: "400px", minHeight: "200px" }}>
             {notifications.length === 0 ? (
               <div className="p-6 text-center text-gray-500">
                 <FaBell className="mx-auto text-3xl mb-2 opacity-50" />
@@ -152,7 +173,7 @@ const Notifications = () => {
                     data-notification-id={notification.id}
                     onClick={() => handleNotificationItemClick(notification.id)}
                     className={`notification-item p-4 border-b border-gray-50 cursor-pointer transition-all duration-200 ${
-                      !notification.isRead ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'bg-white'
+                      !notification.isRead ? "bg-blue-50 border-l-4 border-l-blue-500" : "bg-white"
                     }`}
                   >
                     <div className="flex items-start space-x-3">
@@ -162,13 +183,17 @@ const Notifications = () => {
                             src={notification.image}
                             alt="Notification"
                             className="w-10 h-10 rounded-lg object-cover border border-gray-200 shadow-sm"
-                            onError={(e) => { e.target.src = '/placeholder-image.jpg'; }}
+                            onError={(e) => {
+                              e.target.src = "/placeholder-image.jpg";
+                            }}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                              <h4 className={`text-sm font-medium truncate ${
-                                !notification.isRead ? 'text-gray-900' : 'text-gray-700'
-                              }`}>
+                              <h4
+                                className={`text-sm font-medium truncate ${
+                                  !notification.isRead ? "text-gray-900" : "text-gray-700"
+                                }`}
+                              >
                                 {notification.title}
                               </h4>
                               {!notification.isRead && (
@@ -180,24 +205,35 @@ const Notifications = () => {
                             </p>
                             {notification.newsSlug && (
                               <div className="flex items-center space-x-2 text-sm text-indigo-600 mt-1">
-                                <Link className="w-4 h-4" />
+                                <ExternalLink className="w-4 h-4" />
                                 <span className="truncate">
-                                  {newsArticles.find(article => article.slug === notification.newsSlug)?.title || notification.newsSlug}
+                                  {newsArticles.find((article) => article.slug === notification.newsSlug)?.title ||
+                                    "Berita tidak ditemukan"}
                                 </span>
                               </div>
                             )}
                             <p className="text-xs text-gray-400 mt-1">
-                              {notification.timestamp?.toDate().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) + " " +
-                               notification.timestamp?.toDate().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}
+                              {notification.timestamp?.toDate().toLocaleTimeString("id-ID", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }) +
+                                " " +
+                                notification.timestamp?.toDate().toLocaleDateString("id-ID", {
+                                  day: "2-digit",
+                                  month: "long",
+                                  year: "numeric",
+                                })}
                             </p>
                           </div>
                         </>
                       ) : (
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
-                            <h4 className={`text-sm font-medium truncate ${
-                              !notification.isRead ? 'text-gray-900' : 'text-gray-700'
-                            }`}>
+                            <h4
+                              className={`text-sm font-medium truncate ${
+                                !notification.isRead ? "text-gray-900" : "text-gray-700"
+                              }`}
+                            >
                               {notification.title}
                             </h4>
                             {!notification.isRead && (
@@ -209,15 +245,24 @@ const Notifications = () => {
                           </p>
                           {notification.newsSlug && (
                             <div className="flex items-center space-x-2 text-sm text-indigo-600 mt-1">
-                              <Link className="w-4 h-4" />
+                              <ExternalLink className="w-4 h-4" />
                               <span className="truncate">
-                                {newsArticles.find(article => article.slug === notification.newsSlug)?.title || notification.newsSlug}
+                                {newsArticles.find((article) => article.slug === notification.newsSlug)?.title ||
+                                  "Berita tidak ditemukan"}
                               </span>
                             </div>
                           )}
                           <p className="text-xs text-gray-400 mt-1">
-                            {notification.timestamp?.toDate().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) + " " +
-                             notification.timestamp?.toDate().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}
+                            {notification.timestamp?.toDate().toLocaleTimeString("id-ID", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            }) +
+                              " " +
+                              notification.timestamp?.toDate().toLocaleDateString("id-ID", {
+                                day: "2-digit",
+                                month: "long",
+                                year: "numeric",
+                              })}
                           </p>
                         </div>
                       )}
@@ -233,7 +278,7 @@ const Notifications = () => {
               onClick={() => setIsNotificationOpen(false)}
               className="w-full text-center text-sm text-blue-500 hover:text-blue-600 font-medium transition-colors"
             >
-              {hasNewNotifications ? 'Tutup' : 'Anda sudah melihat semuanya'}
+              {hasNewNotifications ? "Tutup" : "Anda sudah melihat semuanya"}
             </button>
           </div>
         </div>

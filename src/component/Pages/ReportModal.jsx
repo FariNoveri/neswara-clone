@@ -18,14 +18,20 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
     { value: 'other', label: 'Lainnya' },
   ];
 
+  const isValidEmail = (email) => {
+    return email && email.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!currentUser) {
+    if (!currentUser || !currentUser.uid || !currentUser.getIdToken) {
       toast.warn('Silakan masuk untuk melaporkan berita.');
+      console.error('Invalid user object:', { uid: currentUser?.uid, hasGetIdToken: !!currentUser?.getIdToken });
       return;
     }
     if (!newsId) {
       toast.error('ID berita tidak valid.');
+      console.error('Invalid newsId:', newsId);
       return;
     }
     if (!selectedReason) {
@@ -39,6 +45,25 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
 
     setIsSubmitting(true);
     try {
+      // Force refresh the user's ID token
+      await currentUser.getIdToken(true);
+      
+      // Validate userEmail
+      const userEmail = isValidEmail(currentUser.email) ? currentUser.email : 'anonymous';
+      
+      // Log the report data for debugging
+      const reportData = {
+        newsId,
+        userId: currentUser.uid,
+        userEmail,
+        reason: selectedReason,
+        customReason: selectedReason === 'other' ? customReason.trim() : '',
+        title: newsTitle && newsTitle.length <= 500 ? newsTitle : 'Unknown Title',
+        timestamp: serverTimestamp(),
+        status: 'pending',
+      };
+      console.log('Submitting report with data:', reportData);
+
       // Check for existing report by the same user for this news article
       const q = query(
         collection(db, 'reports'),
@@ -53,19 +78,12 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
       }
 
       // Submit new report
-      await addDoc(collection(db, 'reports'), {
-        newsId,
-        userId: currentUser.uid,
-        userEmail: currentUser.email || 'anonymous',
-        reason: selectedReason,
-        customReason: selectedReason === 'other' ? customReason.trim() : '',
-        title: newsTitle || 'Unknown Title',
-        timestamp: serverTimestamp(),
-        status: 'pending', // Added for ReportManagement to track status
-      });
+      await addDoc(collection(db, 'reports'), reportData);
+      
+      // Log the action
       await addDoc(collection(db, 'logs'), {
         action: 'REPORT_NEWS',
-        userEmail: currentUser.email || 'anonymous',
+        userEmail,
         details: {
           newsId,
           title: newsTitle,
@@ -74,16 +92,21 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
         },
         timestamp: serverTimestamp(),
       });
+      
       toast.success('Laporan berhasil dikirim!');
       setSelectedReason('');
       setCustomReason('');
       onClose();
     } catch (error) {
-      console.error('Error submitting report:', error);
-      toast.error('Gagal mengirim laporan.');
+      console.error('Error submitting report:', error, {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      });
+      toast.error('Gagal mengirim laporan: ' + error.message);
       await addDoc(collection(db, 'logs'), {
         action: 'REPORT_NEWS_ERROR',
-        userEmail: currentUser.email || 'anonymous',
+        userEmail: isValidEmail(currentUser.email) ? currentUser.email : 'anonymous',
         details: { newsId, title: newsTitle, error: error.message },
         timestamp: serverTimestamp(),
       });

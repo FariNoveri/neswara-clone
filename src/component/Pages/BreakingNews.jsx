@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { db } from "../../firebaseconfig.js";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { toast } from "react-toastify";
 
 const BreakingNews = () => {
   const [breakingNews, setBreakingNews] = useState([]);
@@ -43,18 +44,25 @@ const BreakingNews = () => {
         const collectionRef = collection(db, "breakingNews");
         const q = query(collectionRef, where("isActive", "==", true), orderBy("priority", "asc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-          const newsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          
+          const newsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            text: doc.data().text || 'No text available',
+            isActive: doc.data().isActive || false,
+            isEmergency: doc.data().isEmergency || false,
+            priority: doc.data().priority || 0,
+            speed: doc.data().speed || 15,
+          }));
+
           const newIsEmergency = newsData.some(news => news.isEmergency);
           const newsText = newsData.length > 0 
-            ? newsData.map(news => news.text || 'No text available').join(' | ')
+            ? newsData.map(news => news.text).join(' | ')
             : 'No breaking news available at this time';
           const baseSpeed = newsData.length > 0 ? (newsData[0].speed || 15) : 15;
           const newSpeed = getUnifiedSpeed(baseSpeed, newsText.length);
-          
+
           const emergencyChanged = newIsEmergency !== isEmergency;
           const speedChanged = newSpeed !== currentSpeed;
-          
+
           if ((emergencyChanged || speedChanged) && breakingNews.length > 0) {
             setShowTransition(true);
             setTimeout(() => {
@@ -67,19 +75,37 @@ const BreakingNews = () => {
             setIsEmergency(newIsEmergency);
             setCurrentSpeed(newSpeed);
           }
-          
+
           setBreakingNews(newsData);
           setIsLoading(false);
         }, (error) => {
-          console.error("Firestore error:", error, "Timestamp:", new Date().toISOString());
+          console.error("Firestore error:", {
+            code: error.code,
+            message: error.message,
+            timestamp: new Date().toISOString(),
+          });
+          toast.error("Failed to load breaking news. Please try again later.", {
+            position: 'top-center',
+            autoClose: 3000,
+            toastId: 'breaking-news-error',
+          });
           setIsLoading(false);
-          setBreakingNews([]); // Ensure consistent state on error
+          setBreakingNews([]);
         });
         return () => unsubscribe();
       } catch (error) {
-        console.error("Fetch error:", error, "Timestamp:", new Date().toISOString());
+        console.error("Fetch error:", {
+          code: error.code,
+          message: error.message,
+          timestamp: new Date().toISOString(),
+        });
+        toast.error("Error initializing breaking news. Please check your connection.", {
+          position: 'top-center',
+          autoClose: 3000,
+          toastId: 'breaking-news-init-error',
+        });
         setIsLoading(false);
-        setBreakingNews([]); // Ensure consistent state on error
+        setBreakingNews([]);
       }
     };
     fetchBreakingNews();
@@ -87,7 +113,7 @@ const BreakingNews = () => {
 
   // Generate text with unique news items or fallback
   const newsText = breakingNews.length > 0 
-    ? breakingNews.map(news => news.text || 'No text available').join(' | ')
+    ? breakingNews.map(news => news.text).join(' | ')
     : 'No breaking news available at this time';
 
   // Ensure seamless loop with padding
@@ -154,10 +180,10 @@ const BreakingNews = () => {
       color: 'white',
       boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
       transition: 'all 0.3s ease-in-out',
-      animation: showTransition ? 'slideUp 0.3s ease-in-out' : 'slideDown 0.5s ease-in-out'
+      animation: showTransition ? 'slideUp 0.3s ease-in-out' : 'slideDown 0.5s ease-in-out',
     },
     badge: {
-      animation: isEmergency ? 'pulse 1s infinite' : 'none'
+      animation: isEmergency ? 'pulse 1s infinite' : 'none',
     },
     scrollingText: {
       animation: `marquee ${currentSpeed}s linear infinite`,
@@ -167,8 +193,8 @@ const BreakingNews = () => {
       willChange: 'transform',
       fontSize: '14px',
       fontWeight: '500',
-      letterSpacing: '0.5px'
-    }
+      letterSpacing: '0.5px',
+    },
   };
 
   return (

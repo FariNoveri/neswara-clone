@@ -1,84 +1,157 @@
 import React, { useState, useEffect } from "react";
 import { Clock, User, MessageCircle, Eye, TrendingUp, Mail, ArrowRight } from "lucide-react";
 import { db } from "../../firebaseconfig";
-import { collection, onSnapshot, query, orderBy, limit, getDocs, collectionGroup } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, limit, getDocs, collectionGroup, doc, getDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { useAuth } from "../auth/useAuth"; // Impor useAuth untuk memeriksa autentikasi
 
 // Utility function to create a slug from a title
 const createSlug = (title) => {
   if (!title) return "";
   return title
     .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .trim('-');
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .trim("-");
 };
 
 // Function to count comments for a specific news item
-const countCommentsForNews = async (newsId) => {
+// Fixed version of countCommentsForNews function with proper error handling
+const countCommentsForNews = async (newsId, user) => {
+  if (!newsId) {
+    console.warn(`News ID is invalid at ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`);
+    return 0;
+  }
+
   try {
+    // First, check if the news document exists
+    const newsRef = doc(db, "news", newsId);
+    const newsDoc = await getDoc(newsRef);
+    if (!newsDoc.exists()) {
+      console.warn(`News document ${newsId} does not exist at ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`);
+      return 0;
+    }
+
+    // Try to get comments count from the news document itself (if you store it there)
+    const newsData = newsDoc.data();
+    if (newsData.comments && typeof newsData.comments === 'number') {
+      return newsData.comments;
+    }
+
+    // If not available in the news doc, try to count from subcollection
+    // But first check if user is authenticated for better error handling
+    if (!user || !user.uid) {
+      console.warn(`User not authenticated, returning 0 comments for news ${newsId}`);
+      return 0;
+    }
+
     const commentsRef = collection(db, `news/${newsId}/comments`);
     const snapshot = await getDocs(commentsRef);
     let total = snapshot.size;
-    for (const doc of snapshot.docs) {
-      const repliesRef = collection(db, `news/${newsId}/comments/${doc.id}/replies`);
-      const repliesSnapshot = await getDocs(repliesRef);
-      total += repliesSnapshot.size;
-    }
-    console.log(`Comment count for news ${newsId}: ${total}`);
+
+    // Count replies for each comment
+    const replyPromises = snapshot.docs.map(async (docSnapshot) => {
+      try {
+        const repliesRef = collection(db, `news/${newsId}/comments/${docSnapshot.id}/replies`);
+        const repliesSnapshot = await getDocs(repliesRef);
+        return repliesSnapshot.size;
+      } catch (replyError) {
+        console.warn(`Failed to count replies for comment ${docSnapshot.id}:`, replyError);
+        return 0;
+      }
+    });
+
+    const repliesCounts = await Promise.all(replyPromises);
+    total += repliesCounts.reduce((sum, count) => sum + count, 0);
+
     return total;
   } catch (error) {
-    console.error(`Error counting comments for news ${newsId}:`, error);
-    toast.error("Gagal memuat jumlah komentar.", {
-      position: 'top-center',
-      autoClose: 3000,
-      toastId: `comment-count-error-${newsId}`,
-    });
+    console.error(`Error counting comments for news ${newsId} at ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}:`, error);
+    
+    // More specific error handling
+    if (error.code === "permission-denied") {
+      console.warn(`Permission denied for comments in news ${newsId}. This might be due to Firestore rules or authentication issues.`);
+      
+      // Don't show toast for every permission error as it can be annoying
+      // Only show it once per session using a Set to track shown errors
+      if (!window.shownPermissionErrors) {
+        window.shownPermissionErrors = new Set();
+      }
+      
+      if (!window.shownPermissionErrors.has(newsId)) {
+        toast.warn(`Tidak dapat mengakses komentar untuk berita ini. Coba refresh halaman.`, {
+          position: "top-center",
+          autoClose: 5000,
+          toastId: `comment-permission-error-${newsId}`,
+        });
+        window.shownPermissionErrors.add(newsId);
+      }
+    } else if (error.code === "unavailable") {
+      toast.error("Layanan sementara tidak tersedia. Coba lagi nanti.", {
+        position: "top-center",
+        autoClose: 3000,
+        toastId: `service-unavailable-${newsId}`,
+      });
+    } else {
+      // For other errors, just log them without showing toast to avoid spam
+      console.error("Unexpected error while counting comments:", error);
+    }
+    
     return 0;
   }
 };
 
-// Debug function to check all comments via collectionGroup
+// Debug function to check all comments via collectionGroup (manual trigger)
 const debugComments = async () => {
   try {
-    const commentsQuery = query(collectionGroup(db, 'comments'));
+    const commentsQuery = query(collectionGroup(db, "comments"));
     const snapshot = await getDocs(commentsQuery);
     const commentsByNews = {};
-    snapshot.forEach(doc => {
-      const newsId = doc.ref.path.split('/')[1]; // Extract newsId from path news/{newsId}/comments/{commentId}
+    const replyPromises = [];
+
+    snapshot.forEach((doc) => {
+      const newsId = doc.ref.path.split("/")[1];
       commentsByNews[newsId] = (commentsByNews[newsId] || 0) + 1;
-      // Check replies
       const repliesRef = collection(db, `news/${newsId}/comments/${doc.id}/replies`);
-      getDocs(repliesRef).then(repliesSnapshot => {
-        commentsByNews[newsId] += repliesSnapshot.size;
-      });
+      replyPromises.push(
+        getDocs(repliesRef).then((repliesSnapshot) => {
+          commentsByNews[newsId] += repliesSnapshot.size;
+        })
+      );
     });
-    console.log("Comments by news ID (collectionGroup):", commentsByNews);
+
+    await Promise.all(replyPromises);
+    console.log("Debug comments result at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", commentsByNews);
     return commentsByNews;
   } catch (error) {
-    console.error("Error debugging comments:", error);
+    console.error("Error debugging comments at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", error);
     return {};
   }
 };
 
 const NewsPage = () => {
+  const { currentUser, loading: authLoading } = useAuth();
   const [newsData, setNewsData] = useState([]);
   const [popularNews, setPopularNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [email, setEmail] = useState('');
   const [imageErrors, setImageErrors] = useState({});
+  const [email, setEmail] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Debug comments once on mount
-    debugComments();
+    if (authLoading || !currentUser) {
+      setLoading(true);
+      console.log("Waiting for authentication at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }));
+      return; // Tunggu autentikasi selesai
+    }
 
-    // Main news: limit to 4 items
+    setLoading(true);
+    setError(null);
+
     const postsQuery = query(collection(db, "news"), orderBy("createdAt", "desc"), limit(4));
-    // Popular news sidebar: limit to 5 items
     const popularQuery = query(collection(db, "news"), orderBy("views", "desc"), limit(5));
 
     const unsubscribePosts = onSnapshot(
@@ -87,45 +160,51 @@ const NewsPage = () => {
         try {
           const postsPromises = snapshot.docs.map(async (doc) => {
             const data = doc.data();
-            const commentCount = await countCommentsForNews(doc.id);
-            console.log(`Processing news ${doc.id}:`, { title: data.title, comments: commentCount });
+            const commentCount = await countCommentsForNews(doc.id, currentUser);
             return {
               id: doc.id,
               title: data.title || data.judul || "Judul tidak tersedia",
-              summary: data.summary || data.ringkasan || data.konten?.substring(0, 150) + "..." || "Ringkasan tidak tersedia",
-              image: data.imageUrl || data.image || data.gambar || "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&h=400&fit=crop&auto=format",
+              summary:
+                data.summary ||
+                data.ringkasan ||
+                data.konten?.substring(0, 150) + "..." ||
+                "Ringkasan tidak tersedia",
+              image:
+                data.imageUrl ||
+                data.image ||
+                data.gambar ||
+                "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&h=400&fit=crop&auto=format",
               category: data.category || data.kategori || "Umum",
               author: data.author || data.authorName || "Admin",
               views: data.views || 0,
               comments: commentCount,
               createdAt: data.createdAt?.toDate?.() || new Date(),
               featured: data.featured || false,
-              slug: data.slug || createSlug(data.judul || data.title || 'untitled'),
+              slug: data.slug || createSlug(data.judul || data.title || "untitled"),
             };
           });
           const posts = await Promise.all(postsPromises);
-          console.log("Jumlah berita yang dimuat:", posts.length, "Data:", posts);
           setNewsData(posts);
           setLoading(false);
         } catch (err) {
-          console.error("Error fetching posts:", err);
+          console.error("Error fetching posts at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
           setError("Gagal memuat berita");
           setLoading(false);
           toast.error("Gagal memuat berita.", {
-            position: 'top-center',
+            position: "top-center",
             autoClose: 3000,
-            toastId: 'posts-error',
+            toastId: "posts-error",
           });
         }
       },
       (err) => {
-        console.error("Error in posts snapshot:", err);
+        console.error("Error in posts snapshot at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
         setError("Gagal memuat pembaruan berita");
         setLoading(false);
         toast.error("Gagal memuat pembaruan berita.", {
-          position: 'top-center',
+          position: "top-center",
           autoClose: 3000,
-          toastId: 'posts-snapshot-error',
+          toastId: "posts-snapshot-error",
         });
       }
     );
@@ -136,34 +215,33 @@ const NewsPage = () => {
         try {
           const popularPromises = snapshot.docs.map(async (doc) => {
             const data = doc.data();
-            const commentCount = await countCommentsForNews(doc.id);
-            console.log(`Processing popular news ${doc.id}:`, { title: data.title, comments: commentCount });
+            const commentCount = await countCommentsForNews(doc.id, currentUser);
             return {
               id: doc.id,
               title: data.title || data.judul || "Judul tidak tersedia",
               views: data.views || 0,
               comments: commentCount,
               createdAt: data.createdAt?.toDate?.() || new Date(),
-              slug: data.slug || createSlug(data.judul || data.title || 'untitled'),
+              slug: data.slug || createSlug(data.judul || data.title || "untitled"),
             };
           });
           const popular = await Promise.all(popularPromises);
           setPopularNews(popular);
         } catch (err) {
-          console.error("Error fetching popular news:", err);
+          console.error("Error fetching popular news at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
           toast.error("Gagal memuat berita populer.", {
-            position: 'top-center',
+            position: "top-center",
             autoClose: 3000,
-            toastId: 'popular-news-error',
+            toastId: "popular-news-error",
           });
         }
       },
       (err) => {
-        console.error("Error in popular news snapshot:", err);
+        console.error("Error in popular news snapshot at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
         toast.error("Gagal memuat pembaruan berita populer.", {
-          position: 'top-center',
+          position: "top-center",
           autoClose: 3000,
-          toastId: 'popular-news-snapshot-error',
+          toastId: "popular-news-snapshot-error",
         });
       }
     );
@@ -172,7 +250,7 @@ const NewsPage = () => {
       unsubscribePosts();
       unsubscribePopular();
     };
-  }, []);
+  }, [authLoading, currentUser]);
 
   const formatTimeAgo = (date) => {
     const now = new Date();
@@ -200,7 +278,7 @@ const NewsPage = () => {
   };
 
   const handleImageError = (newsId) => {
-    setImageErrors(prev => ({ ...prev, [newsId]: true }));
+    setImageErrors((prev) => ({ ...prev, [newsId]: true }));
   };
 
   const getImageSrc = (news) => {
@@ -212,21 +290,28 @@ const NewsPage = () => {
 
   const handleSubscribe = () => {
     if (email) {
-      alert(`Terima kasih! Anda telah berlangganan dengan email: ${email}`);
-      setEmail('');
+      toast.success(`Terima kasih! Anda telah berlangganan dengan email: ${email}`, {
+        position: "top-center",
+        autoClose: 3000,
+      });
+      setEmail("");
     } else {
-      alert('Silakan masukkan email Anda');
+      toast.warn("Silakan masukkan email Anda", {
+        position: "top-center",
+        autoClose: 3000,
+      });
     }
+  };
+
+  const handleDebugComments = () => {
+    debugComments().catch((err) => console.error("Failed to debug comments at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err));
   };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="relative">
-            <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto mb-4"></div>
-            <div className="absolute inset-0 rounded-full h-16 w-16 border-4 border-transparent border-r-blue-400 animate-ping mx-auto opacity-20"></div>
-          </div>
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-700 font-medium">Memuat berita terbaru...</p>
         </div>
       </div>
@@ -253,16 +338,14 @@ const NewsPage = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-800 mb-4">
-            <span className="text-blue-600"> </span>
+            <span className="text-blue-600">Berita Terkini</span>
           </h1>
-          <p className="text-gray-600 text-lg"></p>
+          <p className="text-gray-600 text-lg">Jelajahi informasi terbaru hari ini</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content */}
           <div className="lg:col-span-2">
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-3xl font-bold text-gray-800 flex items-center">
@@ -284,7 +367,6 @@ const NewsPage = () => {
                     className="bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 overflow-hidden group"
                   >
                     <div className="flex flex-col md:flex-row">
-                      {/* Image Container */}
                       <div className="md:w-80 h-64 md:h-56 flex-shrink-0 relative overflow-hidden">
                         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent z-10"></div>
                         <img
@@ -294,13 +376,11 @@ const NewsPage = () => {
                           loading="lazy"
                           onError={() => handleImageError(news.id)}
                         />
-                        {/* Category Badge on Image */}
                         <div className="absolute top-4 left-4 z-20">
                           <span className={`${getCategoryColor(news.category)} text-xs px-3 py-1.5 rounded-full font-semibold border backdrop-blur-sm`}>
                             {news.category}
                           </span>
                         </div>
-                        {/* Featured Badge */}
                         {news.featured && (
                           <div className="absolute top-4 right-4 z-20">
                             <span className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg">
@@ -310,7 +390,6 @@ const NewsPage = () => {
                         )}
                       </div>
 
-                      {/* Content */}
                       <div className="flex-1 p-8">
                         <div className="flex items-center mb-4 space-x-3">
                           {index === 0 && (
@@ -320,10 +399,7 @@ const NewsPage = () => {
                           )}
                         </div>
 
-                        <Link
-                          to={`/berita/${news.slug}`}
-                          onClick={() => console.log(`Navigating to: /berita/${news.slug}`)}
-                        >
+                        <Link to={`/berita/${news.slug}`} onClick={() => console.log(`Navigating to: /berita/${news.slug}`)}>
                           <h2 className="text-2xl font-bold text-gray-800 group-hover:text-blue-600 transition-colors mb-4 line-clamp-2 cursor-pointer">
                             {news.title}
                           </h2>
@@ -358,7 +434,6 @@ const NewsPage = () => {
                           )}
                         </div>
 
-                        {/* Read More Button */}
                         <Link
                           to={`/berita/${news.slug}`}
                           className="mt-6 inline-flex items-center text-blue-600 hover:text-blue-700 font-medium transition-colors group"
@@ -371,7 +446,6 @@ const NewsPage = () => {
                   </article>
                 ))}
 
-                {/* Load More Button */}
                 <div className="text-center">
                   <button
                     onClick={() => navigate("/allnews")}
@@ -385,9 +459,7 @@ const NewsPage = () => {
             )}
           </div>
 
-          {/* Sidebar */}
           <div className="lg:col-span-1 space-y-8">
-            {/* Popular News */}
             <div className="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-shadow duration-300">
               <h3 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
                 <TrendingUp className="w-6 h-6 mr-3 text-red-500" />
@@ -414,10 +486,7 @@ const NewsPage = () => {
                           {item.views.toLocaleString()}
                         </span>
                       </div>
-                      <Link
-                        to={`/berita/${item.slug}`}
-                        onClick={() => console.log(`Navigating to: /berita/${item.slug}`)}
-                      >
+                      <Link to={`/berita/${item.slug}`} onClick={() => console.log(`Navigating to: /berita/${item.slug}`)}>
                         <h4 className="font-bold text-gray-800 group-hover:text-blue-600 transition-colors line-clamp-2 mb-2">
                           {item.title}
                         </h4>
@@ -438,7 +507,6 @@ const NewsPage = () => {
               )}
             </div>
 
-            {/* Newsletter */}
             <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-lg p-6 text-white">
               <div className="text-center mb-6">
                 <Mail className="w-12 h-12 mx-auto mb-4 text-blue-100" />
@@ -453,7 +521,7 @@ const NewsPage = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300"
                 />
-                <button 
+                <button
                   onClick={handleSubscribe}
                   className="w-full bg-white text-blue-600 py-3 rounded-xl font-semibold hover:bg-gray-100 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
@@ -462,7 +530,6 @@ const NewsPage = () => {
               </div>
             </div>
 
-            {/* Quick Stats */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h3 className="text-xl font-bold text-gray-800 mb-4">Statistik Hari Ini</h3>
               <div className="space-y-4">

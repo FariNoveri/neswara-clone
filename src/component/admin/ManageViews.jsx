@@ -3,16 +3,20 @@ import { db } from '../../firebaseconfig';
 import { 
   collection, 
   getDocs, 
-  updateDoc, 
+  getDoc,
   doc, 
+  updateDoc, 
   deleteDoc,
   query,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
+import { useAuth } from '../auth/useAuth';
+import { useNavigate } from 'react-router-dom';
 import { Eye, RefreshCw, User, UserX, Trash, Shield, AlertCircle, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, isProcessing }) => {
   if (!isOpen) return null;
 
   return (
@@ -28,6 +32,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
           <button 
             onClick={onClose} 
             className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
+            disabled={isProcessing}
           >
             <X className="w-6 h-6" />
           </button>
@@ -36,15 +41,17 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
         <div className="flex justify-end space-x-4">
           <button
             onClick={onClose}
-            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform"
+            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all duration-200 font-medium hover:scale-105 transform disabled:opacity-50"
+            disabled={isProcessing}
           >
             Batal
           </button>
           <button
             onClick={onConfirm}
-            className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg"
+            className="px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl hover:from-red-600 hover:to-red-700 transition-all duration-200 font-medium hover:scale-105 transform shadow-lg disabled:opacity-50"
+            disabled={isProcessing}
           >
-            Hapus
+            {isProcessing ? 'Memproses...' : 'Hapus'}
           </button>
         </div>
       </div>
@@ -53,28 +60,83 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
 };
 
 const ManageViews = ({ logActivity, onViewsUpdated }) => {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const [newsItems, setNewsItems] = useState([]);
   const [selectedNewsId, setSelectedNewsId] = useState('');
   const [selectedNewsTitle, setSelectedNewsTitle] = useState('');
   const [viewDetails, setViewDetails] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [totalViews, setTotalViews] = useState(0);
-  const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, type: '', id: null, title: '', message: '' });
+  const [confirmationModal, setConfirmationModal] = useState({ 
+    isOpen: false, 
+    type: '', 
+    id: null, 
+    title: '', 
+    message: '',
+    isProcessing: false 
+  });
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    fetchNewsItems();
-  }, []);
+    console.log('useEffect: Checking authentication, currentUser:', currentUser);
+    if (!currentUser) {
+      console.log('useEffect: No current user, redirecting to /news');
+      toast.warn('Silakan login untuk mengakses halaman ini.');
+      navigate('/news');
+      return;
+    }
+
+    const checkAdminStatus = async () => {
+      try {
+        console.log(`useEffect: Checking admin status for user ${currentUser.uid}`);
+        // Force token refresh to ensure valid auth state
+        await currentUser.getIdToken(true);
+        const tokenResult = await currentUser.getIdTokenResult();
+        const isAdminClaim = tokenResult.claims.isAdmin === true;
+        console.log(`useEffect: isAdmin claim from token: ${isAdminClaim}`);
+
+        // Check Firestore as fallback
+        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        const isAdminFirestore = userDoc.exists() && userDoc.data().isAdmin === true;
+        console.log(`useEffect: isAdmin from Firestore: ${isAdminFirestore}`);
+
+        const isUserAdmin = isAdminClaim || isAdminFirestore;
+        setIsAdmin(isUserAdmin);
+
+        if (!isUserAdmin) {
+          console.log('useEffect: User is not admin, redirecting to /news');
+          toast.warn('Akses ditolak. Hanya admin yang dapat mengakses halaman ini.');
+          navigate('/news');
+          return;
+        }
+
+        // Fetch news items only after admin status is confirmed
+        await fetchNewsItems();
+      } catch (error) {
+        console.error('useEffect: Error checking admin status:', error);
+        setError('Gagal memverifikasi izin admin: ' + error.message);
+        await logActivity('CHECK_ADMIN_ERROR', { error: error.message, userId: currentUser.uid });
+        toast.error('Gagal memverifikasi izin admin.');
+        setLoading(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [currentUser, navigate, logActivity]);
 
   useEffect(() => {
-    if (selectedNewsId) {
+    if (isAdmin && selectedNewsId) {
+      console.log(`useEffect: Triggering fetchViewDetails for newsId ${selectedNewsId}`);
       fetchViewDetails(selectedNewsId);
     }
-  }, [selectedNewsId]);
+  }, [isAdmin, selectedNewsId]);
 
   const fetchNewsItems = async () => {
     setLoading(true);
     try {
+      console.log('fetchNewsItems: Fetching news items');
       const newsSnapshot = await getDocs(collection(db, 'news'));
       const newsData = newsSnapshot.docs.map(doc => ({ 
         id: doc.id, 
@@ -82,19 +144,33 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
         judul: doc.data().judul 
       }));
       setNewsItems(newsData);
+      console.log(`fetchNewsItems: Fetched ${newsData.length} news items`);
+      setLoading(false);
     } catch (err) {
-      console.error('Error fetching news data:', err);
-      setError('Gagal memuat data berita.');
+      console.error('fetchNewsItems: Error fetching news data:', err);
+      setError('Gagal memuat data berita: ' + err.message);
+      await logActivity('FETCH_NEWS_ERROR', { error: err.message });
       toast.error('Gagal memuat data berita.');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const fetchViewDetails = async (newsId) => {
+    if (!currentUser) {
+      console.log('fetchViewDetails: No current user, skipping query');
+      setError('User tidak terautentikasi. Silakan login kembali.');
+      toast.error('Sesi telah berakhir. Silakan login kembali.');
+      navigate('/news');
+      return;
+    }
+
     setLoading(true);
     try {
+      console.log(`fetchViewDetails: Fetching view details for newsId ${newsId}`);
+      // Force token refresh to ensure valid auth state
+      await currentUser.getIdToken(true);
       const viewsSnapshot = await getDocs(
-        query(collection(db, 'views'), where('newsId', '==', newsId))
+        query(collection(db, 'news', newsId, 'views'))
       );
       
       const viewsData = [];
@@ -106,14 +182,18 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
         
         if (viewData.userId) {
           try {
-            const userDoc = await getDocs(
-              query(collection(db, 'users'), where('__name__', '==', viewData.userId))
-            );
-            if (!userDoc.empty) {
-              userData = userDoc.docs[0].data();
+            console.log(`fetchViewDetails: Fetching user data for userId ${viewData.userId}`);
+            const userDoc = await getDoc(doc(db, 'users', viewData.userId));
+            if (userDoc.exists()) {
+              userData = userDoc.data();
+              console.log(`fetchViewDetails: Fetched user data for userId ${viewData.userId}`);
+            } else {
+              console.warn(`fetchViewDetails: No user document found for userId ${viewData.userId}`);
             }
           } catch (error) {
-            console.error('Error fetching user data:', error);
+            console.error(`fetchViewDetails: Error fetching user data for userId ${viewData.userId}:`, error);
+            await logActivity('FETCH_USER_ERROR', { userId: viewData.userId, error: error.message });
+            // Continue processing even if user data fetch fails
           }
         }
         
@@ -121,7 +201,7 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
           id: viewDoc.id,
           ...viewData,
           userData,
-          viewedAt: viewData.viewedAt?.toDate() || new Date()
+          viewedAt: viewData.viewedAt?.toDate?.() || new Date(viewData.viewedAt || Date.now())
         });
         
         total += viewData.count || 1;
@@ -134,18 +214,22 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
       
       const selectedNews = newsItems.find(item => item.id === newsId);
       setSelectedNewsTitle(selectedNews?.judul || '');
+      console.log(`fetchViewDetails: Fetched ${viewsData.length} view details, total views: ${total}`);
       
+      setLoading(false);
     } catch (err) {
-      console.error('Error fetching view details:', err);
-      setError('Gagal memuat detail views.');
-      toast.error('Gagal memuat detail views.');
+      console.error('fetchViewDetails: Error fetching view details:', err);
+      setError('Gagal memuat detail views: ' + err.message);
+      await logActivity('FETCH_VIEWS_ERROR', { newsId, error: err.message });
+      toast.error('Gagal memuat detail views: ' + err.message);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleResetViews = () => {
     if (!selectedNewsId) {
       toast.warn('Pilih berita untuk direset.');
+      console.log('handleResetViews: No news selected');
       return;
     }
 
@@ -154,29 +238,46 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
       type: 'single',
       id: selectedNewsId,
       title: 'Reset Views Berita',
-      message: `Apakah Anda yakin ingin mereset semua views untuk berita "${selectedNewsTitle}"? Tindakan ini tidak dapat dibatalkan.`
+      message: `Apakah Anda yakin ingin mereset semua views untuk berita "${selectedNewsTitle}"? Tindakan ini tidak dapat dibatalkan.`,
+      isProcessing: false
     });
+    console.log(`handleResetViews: Initiated reset for newsId ${selectedNewsId}`);
   };
 
   const confirmResetViews = async () => {
-    setLoading(true);
+    if (!currentUser) {
+      console.log('confirmResetViews: No current user, redirecting to /news');
+      toast.error('Sesi telah berakhir. Silakan login kembali.');
+      navigate('/news');
+      return;
+    }
+
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
     try {
-      await updateDoc(doc(db, 'news', selectedNewsId), {
-        views: 0
+      console.log(`confirmResetViews: Resetting views for newsId ${selectedNewsId}`);
+      const batch = writeBatch(db);
+
+      // Update news document to reset views
+      batch.update(doc(db, 'news', selectedNewsId), { views: 0 });
+
+      // Delete all views for this news item
+      const viewsSnapshot = await getDocs(
+        query(collection(db, 'news', selectedNewsId, 'views'))
+      );
+      viewsSnapshot.forEach(viewDoc => {
+        batch.delete(doc(db, 'news', selectedNewsId, 'views', viewDoc.id));
       });
 
-      const viewsSnapshot = await getDocs(
-        query(collection(db, 'views'), where('newsId', '==', selectedNewsId))
-      );
-      
-      const deletePromises = viewsSnapshot.docs.map(viewDoc => 
-        deleteDoc(doc(db, 'views', viewDoc.id))
-      );
-      
-      await Promise.all(deletePromises);
+      await batch.commit();
 
-      logActivity('VIEWS_UPDATED', { newsId: selectedNewsId, title: selectedNewsTitle, action: 'reset', newTotal: 0 });
+      await logActivity('VIEWS_UPDATED', { 
+        newsId: selectedNewsId, 
+        title: selectedNewsTitle, 
+        action: 'reset', 
+        newTotal: 0 
+      });
       toast.success('Views telah direset untuk berita ini.');
+      console.log(`confirmResetViews: Successfully reset views for newsId ${selectedNewsId}`);
       
       await fetchNewsItems();
       await fetchViewDetails(selectedNewsId);
@@ -184,14 +285,13 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
       if (onViewsUpdated) {
         onViewsUpdated();
       }
-      
     } catch (err) {
-      console.error('Error resetting views:', err);
-      setError('Gagal mereset views.');
-      toast.error('Gagal mereset views. Silakan coba lagi.');
+      console.error('confirmResetViews: Error resetting views:', err);
+      setError('Gagal mereset views: ' + err.message);
+      await logActivity('RESET_VIEWS_ERROR', { newsId: selectedNewsId, error: err.message });
+      toast.error('Gagal mereset views: ' + err.message);
     }
-    setLoading(false);
-    setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '' });
+    setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '', isProcessing: false });
   };
 
   const handleResetAllViews = () => {
@@ -200,29 +300,42 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
       type: 'all',
       id: null,
       title: 'Reset Semua Views',
-      message: 'Apakah Anda yakin ingin mereset SEMUA views untuk SEMUA berita? Tindakan ini tidak dapat dibatalkan.'
+      message: 'Apakah Anda yakin ingin mereset SEMUA views untuk SEMUA berita? Tindakan ini tidak dapat dibatalkan.',
+      isProcessing: false
     });
+    console.log('handleResetAllViews: Initiated reset for all views');
   };
 
   const confirmResetAllViews = async () => {
-    setLoading(true);
+    if (!currentUser) {
+      console.log('confirmResetAllViews: No current user, redirecting to /news');
+      toast.error('Sesi telah berakhir. Silakan login kembali.');
+      navigate('/news');
+      return;
+    }
+
+    setConfirmationModal(prev => ({ ...prev, isProcessing: true }));
     try {
+      console.log('confirmResetAllViews: Resetting all views');
+      const batch = writeBatch(db);
+
+      // Reset views in all news documents
       const newsSnapshot = await getDocs(collection(db, 'news'));
-      const updatePromises = newsSnapshot.docs.map(newsDoc => 
-        updateDoc(doc(db, 'news', newsDoc.id), { views: 0 })
-      );
-      
-      await Promise.all(updatePromises);
+      newsSnapshot.forEach(newsDoc => {
+        batch.update(doc(db, 'news', newsDoc.id), { views: 0 });
+      });
 
+      // Delete all views for all news items
       const allViewsSnapshot = await getDocs(collection(db, 'views'));
-      const deletePromises = allViewsSnapshot.docs.map(viewDoc => 
-        deleteDoc(doc(db, 'views', viewDoc.id))
-      );
-      
-      await Promise.all(deletePromises);
+      allViewsSnapshot.forEach(viewDoc => {
+        batch.delete(doc(db, 'views', viewDoc.id));
+      });
 
-      logActivity('VIEWS_UPDATED', { action: 'reset_all', newTotal: 0 });
+      await batch.commit();
+
+      await logActivity('VIEWS_UPDATED', { action: 'reset_all', newTotal: 0 });
       toast.success('Semua views telah direset.');
+      console.log('confirmResetAllViews: Successfully reset all views');
       
       await fetchNewsItems();
       if (selectedNewsId) {
@@ -232,14 +345,13 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
       if (onViewsUpdated) {
         onViewsUpdated();
       }
-      
     } catch (err) {
-      console.error('Error resetting all views:', err);
-      setError('Gagal mereset semua views.');
-      toast.error('Gagal mereset semua views. Silakan coba lagi.');
+      console.error('confirmResetAllViews: Error resetting all views:', err);
+      setError('Gagal mereset semua views: ' + err.message);
+      await logActivity('RESET_ALL_VIEWS_ERROR', { error: err.message });
+      toast.error('Gagal mereset semua views: ' + err.message);
     }
-    setLoading(false);
-    setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '' });
+    setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '', isProcessing: false });
   };
 
   const formatDate = (date) => {
@@ -496,10 +608,11 @@ const ManageViews = ({ logActivity, onViewsUpdated }) => {
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
-        onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '' })}
+        onClose={() => setConfirmationModal({ isOpen: false, type: '', id: null, title: '', message: '', isProcessing: false })}
         onConfirm={confirmationModal.type === 'single' ? confirmResetViews : confirmResetAllViews}
         title={confirmationModal.title}
         message={confirmationModal.message}
+        isProcessing={confirmationModal.isProcessing}
       />
 
       <div className="h-16"></div> {/* Bottom spacing */}

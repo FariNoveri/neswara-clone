@@ -1,22 +1,21 @@
-import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, Camera, Eye, EyeOff } from 'lucide-react';
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, Camera, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { db, auth } from "../../firebaseconfig";
 import { useState, useEffect, useRef } from 'react';
-import { onAuthStateChanged } from "firebase/auth";
-import ReactCrop from 'react-image-crop';
-import 'react-image-crop/dist/ReactCrop.css';
+import { onAuthStateChanged, getIdTokenResult } from "firebase/auth";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import ImageExtension from '@tiptap/extension-image';
+import 'react-image-crop/dist/ReactCrop.css';
+import ReactCrop from 'react-image-crop';
 
-const NewsModal = ({ 
-  showModal, 
-  setShowModal, 
-  editingNews, 
-  formData, 
-  setFormData, 
-  handleSubmit, 
-  resetForm, 
+const NewsModal = ({
+  showModal,
+  setShowModal,
+  editingNews,
+  formData,
+  setFormData,
+  resetForm,
   loading,
   logActivity
 }) => {
@@ -26,6 +25,7 @@ const NewsModal = ({
   const [imagePreview, setImagePreview] = useState('');
   const [uploading, setUploading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [useUserName, setUseUserName] = useState(false);
   const [showProfilePicture, setShowProfilePicture] = useState(true);
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -33,11 +33,23 @@ const NewsModal = ({
   const [originalImage, setOriginalImage] = useState(null);
   const [imageError, setImageError] = useState('');
   const [cropKey, setCropKey] = useState(0);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [originalAuthorData, setOriginalAuthorData] = useState(null);
   const imgRef = useRef(null);
   const canvasRef = useRef(null);
   const [crop, setCrop] = useState({ unit: '%', x: 0, y: 0, width: 100, height: 100 * (9 / 16), aspect: 16 / 9 });
   const [completedCrop, setCompletedCrop] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const loggedLegacyArticles = useRef(new Set()); // Track logged legacy articles
+
+  const TITLE_MAX_LENGTH = 200;
+
+  // Define isOriginalAuthor before any hooks
+  const isOriginalAuthor = !editingNews || 
+    (editingNews && (
+      (editingNews.authorId && editingNews.authorId === currentUser?.uid) || 
+      (!editingNews.authorId && isAdmin)
+    ));
 
   const editor = useEditor({
     extensions: [
@@ -53,25 +65,132 @@ const NewsModal = ({
     },
   });
 
+  // Monitor auth state and admin status
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const tokenResult = await getIdTokenResult(user, true);
+          setCurrentUser({ ...user, displayName: user.displayName, email: user.email });
+          setIsAdmin(tokenResult.claims.isAdmin === true);
+          console.log('[NewsModal] Admin status:', tokenResult.claims.isAdmin);
+          console.log('[NewsModal] User:', { uid: user.uid, displayName: user.displayName, email: user.email });
+        } catch (error) {
+          console.error('[NewsModal] Error checking admin status:', error);
+          setErrorMessage('Gagal memverifikasi status admin.');
+          setIsAdmin(false);
+        }
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+      }
     });
     return () => unsubscribe();
   }, []);
 
+  // Fetch original author data from Firestore
   useEffect(() => {
-    if (showModal) {
+    const fetchAuthorData = async () => {
+      if (editingNews && editingNews.authorId) {
+        try {
+          // Try fetching from users collection
+          const userDoc = await getDoc(doc(db, "users", editingNews.authorId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            setOriginalAuthorData({
+              displayName: userData.displayName || editingNews.author || 'Tanpa Nama',
+              email: userData.email || 'Tidak tersedia',
+              photoURL: userData.photoURL || null,
+            });
+            console.log('[NewsModal] Original author data fetched:', {
+              uid: editingNews.authorId,
+              displayName: userData.displayName,
+              email: userData.email,
+            });
+          } else {
+            // Fallback to news document data or defaults
+            setOriginalAuthorData({
+              displayName: editingNews.author || 'Tanpa Nama',
+              email: editingNews.authorEmail || 'Tidak tersedia',
+              photoURL: editingNews.authorPhotoURL || null,
+            });
+            console.warn('[NewsModal] No user document found for authorId:', editingNews.authorId);
+          }
+        } catch (error) {
+          console.error('[NewsModal] Error fetching original author data:', error);
+          setOriginalAuthorData({
+            displayName: editingNews.author || 'Tanpa Nama',
+            email: editingNews.authorEmail || 'Tidak tersedia',
+            photoURL: editingNews.authorPhotoURL || null,
+          });
+        }
+      } else if (editingNews && !editingNews.authorId) {
+        // Legacy article
+        setOriginalAuthorData({
+          displayName: editingNews.author || 'Tanpa Nama',
+          email: editingNews.authorEmail || 'Tidak tersedia',
+          photoURL: editingNews.authorPhotoURL || null,
+        });
+      } else {
+        // New article
+        setOriginalAuthorData(null);
+      }
+    };
+    fetchAuthorData();
+  }, [editingNews]);
+
+  // Manual refresh for user data
+  const refreshUserData = async () => {
+    if (auth.currentUser) {
+      try {
+        await auth.currentUser.getIdToken(true);
+        const user = auth.currentUser;
+        setCurrentUser({ ...user, displayName: user.displayName, email: user.email });
+        console.log('[NewsModal] User data refreshed:', { uid: user.uid, displayName: user.displayName, email: user.email });
+        // Refresh original author data if editing a modern article
+        if (editingNews && editingNews.authorId) {
+          const userDoc = await getDoc(doc(db, "users", editingNews.authorId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            setOriginalAuthorData({
+              displayName: userData.displayName || editingNews.author || 'Tanpa Nama',
+              email: userData.email || 'Tidak tersedia',
+              photoURL: userData.photoURL || null,
+            });
+          } else {
+            setOriginalAuthorData({
+              displayName: editingNews.author || 'Tanpa Nama',
+              email: editingNews.authorEmail || 'Tidak tersedia',
+              photoURL: editingNews.authorPhotoURL || null,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('[NewsModal] Error refreshing user data:', error);
+        setErrorMessage('Gagal memperbarui data pengguna.');
+      }
+    }
+  };
+
+  // Initialize formData.author and UI state
+  useEffect(() => {
+    if (showModal && editingNews) {
       setIsAnimating(true);
-      if (editingNews && formData.gambar) {
+      if (formData.gambar) {
         setImagePreview(formData.gambar);
       }
-      if (editingNews && editingNews.hideProfilePicture !== undefined) {
+      if (editingNews.hideProfilePicture !== undefined) {
         setShowProfilePicture(!editingNews.hideProfilePicture);
       }
-      if (editor && editingNews) {
+      if (editor) {
         editor.commands.setContent(formData.konten);
       }
+      // Ensure formData.author is set to editingNews.author
+      setFormData(prev => ({ ...prev, author: editingNews.author || '' }));
+      setUseUserName(editingNews.author === currentUser?.displayName);
+    } else if (showModal) {
+      setIsAnimating(true);
+      setUseUserName(false);
     } else {
       setIsAnimating(false);
       setImagePreview('');
@@ -83,20 +202,25 @@ const NewsModal = ({
       setCompletedCrop(null);
       setZoom(1);
       setImageError('');
+      setErrorMessage('');
       setCropKey(prev => prev + 1);
       if (editor) {
         editor.commands.setContent('');
       }
     }
-  }, [showModal, editingNews, formData.gambar, formData.konten, editor]);
+  }, [showModal, editingNews, formData.gambar, formData.konten, editor, currentUser, setFormData]);
 
+  // Update hideProfilePicture in formData
   useEffect(() => {
-    setFormData(prev => ({
-      ...prev,
-      hideProfilePicture: !showProfilePicture
-    }));
-  }, [showProfilePicture, setFormData]);
+    if (!editingNews || isOriginalAuthor) {
+      setFormData(prev => ({
+        ...prev,
+        hideProfilePicture: !showProfilePicture
+      }));
+    }
+  }, [showProfilePicture, setFormData, editingNews, isOriginalAuthor]);
 
+  // Validate image URL
   useEffect(() => {
     if (formData.gambar && formData.gambar.startsWith('https://')) {
       const cacheBustedUrl = `${formData.gambar}?t=${Date.now()}`;
@@ -110,13 +234,13 @@ const NewsModal = ({
           }
         })
         .catch((error) => {
-          setImageError(`Failed to load image: ${error.message}. Please use a valid HTTPS URL or upload a new image.`);
+          setImageError(`Gagal memuat gambar: ${error.message}.`);
           setFormData(prev => ({ ...prev, gambar: '' }));
           setImagePreview('');
           setOriginalImage(null);
         });
     } else if (formData.gambar) {
-      setImageError('Only HTTPS image URLs are supported.');
+      setImageError('Hanya URL gambar HTTPS yang didukung.');
       setFormData(prev => ({ ...prev, gambar: '' }));
       setImagePreview('');
       setOriginalImage(null);
@@ -124,8 +248,9 @@ const NewsModal = ({
       setImageError('');
       setOriginalImage(null);
     }
-  }, [formData.gambar]);
+  }, [formData.gambar, setFormData]);
 
+  // Update cropped image canvas
   useEffect(() => {
     if (!completedCrop || !imgRef.current || !canvasRef.current) return;
 
@@ -157,6 +282,7 @@ const NewsModal = ({
     );
   }, [completedCrop]);
 
+  // Manage body overflow for crop modal
   useEffect(() => {
     if (cropModalOpen) {
       document.body.classList.add('overflow-hidden');
@@ -166,29 +292,85 @@ const NewsModal = ({
     return () => document.body.classList.remove('overflow-hidden');
   }, [cropModalOpen]);
 
-  if (!showModal) return null;
+  // Log warning for legacy articles
+  useEffect(() => {
+    if (editingNews && !editingNews.authorId && !loggedLegacyArticles.current.has(editingNews.id)) {
+      console.warn(
+        `[NewsModal] Legacy article detected (ID: ${editingNews.id}). No authorId found. Using author name fallback: "${editingNews.author}".`
+      );
+      loggedLegacyArticles.current.add(editingNews.id);
+    }
+  }, [editingNews]);
 
-  const generateSlug = async (title) => {
-    if (!title || typeof title !== 'string') return '';
-    let slug = title
+  const createSlug = (title) => {
+    if (!title) return "";
+    return title
       .toLowerCase()
-      .trim()
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
-      .substring(0, 100);
+      .trim('-');
+  };
 
-    let baseSlug = slug;
-    let counter = 1;
+  const createUniqueSlug = async (title, docId, existingSlug = null) => {
+    let slug = createSlug(title || `news-${docId}`);
+    let suffix = 1;
+    let uniqueSlug = existingSlug || slug;
     while (true) {
-      const slugQuery = query(collection(db, "news"), where("slug", "==", slug));
-      const snapshot = await getDocs(slugQuery);
-      if (snapshot.empty || (editingNews && snapshot.docs[0].id === editingNews.id)) {
-        return slug;
-      }
-      slug = `${baseSlug}-${counter}`;
-      counter++;
+      const q = query(collection(db, "news"), where("slug", "==", uniqueSlug));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty || (snapshot.docs[0].id === docId && snapshot.size === 1)) break;
+      uniqueSlug = `${slug}-${suffix++}`;
     }
+    return uniqueSlug;
+  };
+
+  const createNews = async (newsData, isUpdate = false) => {
+    try {
+      const requiredFields = ['judul', 'kategori', 'author', 'authorId', 'konten'];
+      for (const field of requiredFields) {
+        if (!newsData[field] || newsData[field] === '') {
+          throw new Error(`Field ${field} wajib diisi.`);
+        }
+      }
+
+      const dataToSave = {
+        judul: String(newsData.judul),
+        kategori: String(newsData.kategori),
+        author: String(newsData.author),
+        authorId: String(newsData.authorId),
+        authorEmail: String(currentUser?.email || 'Tidak tersedia'),
+        authorPhotoURL: String(currentUser?.photoURL || ''),
+        konten: String(newsData.konten),
+        ringkasan: newsData.ringkasan ? String(newsData.ringkasan) : '',
+        gambar: newsData.gambar ? String(newsData.gambar) : '',
+        gambarDeskripsi: newsData.gambarDeskripsi ? String(newsData.gambarDeskripsi) : '',
+        slug: newsData.slug || '',
+        hideProfilePicture: Boolean(newsData.hideProfilePicture),
+        views: Number(newsData.views || 0),
+        komentar: Number(newsData.komentar || 0),
+        updatedAt: serverTimestamp(),
+      };
+
+      const newsRef = isUpdate ? doc(db, "news", editingNews.id) : doc(collection(db, "news"));
+      dataToSave.slug = await createUniqueSlug(newsData.judul, newsRef.id, isUpdate ? newsData.slug : null);
+
+      if (!isUpdate) {
+        dataToSave.createdAt = serverTimestamp();
+      }
+
+      await setDoc(newsRef, dataToSave, { merge: true });
+      console.log(`[NewsModal] News ${isUpdate ? 'updated' : 'created'} with ID: ${newsRef.id}, Slug: ${dataToSave.slug}`);
+      return newsRef.id;
+    } catch (error) {
+      console.error("[NewsModal] Error creating/updating news:", error);
+      throw error;
+    }
+  };
+
+  const generateSlug = async (title) => {
+    if (!title || typeof title !== 'string') return '';
+    return createSlug(title).substring(0, 100);
   };
 
   const validateImageFile = (file, callback) => {
@@ -198,38 +380,38 @@ const NewsModal = ({
 
     const fileExtension = file.name.split('.').pop().toLowerCase();
     if (!allowedExtensions.includes(fileExtension)) {
-      callback(new Error(`Invalid file extension. Allowed: ${allowedExtensions.join(', ')}`));
+      callback(new Error(`Ekstensi file tidak valid. Diizinkan: ${allowedExtensions.join(', ')}`));
       return;
     }
 
     if (!allowedMimeTypes.includes(file.type)) {
-      callback(new Error(`Invalid file type. Allowed: ${allowedMimeTypes.join(', ')}`));
+      callback(new Error(`Tipe file tidak valid. Diizinkan: ${allowedMimeTypes.join(', ')}`));
       return;
     }
 
     if (file.size > maxSize) {
-      callback(new Error('File size exceeds 5MB limit.'));
+      callback(new Error('Ukuran file melebihi batas 5MB.'));
       return;
     }
 
     createImageBitmap(file).then(() => {
       callback(null);
     }).catch(() => {
-      callback(new Error('File is not a valid image.'));
+      callback(new Error('File bukan gambar yang valid.'));
     });
   };
 
   const getCroppedImg = () => {
     return new Promise((resolve, reject) => {
       if (!completedCrop || !canvasRef.current) {
-        reject(new Error('No crop data available.'));
+        reject(new Error('Tidak ada data crop yang tersedia.'));
         return;
       }
 
       canvasRef.current.toBlob(
         (blob) => {
           if (!blob) {
-            reject(new Error('Failed to create cropped image.'));
+            reject(new Error('Gagal membuat gambar yang telah dipotong.'));
             return;
           }
           const croppedFile = new File([blob], `cropped-image-${Date.now()}.jpg`, {
@@ -262,7 +444,7 @@ const NewsModal = ({
         setCropKey(prev => prev + 1);
       };
       reader.onerror = () => {
-        setImageError('Failed to read image file. Please try another image.');
+        setImageError('Gagal membaca file gambar.');
       };
       reader.readAsDataURL(file);
     });
@@ -270,7 +452,7 @@ const NewsModal = ({
 
   const handleCropConfirm = async () => {
     if (!imageToCrop || !completedCrop) {
-      console.log('No image or crop data available');
+      console.log('[NewsModal] No image or crop data available');
       setCropModalOpen(false);
       return;
     }
@@ -291,8 +473,8 @@ const NewsModal = ({
         try {
           const response = await fetch(
             `https://api.imgbb.com/1/upload?key=${import.meta.env.VITE_IMGBB_API_KEY}`,
-            { 
-              method: "POST", 
+            {
+              method: "POST",
               body: formDataImg,
               headers: {
                 'Accept': 'application/json',
@@ -302,27 +484,27 @@ const NewsModal = ({
 
           const data = await response.json();
           if (!data.success) {
-            throw new Error(`Upload failed: ${data.error?.message || "Unknown error"}`);
+            throw new Error(`Upload gagal: ${data.error?.message || "Kesalahan tidak diketahui"}`);
           }
 
           publicUrl = data.data.display_url;
           if (!publicUrl.startsWith('https://')) {
-            throw new Error('Uploaded image URL is not secure (HTTPS).');
+            throw new Error('URL gambar yang diunggah tidak aman (HTTPS).');
           }
 
           await fetch(`${publicUrl}?t=${Date.now()}`, { method: 'HEAD', cache: 'no-cache', mode: 'cors' })
             .then(res => {
               if (!res.ok || !res.headers.get('content-type')?.startsWith('image/')) {
-                throw new Error('Uploaded image is inaccessible or invalid.');
+                throw new Error('Gagal memuat gambar yang diunggah.');
               }
             });
-          
+
           uploadSuccess = true;
         } catch (error) {
           attempts++;
-          console.error(`Upload attempt ${attempts} failed:`, error);
+          console.error(`[NewsModal] Upload attempt ${attempts} failed:`, error);
           if (attempts === maxAttempts) {
-            throw new Error(`Failed to upload image after ${maxAttempts} attempts: ${error.message}`);
+            throw new Error(`Gagal mengunggah gambar setelah ${maxAttempts} percobaan: ${error.message}`);
           }
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
         }
@@ -331,10 +513,15 @@ const NewsModal = ({
       setFormData(prev => ({ ...prev, gambar: publicUrl }));
       setImagePreview(`${publicUrl}?t=${Date.now()}`);
       setImageError('');
-      console.log('Cropped image uploaded:', publicUrl);
+      console.log('[NewsModal] Cropped image uploaded:', publicUrl);
     } catch (error) {
-      console.error("Error uploading image:", error);
-      setImageError(`Error uploading image: ${error.message}. Please try again or use a different image.`);
+      console.error("[NewsModal] Error uploading image:", error);
+      setImageError(`Gagal mengunggah gambar: ${error.message}.`);
+      await logActivity('UPLOAD_IMAGE_ERROR', {
+        newsId: editingNews?.id || 'new',
+        title: formData.judul,
+        error: error.message
+      });
     } finally {
       setUploading(false);
       setCropModalOpen(false);
@@ -378,7 +565,7 @@ const NewsModal = ({
             setCropKey(prev => prev + 1);
           };
           reader.onerror = () => {
-            setImageError('Failed to read image file. Please try another image.');
+            setImageError('Gagal membaca file gambar.');
           };
           reader.readAsDataURL(file);
         });
@@ -388,38 +575,73 @@ const NewsModal = ({
 
   const handleSubmitWithLog = async () => {
     try {
-      const newSlug = await generateSlug(formData.judul);
-      const updatedFormData = { ...formData, slug: newSlug };
-      setFormData(updatedFormData);
+      if (!isAdmin) {
+        throw new Error('Hanya admin yang dapat membuat atau mengedit berita.');
+      }
 
-      const newsId = await handleSubmit(updatedFormData);
+      const newSlug = await generateSlug(formData.judul);
+      const updatedFormData = {
+        ...formData,
+        slug: newSlug,
+        updatedAt: new Date().toISOString(),
+        createdAt: editingNews ? formData.createdAt : new Date().toISOString(),
+        authorId: editingNews ? (editingNews.authorId || currentUser.uid) : currentUser.uid,
+        authorEmail: editingNews ? (editingNews.authorEmail || currentUser.email || 'Tidak tersedia') : currentUser.email || 'Tidak tersedia',
+        authorPhotoURL: editingNews ? (editingNews.authorPhotoURL || currentUser.photoURL || '') : currentUser.photoURL || ''
+      };
+
+      if (!updatedFormData.judul || updatedFormData.judul.length > TITLE_MAX_LENGTH) {
+        throw new Error(`Judul harus diisi dan maksimum ${TITLE_MAX_LENGTH} karakter.`);
+      }
+      if (!updatedFormData.kategori) {
+        throw new Error('Kategori harus diisi.');
+      }
+      if (!updatedFormData.author) {
+        throw new Error('Nama penulis harus diisi.');
+      }
+      if (!updatedFormData.konten) {
+        throw new Error('Konten berita harus diisi.');
+      }
+
+      const newsId = await createNews(updatedFormData, !!editingNews);
 
       if (!loading) {
         const action = editingNews ? 'NEWS_EDIT' : 'NEWS_ADD';
-        await logActivity(action, { 
-          newsId: editingNews?.id || newsId || 'new', 
-          title: formData.judul, 
+        await logActivity(action, {
+          newsId: editingNews?.id || newsId || 'new',
+          title: formData.judul,
           category: formData.kategori,
           slug: newSlug,
-          hideProfilePicture: formData.hideProfilePicture
+          hideProfilePicture: formData.hideProfilePicture,
+          userId: currentUser.uid
         });
       }
+
       setShowModal(false);
-      window.dispatchEvent(new CustomEvent('newsEdited', { 
-        detail: { 
-          newsId: editingNews?.id || newsId, 
+      window.dispatchEvent(new CustomEvent('newsEdited', {
+        detail: {
+          newsId: editingNews?.id || newsId,
           newSlug,
           oldSlug: editingNews?.slug
         }
       }));
       return newsId;
     } catch (error) {
-      console.error('Error submitting news:', error);
-      alert(`Gagal menyimpan berita: ${error.message}`);
+      console.error('[NewsModal] Error submitting news:', error);
+      let userMessage = 'Gagal menyimpan berita: ';
+      if (error.code === 'permission-denied') {
+        userMessage += 'Anda tidak memiliki izin admin.';
+      } else if (error.code === 'invalid-argument' || error.message.includes('Invalid document')) {
+        userMessage += 'Data tidak valid.';
+      } else {
+        userMessage += `${error.message}.`;
+      }
+      setErrorMessage(userMessage);
       await logActivity('SUBMIT_NEWS_ERROR', {
         newsId: editingNews?.id || 'new',
         title: formData.judul,
-        error: error.message
+        error: error.message,
+        userId: currentUser.uid
       });
       return null;
     }
@@ -438,6 +660,7 @@ const NewsModal = ({
       setCompletedCrop(null);
       setZoom(1);
       setImageError('');
+      setErrorMessage('');
       setCropKey(prev => prev + 1);
       if (editor) {
         editor.commands.setContent('');
@@ -450,13 +673,13 @@ const NewsModal = ({
       setFormData(prev => ({ ...prev, author: currentUser.displayName }));
       setUseUserName(true);
     } else {
-      alert('No username available. Please enter a name manually.');
+      setErrorMessage('Tidak ada username tersedia.');
     }
   };
 
   const handleSwitchToManual = () => {
     setUseUserName(false);
-    setFormData(prev => ({ ...prev, author: '' }));
+    setFormData(prev => ({ ...prev, author: editingNews?.author || '' }));
   };
 
   const Toolbar = () => (
@@ -491,11 +714,11 @@ const NewsModal = ({
       </button>
       <button
         onClick={() => {
-          const url = prompt('Enter image URL:');
+          const url = prompt('Masukkan URL gambar:');
           if (url && url.startsWith('https://')) {
             editor.chain().focus().setImage({ src: url }).run();
           } else {
-            alert('Please enter a valid HTTPS image URL.');
+            setErrorMessage('Masukkan URL gambar HTTPS yang valid.');
           }
         }}
         className="px-2 py-1"
@@ -535,6 +758,30 @@ const NewsModal = ({
     { id: 3, title: "Konten", icon: Globe }
   ];
 
+  // Conditional rendering
+  if (!showModal || !currentUser) {
+    return null;
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+        <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Akses Ditolak</h3>
+          <p className="text-sm text-gray-600 mb-6">
+            {errorMessage || 'Hanya admin yang dapat membuat atau mengedit berita.'}
+          </p>
+          <button
+            onClick={() => setShowModal(false)}
+            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className={`fixed inset-0 z-50 overflow-y-auto transition-all duration-300 ${isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'}`}>
@@ -548,23 +795,23 @@ const NewsModal = ({
                       {editingNews ? '✏️ Edit Berita' : '✨ Buat Berita Baru'}
                     </h2>
                     <p className="text-blue-100 text-sm">
-                      {editingNews ? 'Perbarui informasi berita' : 'Bagikan cerita terbaru kepada dunia'}
+                      {editingNews ? 'Perbarui informasi berita' : 'Bagikan cerita terbaru'}
                     </p>
                   </div>
                   <button
                     onClick={handleClose}
-                    className="p-2 rounded-full bg-white/20 hover:bg-white/30 transition-all duration-200 group"
+                    className="p-2 rounded-full bg-white/20 hover:bg-white/30"
                   >
-                    <X className="h-5 w-5 text-white group-hover:rotate-90 transition-transform duration-200" />
+                    <X className="h-5 w-5 text-white group-hover:rotate-90" />
                   </button>
                 </div>
                 <div className="flex justify-center mt-6 space-x-8">
                   {steps.map((step) => (
                     <div key={step.id} className="flex items-center space-x-2">
-                      <div className={`p-2 rounded-full transition-all duration-300 ${activeStep >= step.id ? 'bg-white text-purple-600 shadow-lg scale-110' : 'bg-white/20 text-white/70'}`}>
+                      <div className={`p-2 rounded-full ${activeStep >= step.id ? 'bg-white text-purple-600' : 'bg-white/20 text-white/70'}`}>
                         <step.icon className="h-4 w-4" />
                       </div>
-                      <span className={`text-sm font-medium transition-colors duration-300 ${activeStep >= step.id ? 'text-white' : 'text-white/70'}`}>
+                      <span className={`text-sm font-medium ${activeStep >= step.id ? 'text-white' : 'text-white/70'}`}>
                         {step.title}
                       </span>
                     </div>
@@ -572,11 +819,16 @@ const NewsModal = ({
                 </div>
               </div>
               <div className="p-8 bg-white">
+                {errorMessage && (
+                  <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl">
+                    {errorMessage}
+                  </div>
+                )}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   <div className="space-y-6">
                     <div className="group">
                       <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                        <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                        <FileText className="h-4 w-4 mr-2 text-purple-600" />
                         Judul Berita
                       </label>
                       <div className="relative">
@@ -585,24 +837,31 @@ const NewsModal = ({
                           required
                           value={formData.judul}
                           onChange={(e) => {
-                            if (e.target.value.length <= 50) {
-                              setFormData(prev => ({ ...prev, judul: e.target.value }));
-                            }
+                            setFormData(prev => ({ ...prev, judul: e.target.value }));
                           }}
-                          className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500"
-                          placeholder="Tulis judul (max 50 karakter)..."
+                          className={`w-full px-4 py-3 bg-gray-50 border-2 rounded-xl text-gray-900 placeholder-gray-500 ${
+                            formData.judul.length > TITLE_MAX_LENGTH
+                              ? 'border-red-500'
+                              : 'border-gray-200 focus:border-blue-600'
+                          }`}
+                          placeholder={`Tulis judul (max ${TITLE_MAX_LENGTH} karakter)...`}
                           onFocus={() => setActiveStep(1)}
-                          maxLength={50}
+                          maxLength={TITLE_MAX_LENGTH + 50}
                         />
-                        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                        <div className="text-xs text-gray-500 mt-1">
-                          {formData.judul.length}/50 karakter
+                        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 pointer-events-none" />
+                        <div className={`text-xs mt-1 ${
+                          formData.judul.length > TITLE_MAX_LENGTH
+                            ? 'text-red-600 font-semibold'
+                            : 'text-gray-900'
+                        }`}>
+                          {formData.judul.length}/{TITLE_MAX_LENGTH} karakter
+                          {formData.judul.length > TITLE_MAX_LENGTH && ', melebihi batas!'}
                         </div>
                       </div>
                     </div>
                     <div className="group">
                       <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                        <Tag className="h-4 w-4 mr-2 text-purple-500" />
+                        <Tag className="h-4 w-4 mr-2 text-purple-600" />
                         Kategori
                       </label>
                       <div className="grid grid-cols-2 gap-2">
@@ -611,7 +870,7 @@ const NewsModal = ({
                             key={cat.value}
                             type="button"
                             onClick={() => setFormData(prev => ({ ...prev, kategori: cat.value }))}
-                            className={`p-3 rounded-xl border-2 transition-all duration-300 flex items-center space-x-2 hover:scale-105 ${formData.kategori === cat.value ? `${cat.color} border-current transform scale-105 shadow-lg` : 'bg-gray-50 border-gray-200 hover:bg-gray-100 text-gray-700'}`}
+                            className={`p-3 rounded-xl border-2 flex items-center space-x-2 ${formData.kategori === cat.value ? `${cat.color} border-current` : 'bg-gray-50 border-gray-200 text-gray-700'}`}
                           >
                             <span className="text-lg">{cat.icon}</span>
                             <span className="text-sm font-medium">{cat.value}</span>
@@ -621,16 +880,16 @@ const NewsModal = ({
                     </div>
                     <div className="group">
                       <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                        <User className="h-4 w-4 mr-2 text-purple-500" />
+                        <User className="h-4 w-4 mr-2 text-purple-600" />
                         Penulis
                       </label>
-                      {currentUser && currentUser.photoURL && (
+                      {(editingNews && originalAuthorData) ? (
                         <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg">
                           <div className="flex items-center space-x-3">
-                            {showProfilePicture ? (
-                              <img 
-                                src={currentUser.photoURL} 
-                                alt="Profile" 
+                            {showProfilePicture && originalAuthorData.photoURL && !editingNews?.hideProfilePicture ? (
+                              <img
+                                src={originalAuthorData.photoURL}
+                                alt="Profile"
                                 className="w-8 h-8 rounded-full object-cover"
                               />
                             ) : (
@@ -638,9 +897,15 @@ const NewsModal = ({
                                 <User className="h-4 w-4 text-gray-500" />
                               </div>
                             )}
-                            <div className="flex flex-col">
+                            <div className="flex flex-col space-y-1">
                               <span className="text-sm font-medium text-gray-700">
-                                {currentUser.displayName || currentUser.email}
+                                {originalAuthorData.displayName}
+                              </span>
+                              <span className="text-xs text-gray-900">
+                                ID: {editingNews?.authorId || '(Legacy)'}
+                              </span>
+                              <span className="text-xs text-gray-900">
+                                Email: {originalAuthorData.email}
                               </span>
                               {!showProfilePicture && (
                                 <span className="text-xs text-gray-500 italic">
@@ -649,14 +914,87 @@ const NewsModal = ({
                               )}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setShowProfilePicture(!showProfilePicture)}
-                            className="p-1 text-gray-500 hover:text-gray-700 transition-colors duration-200"
-                            title={showProfilePicture ? "Sembunyikan foto profil" : "Tampilkan foto profil"}
-                          >
-                            {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowProfilePicture(!showProfilePicture)}
+                              disabled={!isOriginalAuthor}
+                              className={`p-1 ${
+                                isOriginalAuthor
+                                  ? 'text-gray-500 hover:text-gray-700'
+                                  : 'text-gray-300 cursor-not-allowed'
+                              }`}
+                              title={
+                                isOriginalAuthor
+                                  ? showProfilePicture
+                                    ? "Sembunyikan foto profil"
+                                    : "Tampilkan foto profil"
+                                  : editingNews?.authorId
+                                    ? "Hanya penulis asli yang dapat mengubah"
+                                    : "Hanya admin yang dapat mengubah"
+                              }
+                            >
+                              {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={refreshUserData}
+                              className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200"
+                              title="Perbarui data pengguna"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            {showProfilePicture && currentUser?.photoURL ? (
+                              <img
+                                src={currentUser.photoURL}
+                                alt="Profile"
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                                <User className="h-4 w-4 text-gray-500" />
+                              </div>
+                            )}
+                            <div className="flex flex-col space-y-1">
+                              <span className="text-sm font-medium text-gray-700">
+                                {formData.author || currentUser?.displayName || 'Tanpa Nama'}
+                              </span>
+                              <span className="text-xs text-gray-900">
+                                ID: {currentUser?.uid || 'N/A'}
+                              </span>
+                              <span className="text-xs text-gray-900">
+                                Email: {currentUser?.email || 'Tidak tersedia'}
+                              </span>
+                              {!showProfilePicture && (
+                                <span className="text-xs text-gray-500 italic">
+                                  [Foto profil disembunyikan]
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowProfilePicture(!showProfilePicture)}
+                              className="p-1 text-gray-500 hover:text-gray-700"
+                              title={showProfilePicture ? "Sembunyikan foto profil" : "Tampilkan foto profil"}
+                            >
+                              {showProfilePicture ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={refreshUserData}
+                              className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200"
+                              title="Perbarui data pengguna"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       )}
                       <div className="flex items-center space-x-2">
@@ -666,46 +1004,59 @@ const NewsModal = ({
                             required
                             value={formData.author}
                             onChange={(e) => {
-                              setFormData(prev => ({ ...prev, author: e.target.value }));
-                              setUseUserName(false);
+                              if (isOriginalAuthor) {
+                                setFormData(prev => ({ ...prev, author: e.target.value }));
+                                setUseUserName(false);
+                              }
                             }}
-                            className={`w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 text-gray-900 placeholder-gray-500 ${useUserName ? 'bg-blue-50 border-blue-300' : ''}`}
+                            className={`w-full px-4 py-3 bg-gray-50 border-2 rounded-xl text-gray-900 placeholder-gray-500 ${
+                              useUserName || !isOriginalAuthor
+                                ? 'border-gray-300 bg-gray-100 cursor-not-allowed'
+                                : 'border-gray-200 focus:border-purple-500'
+                            }`}
                             placeholder="Masukkan nama penulis..."
-                            readOnly={useUserName}
+                            readOnly={useUserName || !isOriginalAuthor}
                           />
-                          {useUserName && (
+                          {(useUserName || !isOriginalAuthor) && (
                             <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 pointer-events-none" />
                           )}
                         </div>
-                        {useUserName ? (
-                          <button
-                            type="button"
-                            onClick={handleSwitchToManual}
-                            className="px-4 py-3 bg-gray-500 text-white rounded-xl hover:bg-gray-600 transition-all duration-300 flex items-center space-x-2"
-                            title="Ketik manual"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                            <span className="text-sm">Manual</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleUseUserName}
-                            className="px-4 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-all duration-300 disabled:opacity-50 flex items-center space-x-2"
-                            disabled={!currentUser || !currentUser.displayName}
-                            title="Gunakan username"
-                          >
-                            <User className="h-4 w-4" />
-                            <span className="text-sm">Username</span>
-                          </button>
-                        )}
+                        {isOriginalAuthor ? (
+                          useUserName ? (
+                            <button
+                              type="button"
+                              onClick={handleSwitchToManual}
+                              className="px-4 py-3 bg-gray-500 text-white rounded-xl hover:bg-gray-600 flex items-center space-x-2"
+                              title="Ketik manual"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                              <span className="text-sm">Manual</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleUseUserName}
+                              className="px-4 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 flex items-center space-x-2"
+                              disabled={!currentUser || !currentUser.displayName}
+                              title="Gunakan username"
+                            >
+                              <User className="h-4 w-4" />
+                              <span className="text-sm">Gunakan Username</span>
+                            </button>
+                          )
+                        ) : null}
                       </div>
-                      <div className="mt-2 text-xs text-gray-500">
-                        {useUserName ? (
+                      <div className="mt-2 text-xs text-gray-900">
+                        {!isOriginalAuthor ? (
+                          <span className="text-red-600 font-semibold">
+                            {editingNews?.authorId
+                              ? 'Hanya penulis asli yang dapat mengedit nama penulis.'
+                              : 'Hanya admin yang dapat mengedit nama penulis.'}
+                          </span>
+                        ) : useUserName ? (
                           <div className="flex items-center space-x-1">
                             <span>✓ Menggunakan username akun</span>
                             <button
-                              type="button"
                               onClick={handleSwitchToManual}
                               className="text-blue-500 hover:text-blue-700 underline"
                             >
@@ -717,7 +1068,6 @@ const NewsModal = ({
                             <div className="flex items-center space-x-1">
                               <span>💡 Username tersedia:</span>
                               <button
-                                type="button"
                                 onClick={handleUseUserName}
                                 className="text-blue-500 hover:text-blue-700 underline"
                               >
@@ -726,13 +1076,20 @@ const NewsModal = ({
                             </div>
                           )
                         )}
+                        {isOriginalAuthor && (
+                          <span className="block mt-1 text-gray-500">
+                            {editingNews?.authorId
+                              ? 'Sebagai penulis asli, Anda dapat mengedit nama penulis.'
+                              : 'Sebagai admin, Anda dapat mengedit nama penulis untuk artikel legacy.'}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
                   <div className="space-y-6">
                     <div className="group">
                       <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                        <Image className="h-4 w-4 mr-2 text-purple-500" />
+                        <Image className="h-4 w-4 mr-2 text-purple-600" />
                         Gambar Berita
                       </label>
                       {imageError && (
@@ -740,19 +1097,19 @@ const NewsModal = ({
                       )}
                       {imagePreview && !imageError && (
                         <div className="mb-4 relative group/preview">
-                          <img 
-                            src={imagePreview} 
-                            alt="Preview" 
-                            className="w-full h-40 object-cover rounded-xl shadow-lg transition-transform duration-300 group-hover/preview:scale-105"
+                          <img
+                            src={imagePreview}
+                            alt="Preview"
+                            className="w-full h-40 object-cover rounded-xl"
                             onError={(e) => {
                               e.target.src = '';
-                              setImageError('Failed to load image. Please use a valid HTTPS URL or upload a new image.');
+                              setImageError('Gagal memuat gambar.');
                               setFormData(prev => ({ ...prev, gambar: '' }));
                               setImagePreview('');
                               setOriginalImage(null);
                             }}
                           />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-300 rounded-xl flex items-center justify-center space-x-4">
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 rounded-xl flex items-center justify-center space-x-4">
                             <button
                               onClick={() => {
                                 if (originalImage) {
@@ -763,7 +1120,7 @@ const NewsModal = ({
                                 setCropModalOpen(true);
                                 setCropKey(prev => prev + 1);
                               }}
-                              className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600 transition-colors duration-200"
+                              className="bg-blue-500 text-white p-2 rounded-full hover:bg-blue-600"
                             >
                               <Camera className="h-4 w-4" />
                             </button>
@@ -774,7 +1131,7 @@ const NewsModal = ({
                                 setOriginalImage(null);
                                 setImageError('');
                               }}
-                              className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors duration-200"
+                              className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
                             >
                               <X className="h-4 w-4" />
                             </button>
@@ -789,12 +1146,12 @@ const NewsModal = ({
                           setImageError('');
                           setOriginalImage(null);
                         }}
-                        className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 mb-3 text-gray-900 placeholder-gray-500"
+                        className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-900 placeholder-gray-500"
                         placeholder="https://example.com/image.jpg"
                         onFocus={() => setActiveStep(2)}
                       />
                       <div
-                        className={`relative border-2 border-dashed rounded-xl p-6 transition-all duration-300 ${dragActive ? 'border-purple-500 bg-purple-50 scale-105' : 'border-gray-300 hover:border-purple-400 hover:bg-gray-50'}`}
+                        className={`relative border-2 border-dashed rounded-xl p-6 ${dragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-300 hover:border-gray-400'}`}
                         onDragEnter={handleDrag}
                         onDragLeave={handleDrag}
                         onDragOver={handleDrag}
@@ -808,11 +1165,11 @@ const NewsModal = ({
                           disabled={uploading}
                         />
                         <div className="text-center">
-                          <Upload className={`mx-auto h-8 w-8 mb-2 transition-colors duration-300 ${dragActive ? 'text-purple-500' : 'text-gray-400'}`} />
+                          <Upload className={`mx-auto h-8 w-8 ${dragActive ? 'text-yellow-800' : 'text-gray-400'}`} />
                           <p className="text-sm text-gray-700">
-                            <span className="font-semibold text-purple-600">Klik untuk upload</span> atau drag & drop
+                            <span className="text-purple-600">Klik untuk upload</span> atau drag &amp; drop
                           </p>
-                          <p className="text-xs text-gray-500 mt-1">PNG, JPG, GIF, WEBP hingga 5MB</p>
+                          <p className="text-xs text-gray-400 mt-1">PNG, JPG, max 5MB</p>
                         </div>
                       </div>
                       <div className="relative">
@@ -824,7 +1181,7 @@ const NewsModal = ({
                               setFormData(prev => ({ ...prev, gambarDeskripsi: e.target.value }));
                             }
                           }}
-                          className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 mt-3 text-gray-900 placeholder-gray-500"
+                          className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-900 placeholder-gray-400"
                           placeholder="Deskripsi gambar (max 30 karakter)..."
                           maxLength={30}
                         />
@@ -837,50 +1194,49 @@ const NewsModal = ({
                 </div>
                 <div className="mt-8 group">
                   <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                    <Globe className="h-4 w-4 mr-2 text-purple-500" />
+                    <Globe className="h-4 w-4 mr-2 text-blue-500" />
                     Ringkasan Berita
                   </label>
                   <textarea
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-900 placeholder-gray-400"
                     value={formData.ringkasan}
                     onChange={(e) => setFormData(prev => ({ ...prev, ringkasan: e.target.value }))}
                     rows="3"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 focus:bg-white transition-all duration-300 resize-none text-gray-900 placeholder-gray-500"
-                    placeholder="Tulis ringkasan singkat yang menarik..."
                     onFocus={() => setActiveStep(3)}
                   />
                 </div>
                 <div className="mt-6 group">
                   <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
-                    <FileText className="h-4 w-4 mr-2 text-purple-500" />
+                    <FileText className="h-4 w-4 mr-2 text-purple-600" />
                     Konten Berita
                   </label>
-                  <div className="rounded-xl overflow-hidden border-2 border-gray-200 focus-within:border-purple-500 transition-colors duration-300 bg-white">
+                  <div className="border-2 border-gray-200 rounded-xl overflow-hidden">
                     <Toolbar />
-                    <EditorContent editor={editor} className="p-4 min-h-[300px] text-gray-900" />
+                    <EditorContent className="p-4 min-h-[400px] text-gray-900" editor={editor} />
                   </div>
                 </div>
                 <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-200">
                   <button
                     type="button"
                     onClick={handleClose}
-                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all duration-300 font-medium hover:scale-105"
+                    className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200"
                   >
                     Batal
                   </button>
                   <button
                     type="button"
                     onClick={handleSubmitWithLog}
-                    disabled={loading || uploading}
-                    className="px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all duration-300 font-medium disabled:opacity-50 flex items-center hover:scale-105 hover:shadow-lg"
+                    disabled={loading || uploading || !isAdmin || formData.judul.length > TITLE_MAX_LENGTH}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
                     {loading || uploading ? (
                       <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white mr-2"></div>
+                        <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></span>
                         Menyimpan...
                       </>
                     ) : (
                       <>
-                        <Save className="h-4 w-4 mr-2" />
+                        <Save className="h-4 w-4 mr-2 inline" />
                         {editingNews ? 'Update Berita' : 'Publikasikan'}
                       </>
                     )}
@@ -905,7 +1261,7 @@ const NewsModal = ({
                   setZoom(1);
                   setCropKey(prev => prev + 1);
                 }}
-                className="p-2 rounded-full bg-gray-100 hover:bg-gray-200"
+                className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
               >
                 <X className="h-5 w-5 text-gray-600" />
               </button>
@@ -926,30 +1282,23 @@ const NewsModal = ({
                   alt="Crop"
                   style={{ maxHeight: '400px', width: '100%', objectFit: 'contain', transform: `scale(${zoom})` }}
                   onLoad={() => {
-                    setCrop({
-                      unit: '%',
-                      x: 0,
-                      y: 0,
-                      width: 100,
-                      height: 100 * (9 / 16),
-                      aspect: 16 / 9
-                    });
+                    setCrop({ unit: '%', x: 0, y: 0, width: 100, height: 100 * (9 / 16), aspect: 16 / 9 });
                     setImageError('');
-                    console.log('Crop image loaded:', imageToCrop);
+                    console.log('[CropModal] Image loaded:', imageToCrop);
                   }}
                   onError={() => {
-                    setImageError('Failed to load image for cropping. Please try uploading again.');
+                    setImageError('Gagal memuat gambar untuk cropping.');
                     setCropModalOpen(false);
                     setImageToCrop(null);
                     setCropKey(prev => prev + 1);
-                    console.log('Crop image failed:', imageToCrop);
+                    console.log('[CropModal] Error loading image:', imageToCrop);
                   }}
                 />
               </ReactCrop>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Zoom</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Zoom</label>
               <input
                 type="range"
                 min="1"
@@ -969,14 +1318,7 @@ const NewsModal = ({
             <div className="flex justify-end space-x-4">
               <button
                 onClick={() => {
-                  setCrop({
-                    unit: '%',
-                    x: 0,
-                    y: 0,
-                    width: 100,
-                    height: 100 * (9 / 16),
-                    aspect: 16 / 9
-                  });
+                  setCrop({ unit: '%', x: 0, y: 0, width: 100, height: 100 * (9 / 16), aspect: 16 / 9 });
                   setZoom(1);
                   if (imgRef.current) {
                     imgRef.current.style.transform = 'scale(1)';
@@ -988,10 +1330,10 @@ const NewsModal = ({
               </button>
               <button
                 onClick={handleCropConfirm}
-                className="px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600"
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700"
                 disabled={uploading || !completedCrop}
               >
-                {uploading ? 'Mengunggah...' : 'Konfirmasi'}
+                {uploading ? 'Uploading...' : 'Konfirmasi'}
               </button>
             </div>
           </div>

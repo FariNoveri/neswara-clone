@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Chart from 'chart.js/auto';
 import { collection, query, collectionGroup, onSnapshot } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../../firebaseconfig';
 import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,43 +23,6 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds}`;
 };
 
-// Utility function to parse createdAt in various formats and convert to WIB
-const parseCreatedAt = (createdAt, docId, collectionName) => {
-  try {
-    if (!createdAt) {
-      console.warn(`Missing createdAt in ${collectionName} doc: ${docId}`);
-      toast.warn(`Missing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
-      return null;
-    }
-    let date;
-    if (createdAt.toDate && typeof createdAt.toDate === 'function') {
-      date = createdAt.toDate(); // Firestore Timestamp to JS Date (UTC)
-    } else if (typeof createdAt === 'string') {
-      date = new Date(createdAt);
-      if (isNaN(date)) {
-        console.warn(`Invalid createdAt string in ${collectionName} doc: ${docId}, value: ${createdAt}`);
-        toast.warn(`Invalid createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
-        return null;
-      }
-    } else if (typeof createdAt === 'number') {
-      date = new Date(createdAt);
-    } else {
-      console.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}, type: ${typeof createdAt}, value: ${createdAt}`);
-      toast.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
-      return null;
-    }
-    // Convert UTC to WIB (UTC+7)
-    const wibOffset = 7 * 60; // 7 hours in minutes
-    const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60 * 1000);
-    const wibDate = new Date(utcDate.getTime() + wibOffset * 60 * 1000);
-    return wibDate;
-  } catch (error) {
-    console.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, error);
-    toast.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
-    return null;
-  }
-};
-
 const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity }) => {
   const chartRef = useRef(null);
   const [chartInstance, setChartInstance] = useState(null);
@@ -75,11 +39,71 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
   const [timeRange, setTimeRange] = useState(() => {
     return localStorage.getItem('trendsChartTimeRange') || '7days';
   });
-  const [showDecimal, setShowDecimal] = useState(false); // New state for toggling decimal display
-  const [, forceUpdate] = useState();
+  const [showDecimal, setShowDecimal] = useState(false);
 
-  const forceRender = useCallback(() => {
-    forceUpdate({});
+  // ✅ Move parseCreatedAt INSIDE the component
+  const parseCreatedAt = useCallback((createdAt, docId, collectionName) => {
+    try {
+      if (!createdAt) {
+        console.warn(`Missing createdAt in ${collectionName} doc: ${docId}`);
+        toast.warn(`Missing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+        return null;
+      }
+      let date;
+      if (createdAt.toDate && typeof createdAt.toDate === 'function') {
+        // Proper Firestore Timestamp
+        date = createdAt.toDate(); 
+      } else if (typeof createdAt === 'string') {
+        date = new Date(createdAt);
+        if (isNaN(date)) {
+          console.warn(`Invalid createdAt string in ${collectionName} doc: ${docId}, value: ${createdAt}`);
+          toast.warn(`Invalid createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+          return null;
+        }
+      } else if (typeof createdAt === 'number') {
+        date = new Date(createdAt);
+      } else if (typeof createdAt === 'object' && createdAt !== null) {
+        // Handle serialized Firestore timestamp
+        if (createdAt.type && createdAt.type.includes('firestore') && createdAt.seconds) {
+          // Serialized Firestore timestamp: { type: "firestore/timestamp/1.0", seconds: ..., nanoseconds: ... }
+          const milliseconds = createdAt.seconds * 1000 + Math.floor(createdAt.nanoseconds / 1000000);
+          date = new Date(milliseconds);
+        } else if (createdAt.seconds !== undefined) {
+          // Simple timestamp object: { seconds: ..., nanoseconds: ... }
+          const milliseconds = createdAt.seconds * 1000 + Math.floor((createdAt.nanoseconds || 0) / 1000000);
+          date = new Date(milliseconds);
+        } else if (createdAt._seconds !== undefined) {
+          // Alternative format: { _seconds: ..., _nanoseconds: ... }
+          const milliseconds = createdAt._seconds * 1000 + Math.floor((createdAt._nanoseconds || 0) / 1000000);
+          date = new Date(milliseconds);
+        } else {
+          console.warn(`Unexpected object format in createdAt for ${collectionName} doc: ${docId}, value: ${JSON.stringify(createdAt)}`);
+          toast.warn(`Unexpected createdAt format in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+          return null;
+        }
+      } else {
+        console.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}, type: ${typeof createdAt}, value: ${createdAt}`);
+        toast.warn(`Unsupported createdAt type in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+        return null;
+      }
+      
+      // Validate the resulting date
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid date created for ${collectionName} doc: ${docId}, original value: ${JSON.stringify(createdAt)}`);
+        toast.warn(`Invalid date created for ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+        return null;
+      }
+      
+      // Convert UTC to WIB (UTC+7)
+      const wibOffset = 7 * 60; // 7 hours in minutes
+      const utcDate = new Date(date.getTime() + date.getTimezoneOffset() * 60 * 1000);
+      const wibDate = new Date(utcDate.getTime() + wibOffset * 60 * 1000);
+      return wibDate;
+    } catch (error) {
+      console.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, error);
+      toast.error(`Error parsing createdAt in ${collectionName} doc: ${docId}`, { autoClose: 5000 });
+      return null;
+    }
   }, []);
 
   useEffect(() => {
@@ -100,247 +124,315 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
       return;
     }
 
-    const fetchTrendsData = () => {
-      setIsLoading(true);
-      const today = new Date();
-      // Set to end of day in WIB (UTC+7)
-      const wibOffset = 7 * 60 * 60 * 1000; // 7 hours in milliseconds
-      const todayWib = new Date(today.getTime() + wibOffset);
-      todayWib.setHours(23, 59, 59, 999);
-
-      let rangeDays;
-      switch (timeRange) {
-        case '30days':
-          rangeDays = 30;
-          break;
-        case '365days':
-          rangeDays = 365;
-          break;
-        default:
-          rangeDays = 7;
+    const auth = getAuth();
+    const fetchTrendsData = async () => {
+      if (!auth.currentUser) {
+        console.error('fetchTrendsData: No authenticated user');
+        toast.error('Tidak dapat memuat data tren: Pengguna tidak terautentikasi.');
+        setIsLoading(false);
+        if (typeof logActivity === 'function') {
+          await logActivity('TRENDS_ACCESS_DENIED', { error: 'No authenticated user' });
+        }
+        return;
       }
-      const rangeStart = new Date(todayWib);
-      rangeStart.setDate(todayWib.getDate() - (rangeDays - 1));
-      rangeStart.setHours(0, 0, 0, 0);
 
-      const data = [];
-      const newsTrends = {};
-      const commentsTrends = {};
-      const viewsTrends = {};
-      const usersTrends = {};
-      const reportsTrends = {};
-
-      for (let i = 0; i < rangeDays; i++) {
-        const date = new Date(rangeStart);
-        date.setDate(rangeStart.getDate() + i);
-        const dateStr = formatDate(date).split(',')[0]; // Use DD MMMM YYYY format for consistency
-        const shortDate = rangeDays <= 30
-          ? date.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })
-          : date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
-        newsTrends[dateStr] = 0;
-        commentsTrends[dateStr] = 0;
-        viewsTrends[dateStr] = 0;
-        usersTrends[dateStr] = 0;
-        reportsTrends[dateStr] = 0;
-        data.push({
-          date: shortDate,
-          fullDate: dateStr,
-          news: 0,
-          comments: 0,
-          views: 0,
-          users: 0,
-          reports: 0
+      try {
+        // Log authentication state for debugging
+        const tokenResult = await auth.currentUser.getIdTokenResult(true);
+        console.log('Auth state:', {
+          uid: auth.currentUser.uid,
+          email: auth.currentUser.email,
+          tokenClaims: tokenResult.claims
         });
+
+        setIsLoading(true);
+
+        const today = new Date();
+        const wibOffset = 7 * 60 * 60 * 1000; // 7 hours in milliseconds
+        const todayWib = new Date(today.getTime() + wibOffset);
+        todayWib.setHours(23, 59, 59, 999);
+
+        let rangeDays;
+        switch (timeRange) {
+          case '30days':
+            rangeDays = 30;
+            break;
+          case '365days':
+            rangeDays = 365;
+            break;
+          default:
+            rangeDays = 7;
+        }
+        const rangeStart = new Date(todayWib);
+        rangeStart.setDate(todayWib.getDate() - (rangeDays - 1));
+        rangeStart.setHours(0, 0, 0, 0);
+
+        const data = [];
+        const newsTrends = {};
+        const commentsTrends = {};
+        const viewsTrends = {};
+        const usersTrends = {};
+        const reportsTrends = {};
+
+        for (let i = 0; i < rangeDays; i++) {
+          const date = new Date(rangeStart);
+          date.setDate(rangeStart.getDate() + i);
+          const dateStr = formatDate(date).split(',')[0];
+          const shortDate = rangeDays <= 30
+            ? date.toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })
+            : date.toLocaleDateString('id-ID', { month: 'short', year: '2-digit' });
+          newsTrends[dateStr] = 0;
+          commentsTrends[dateStr] = 0;
+          viewsTrends[dateStr] = 0;
+          usersTrends[dateStr] = 0;
+          reportsTrends[dateStr] = 0;
+          data.push({
+            date: shortDate,
+            fullDate: dateStr,
+            news: 0,
+            comments: 0,
+            views: 0,
+            users: 0,
+            reports: 0
+          });
+        }
+
+        // Fetch news
+        const newsQuery = query(collection(db, 'news'));
+        const unsubscribeNews = onSnapshot(newsQuery, (snapshot) => {
+          try {
+            Object.keys(newsTrends).forEach(dateStr => {
+              newsTrends[dateStr] = 0;
+              viewsTrends[dateStr] = 0;
+              data.find(d => d.fullDate === dateStr).news = 0;
+              data.find(d => d.fullDate === dateStr).views = 0;
+            });
+
+            let newsCount = 0;
+            snapshot.forEach(doc => {
+              try {
+                const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'news');
+                if (!createdAt) return; // Skip invalid documents
+                const dateStr = formatDate(createdAt).split(',')[0];
+                if (createdAt >= rangeStart && createdAt <= todayWib && newsTrends[dateStr] !== undefined) {
+                  newsTrends[dateStr]++;
+                  data.find(d => d.fullDate === dateStr).news++;
+                  viewsTrends[dateStr] += doc.data().views || 0;
+                  data.find(d => d.fullDate === dateStr).views += doc.data().views || 0;
+                  newsCount++;
+                }
+              } catch (error) {
+                console.error(`Error processing news doc: ${doc.id}`, error);
+              }
+            });
+
+            setTrends(prev => ({ ...prev, news: { ...newsTrends }, views: { ...viewsTrends } }));
+            setChartData([...data]);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_NEWS_FETCHED', { totalNews: newsCount });
+            }
+          } catch (error) {
+            console.error('Error fetching news trends:', error);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_NEWS_ERROR', { error: error.message });
+            }
+            toast.error('Gagal memuat tren berita.');
+          }
+        }, (error) => {
+          console.error('Error in news snapshot:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('TRENDS_NEWS_SNAPSHOT_ERROR', { error: error.message });
+          }
+          toast.error('Gagal memuat pembaruan tren berita.');
+        });
+
+        // Fetch comments with retry logic
+        const maxRetries = 3;
+        let retryCount = 0;
+        const fetchComments = () => {
+          const commentsQuery = query(collectionGroup(db, 'comments'));
+          const unsubscribeComments = onSnapshot(commentsQuery, (snapshot) => {
+            try {
+              Object.keys(commentsTrends).forEach(dateStr => {
+                commentsTrends[dateStr] = 0;
+                data.find(d => d.fullDate === dateStr).comments = 0;
+              });
+
+              let commentsCount = 0;
+              snapshot.forEach(doc => {
+                try {
+                  const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'comments');
+                  if (!createdAt) return; // Skip invalid documents
+                  const dateStr = formatDate(createdAt).split(',')[0];
+                  if (createdAt >= rangeStart && createdAt <= todayWib && commentsTrends[dateStr] !== undefined) {
+                    commentsTrends[dateStr]++;
+                    data.find(d => d.fullDate === dateStr).comments++;
+                    commentsCount++;
+                  }
+                } catch (error) {
+                  console.error(`Error processing comment doc: ${doc.id}`, error);
+                }
+              });
+
+              setTrends(prev => ({ ...prev, comments: { ...commentsTrends } }));
+              setChartData([...data]);
+              if (typeof logActivity === 'function') {
+                logActivity('TRENDS_COMMENTS_FETCHED', { totalComments: commentsCount });
+              }
+            } catch (error) {
+              console.error('Error fetching comments trends:', error);
+              if (typeof logActivity === 'function') {
+                logActivity('TRENDS_COMMENTS_ERROR', { error: error.message });
+              }
+              toast.error('Gagal memuat tren komentar.');
+            }
+          }, (error) => {
+            console.error('Error in comments snapshot:', error);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_COMMENTS_SNAPSHOT_ERROR', {
+                error: error.message,
+                code: error.code,
+                retryCount
+              });
+            }
+            if (error.code === 'permission-denied' && retryCount < maxRetries) {
+              retryCount++;
+              console.warn(`Retrying comments query (attempt ${retryCount}/${maxRetries})`);
+              setTimeout(fetchComments, 1000 * retryCount);
+            } else if (error.message.includes('index')) {
+              console.log('Missing index for comments collection group. Create it in Firebase Console.');
+              toast.error('Komentar membutuhkan indeks. Periksa Firebase Console.');
+            } else if (error.code === 'permission-denied') {
+              console.warn('Permission denied for comments collection group');
+              toast.error('Akses ke komentar ditolak. Pastikan aturan Firestore sudah benar.');
+            } else {
+              toast.error('Gagal memuat pembaruan tren komentar.');
+            }
+          });
+          return unsubscribeComments;
+        };
+
+        const unsubscribeComments = fetchComments();
+
+        // Fetch users
+        const usersQuery = query(collection(db, 'users'));
+        const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
+          try {
+            Object.keys(usersTrends).forEach(dateStr => {
+              usersTrends[dateStr] = 0;
+              data.find(d => d.fullDate === dateStr).users = 0;
+            });
+
+            let usersCount = 0;
+            snapshot.forEach(doc => {
+              try {
+                const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'users');
+                if (!createdAt) return; // Skip invalid documents
+                const dateStr = formatDate(createdAt).split(',')[0];
+                if (createdAt >= rangeStart && createdAt <= todayWib && usersTrends[dateStr] !== undefined) {
+                  usersTrends[dateStr]++;
+                  data.find(d => d.fullDate === dateStr).users++;
+                  usersCount++;
+                }
+              } catch (error) {
+                console.error(`Error processing user doc: ${doc.id}`, error);
+              }
+            });
+
+            setTrends(prev => ({ ...prev, users: { ...usersTrends } }));
+            setChartData([...data]);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_USERS_FETCHED', { totalUsers: usersCount });
+            }
+          } catch (error) {
+            console.error('Error fetching users trends:', error);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_USERS_ERROR', { error: error.message });
+            }
+            toast.error('Gagal memuat tren pengguna.');
+          }
+        }, (error) => {
+          console.error('Error in users snapshot:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('TRENDS_USERS_SNAPSHOT_ERROR', { error: error.message });
+          }
+          toast.error('Gagal memuat pembaruan tren pengguna.');
+        });
+
+        // Fetch reports
+        const reportsQuery = query(collection(db, 'reports'));
+        const unsubscribeReports = onSnapshot(reportsQuery, (snapshot) => {
+          try {
+            Object.keys(reportsTrends).forEach(dateStr => {
+              reportsTrends[dateStr] = 0;
+              data.find(d => d.fullDate === dateStr).reports = 0;
+            });
+
+            let reportCount = 0;
+            snapshot.forEach(doc => {
+              try {
+                const createdAt = parseCreatedAt(doc.data().timestamp, doc.id, 'reports');
+                if (!createdAt) return; // Skip invalid documents
+                const dateStr = formatDate(createdAt).split(',')[0];
+                if (createdAt >= rangeStart && createdAt <= todayWib && reportsTrends[dateStr] !== undefined) {
+                  reportsTrends[dateStr]++;
+                  data.find(d => d.fullDate === dateStr).reports++;
+                  reportCount++;
+                }
+              } catch (error) {
+                console.error(`Error processing report doc: ${doc.id}`, error);
+              }
+            });
+
+            setTrends(prev => ({ ...prev, reports: { ...reportsTrends } }));
+            setChartData([...data]);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_REPORTS_FETCHED', { totalReports: reportCount });
+            }
+          } catch (error) {
+            console.error('Error fetching reports trends:', error);
+            if (typeof logActivity === 'function') {
+              logActivity('TRENDS_REPORTS_ERROR', { error: error.message });
+            }
+            if (error.code === 'permission-denied') {
+              console.warn('Permission denied for reports collection');
+              toast.error('Akses ke laporan ditolak. Pastikan Anda memiliki izin admin.');
+            } else {
+              toast.error('Gagal memuat tren laporan.');
+            }
+          }
+        }, (error) => {
+          console.error('Error in reports snapshot:', error);
+          if (typeof logActivity === 'function') {
+            logActivity('TRENDS_REPORTS_SNAPSHOT_ERROR', { error: error.message });
+          }
+          if (error.code === 'permission-denied') {
+            toast.error('Akses ke pembaruan laporan ditolak. Pastikan Anda memiliki izin admin.');
+          } else {
+            toast.error('Gagal memuat pembaruan tren laporan.');
+          }
+        });
+
+        setIsLoading(false);
+
+        return () => {
+          unsubscribeNews();
+          unsubscribeComments();
+          unsubscribeUsers();
+          unsubscribeReports();
+        };
+      } catch (error) {
+        console.error('Error setting up trends data:', error);
+        if (typeof logActivity === 'function') {
+          logActivity('TRENDS_SETUP_ERROR', { error: error.message });
+        }
+        toast.error('Gagal mengatur data tren.');
+        setIsLoading(false);
       }
-
-      // Fetch news
-      const newsQuery = query(collection(db, 'news'));
-      const unsubscribeNews = onSnapshot(newsQuery, (snapshot) => {
-        try {
-          Object.keys(newsTrends).forEach(dateStr => {
-            newsTrends[dateStr] = 0;
-            viewsTrends[dateStr] = 0;
-            data.find(d => d.fullDate === dateStr).news = 0;
-            data.find(d => d.fullDate === dateStr).views = 0;
-          });
-
-          let newsCount = 0;
-          snapshot.forEach(doc => {
-            try {
-              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'news') || rangeStart;
-              const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWib && newsTrends[dateStr] !== undefined) {
-                newsTrends[dateStr]++;
-                data.find(d => d.fullDate === dateStr).news++;
-                viewsTrends[dateStr] += doc.data().views || 0;
-                data.find(d => d.fullDate === dateStr).views += doc.data().views || 0;
-                newsCount++;
-              }
-            } catch (error) {
-              console.error(`Error processing news doc: ${doc.id}`, error);
-            }
-          });
-
-          setTrends(prev => ({ ...prev, news: { ...newsTrends }, views: { ...viewsTrends } }));
-          setChartData(JSON.parse(JSON.stringify(data)));
-          if (typeof logActivity === 'function') {
-          }
-          forceRender();
-        } catch (error) {
-          console.error('Error fetching news trends:', error);
-          if (typeof logActivity === 'function') {
-          }
-          toast.error('Gagal memuat tren berita.');
-        }
-      }, (error) => {
-        console.error('Error in news snapshot:', error);
-        if (typeof logActivity === 'function') {
-        }
-        toast.error('Gagal memuat pembaruan tren berita.');
-      });
-
-      // Fetch comments
-      const commentsQuery = query(collectionGroup(db, 'comments'));
-      const unsubscribeComments = onSnapshot(commentsQuery, (snapshot) => {
-        try {
-          Object.keys(commentsTrends).forEach(dateStr => {
-            commentsTrends[dateStr] = 0;
-            data.find(d => d.fullDate === dateStr).comments = 0;
-          });
-
-          let commentsCount = 0;
-          snapshot.forEach(doc => {
-            try {
-              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'comments') || rangeStart;
-              const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWib && commentsTrends[dateStr] !== undefined) {
-                commentsTrends[dateStr]++;
-                data.find(d => d.fullDate === dateStr).comments++;
-                commentsCount++;
-              }
-            } catch (error) {
-              console.error(`Error processing comment doc: ${doc.id}`, error);
-            }
-          });
-
-          setTrends(prev => ({ ...prev, comments: { ...commentsTrends } }));
-          setChartData(JSON.parse(JSON.stringify(data)));
-          if (typeof logActivity === 'function') {
-          }
-          forceRender();
-        } catch (error) {
-          console.error('Error fetching comments trends:', error);
-          if (error.message.includes('index')) {
-            console.log('Missing index for comments collection group. Create it in Firebase Console.');
-          }
-          if (typeof logActivity === 'function') {
-          }
-          toast.error('Gagal memuat tren komentar.');
-        }
-      }, (error) => {
-        console.error('Error in comments snapshot:', error);
-        if (typeof logActivity === 'function') {
-        }
-        toast.error('Gagal memuat pembaruan tren komentar.');
-      });
-
-      // Fetch users
-      const usersQuery = query(collection(db, 'users'));
-      const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-        try {
-          Object.keys(usersTrends).forEach(dateStr => {
-            usersTrends[dateStr] = 0;
-            data.find(d => d.fullDate === dateStr).users = 0;
-          });
-
-          let usersCount = 0;
-          snapshot.forEach(doc => {
-            try {
-              const createdAt = parseCreatedAt(doc.data().createdAt, doc.id, 'users') || rangeStart;
-              const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWib && usersTrends[dateStr] !== undefined) {
-                usersTrends[dateStr]++;
-                data.find(d => d.fullDate === dateStr).users++;
-                usersCount++;
-              }
-            } catch (error) {
-              console.error(`Error processing user doc: ${doc.id}`, error);
-            }
-          });
-
-          setTrends(prev => ({ ...prev, users: { ...usersTrends } }));
-          setChartData(JSON.parse(JSON.stringify(data)));
-          if (typeof logActivity === 'function') {
-          }
-          forceRender();
-        } catch (error) {
-          console.error('Error fetching users trends:', error);
-          if (typeof logActivity === 'function') {
-          }
-          toast.error('Gagal memuat tren pengguna.');
-        }
-      }, (error) => {
-        console.error('Error in users snapshot:', error);
-        if (typeof logActivity === 'function') {
-        }
-        toast.error('Gagal memuat pembaruan tren pengguna.');
-      });
-
-      // Fetch reports
-      const reportsQuery = query(collection(db, 'reports'));
-      const unsubscribeReports = onSnapshot(reportsQuery, (snapshot) => {
-        try {
-          Object.keys(reportsTrends).forEach(dateStr => {
-            reportsTrends[dateStr] = 0;
-            data.find(d => d.fullDate === dateStr).reports = 0;
-          });
-
-          let reportCount = 0;
-          snapshot.forEach(doc => {
-            try {
-              const createdAt = parseCreatedAt(doc.data().timestamp, doc.id, 'reports') || rangeStart;
-              const dateStr = formatDate(createdAt).split(',')[0];
-              if (createdAt >= rangeStart && createdAt <= todayWib && reportsTrends[dateStr] !== undefined) {
-                reportsTrends[dateStr]++;
-                data.find(d => d.fullDate === dateStr).reports++;
-                reportCount++;
-              }
-            } catch (error) {
-              console.error(`Error processing report doc: ${doc.id}`, error);
-            }
-          });
-
-          setTrends(prev => ({ ...prev, reports: { ...reportsTrends } }));
-          setChartData(JSON.parse(JSON.stringify(data)));
-          if (typeof logActivity === 'function') {
-          }
-          forceRender();
-        } catch (error) {
-          console.error('Error fetching reports trends:', error);
-          if (typeof logActivity === 'function') {
-          }
-          toast.error('Gagal memuat tren laporan.');
-        }
-      }, (error) => {
-        console.error('Error in reports snapshot:', error);
-        if (typeof logActivity === 'function') {
-        }
-        toast.error('Gagal memuat pembaruan tren laporan.');
-      });
-
-      setIsLoading(false);
-
-      return () => {
-        unsubscribeNews();
-        unsubscribeComments();
-        unsubscribeUsers();
-        unsubscribeReports();
-      };
     };
 
-    const unsubscribe = fetchTrendsData();
-    return unsubscribe;
-  }, [isAuthorized, activeTab, logActivity, timeRange, forceRender]);
+    fetchTrendsData();
+  }, [isAuthorized, activeTab, logActivity, timeRange, parseCreatedAt]);
 
   const metrics = [
     { key: 'all', label: 'Semua Metrik', color: '#6366f1' },
@@ -637,7 +729,6 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
                 </motion.button>
               ))}
             </div>
-            {/* Toggle for Decimal Display */}
             <motion.button
               onClick={() => setShowDecimal(!showDecimal)}
               className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 transform hover:scale-105 ${
@@ -732,7 +823,6 @@ const TrendsChart = ({ isAuthorized = true, activeTab = 'dashboard', logActivity
           )}
         </AnimatePresence>
 
-        {/* Explanatory Text for Admins */}
         {!isLoading && chartData.length > 0 && (
           <motion.div
             className="mt-8 bg-gray-50 rounded-xl p-6 border border-gray-200"

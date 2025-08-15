@@ -12,8 +12,9 @@ import {
   onSnapshot,
   doc,
   getDoc,
+  setDoc,
   addDoc,
-  serverTimestamp
+  serverTimestamp,
 } from 'firebase/firestore';
 import {
   BarChart3,
@@ -27,7 +28,7 @@ import {
   FileText,
   Flag,
   AlertCircle,
-  X
+  X,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import UnauthorizedModal from './UnauthorizedModal';
@@ -40,9 +41,7 @@ import NotificationManagement from './NotificationManagement';
 import ManageViews from './ManageViews';
 import LogActivity from './LogActivity';
 import ReportManagement from './ReportManagement';
-import NewsManagement from './NewsManagement';
-
-const ADMIN_EMAILS = ['cahayalunamaharani1@gmail.com', 'fari_noveriwinanto@teknokrat.ac.id'];
+import NewsManagement from './NewsManagement'; // Correct import
 
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
   if (!isOpen) return null;
@@ -57,8 +56,8 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
             </div>
             <h3 className="text-xl font-bold text-gray-900">{title}</h3>
           </div>
-          <button 
-            onClick={onClose} 
+          <button
+            onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors duration-200 hover:rotate-90 transform"
           >
             <X className="w-6 h-6" />
@@ -96,59 +95,94 @@ const AdminDashboard = () => {
     totalUsers: 0,
     totalNotifications: 0,
     totalBreakingNews: 0,
-    totalReports: 0
+    totalReports: 0,
   });
   const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, id: null, title: '', message: '' });
-
   const navigate = useNavigate();
 
-  const logActivity = async (action, details = {}) => {
+  const logActivity = async (action, details = {}, retryCount = 0) => {
+    if (!user) {
+      toast.error('Tidak dapat mencatat aktivitas: Pengguna tidak terautentikasi.');
+      return;
+    }
+
+    let cleanedDetails = {};
     try {
-      const cleanedDetails = Object.fromEntries(
-        Object.entries(details).filter(([_, value]) => value !== undefined)
+      cleanedDetails = Object.fromEntries(
+        Object.entries(details).filter(([_, value]) => value !== undefined && value !== null)
       );
 
-      await addDoc(collection(db, 'logs'), {
-        userId: user?.uid || null,
-        userEmail: user?.email || null,
-        action: action,
-        details: cleanedDetails,
+      const logData = {
+        userId: user.uid,
+        userEmail: user.email || 'anonymous',
+        action: action.slice(0, 100),
+        details: JSON.stringify(cleanedDetails) || 'No details provided',
         timestamp: serverTimestamp(),
-        ipAddress: null
-      });
+        ipAddress: 'unknown',
+      };
+
+      await addDoc(collection(db, 'logs'), logData);
     } catch (error) {
-      console.error('Error logging activity:', error);
-      toast.error('Gagal mencatat aktivitas.');
+      if (error.code === 'permission-denied' && retryCount < 2) {
+        console.warn(`logActivity: Permission denied, retrying ${retryCount + 1}/2...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return logActivity(action, details, retryCount + 1);
+      }
+      toast.error(`Gagal mencatat aktivitas: ${error.message}`);
     }
   };
 
   useEffect(() => {
     if (!loading && user) {
+      let isMounted = true;
+
+      const debounce = (fn, delay) => {
+        let timeoutId;
+        return (...args) => {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => fn(...args), delay);
+        };
+      };
+
       const checkAuthorization = async () => {
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            const isAdmin = userData?.isAdmin || ADMIN_EMAILS.includes(user.email);
-            if (isAdmin) {
+          const userRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userRef);
+          if (userDoc.exists() && userDoc.data().isAdmin === true) {
+            if (isMounted) {
               setIsAuthorized(true);
-            } else {
-              setIsAuthorized(false);
-              setShowUnauthorizedModal(true);
-              await logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email });
+              await logActivity('ADMIN_ACCESS', { userEmail: user.email });
             }
           } else {
-            setIsAuthorized(false);
-            setShowUnauthorizedModal(true);
-            await logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email });
+            console.warn('checkAuthorization: User is not an admin or document missing', {
+              userId: user.uid,
+              userEmail: user.email,
+              exists: userDoc.exists(),
+              isAdmin: userDoc.exists() ? userDoc.data().isAdmin : null,
+            });
+            if (!userDoc.exists()) {
+              await setDoc(userRef, {
+                email: user.email || 'anonymous',
+                isAdmin: false,
+                role: 'user',
+                createdAt: new Date().toISOString().split('T')[0],
+                updatedAt: new Date().toISOString().split('T')[0],
+              });
+            }
+            throw new Error('User is not an admin');
           }
         } catch (error) {
-          console.error('Error checking user role:', error);
-          setShowUnauthorizedModal(true);
-          await logActivity('AUTH_ERROR', { userEmail: user?.email, error: error.message });
+          console.error('checkAuthorization: Error checking user role:', error);
+          if (isMounted) {
+            setIsAuthorized(false);
+            setShowUnauthorizedModal(true);
+            await logActivity('UNAUTHORIZED_ACCESS', { userEmail: user.email, error: error.message });
+          }
         }
       };
-      checkAuthorization();
+
+      const debouncedCheckAuthorization = debounce(checkAuthorization, 500);
+      debouncedCheckAuthorization();
 
       const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
         if (currentUser && currentUser.uid === user.uid) {
@@ -165,6 +199,7 @@ const AdminDashboard = () => {
       });
 
       return () => {
+        isMounted = false;
         unsubscribeAuth();
       };
     } else if (!loading && !user) {
@@ -174,12 +209,12 @@ const AdminDashboard = () => {
 
   const handleUnauthorizedClose = async () => {
     try {
-      await auth.signOut();
       await logActivity('UNAUTHORIZED_LOGOUT', { userEmail: user?.email || null });
+      await auth.signOut();
       setShowUnauthorizedModal(false);
       navigate('/');
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('handleUnauthorizedClose: Error signing out:', error);
       toast.error('Gagal logout.');
       navigate('/');
     }
@@ -187,18 +222,17 @@ const AdminDashboard = () => {
 
   const handleAdminLogout = async () => {
     try {
-      await auth.signOut();
       await logActivity('ADMIN_LOGOUT', { userEmail: user?.email || null });
+      await auth.signOut();
       toast.success('Berhasil logout.');
       navigate('/');
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('handleAdminLogout: Error signing out:', error);
       toast.error('Gagal logout.');
       navigate('/');
     }
   };
 
-  // Fetch total news and views from the 'news' collection
   const fetchNews = () => {
     const unsubscribe = onSnapshot(collection(db, 'news'), (snapshot) => {
       try {
@@ -210,14 +244,14 @@ const AdminDashboard = () => {
         setStats(prev => ({
           ...prev,
           totalNews,
-          totalViews
+          totalViews,
         }));
       } catch (error) {
-        console.error('Error fetching news:', error);
+        console.error('fetchNews: Error fetching news:', error);
         toast.error('Gagal memuat data berita.');
       }
     }, (error) => {
-      console.error('Error in news snapshot:', error);
+      console.error('fetchNews: Error in news snapshot:', error);
       toast.error('Gagal memuat pembaruan berita.');
     });
 
@@ -230,14 +264,14 @@ const AdminDashboard = () => {
         const totalUsers = snapshot.size;
         setStats(prev => ({
           ...prev,
-          totalUsers
+          totalUsers,
         }));
       } catch (error) {
-        console.error('Error fetching users:', error);
+        console.error('fetchUsers: Error fetching users:', error);
         toast.error('Gagal memuat data pengguna.');
       }
     }, (error) => {
-      console.error('Error in users snapshot:', error);
+      console.error('fetchUsers: Error in users snapshot:', error);
       toast.error('Gagal memuat pembaruan pengguna.');
     });
 
@@ -251,17 +285,19 @@ const AdminDashboard = () => {
         const totalComments = snapshot.size;
         setStats(prev => ({
           ...prev,
-          totalComments
+          totalComments,
         }));
       } catch (error) {
-        console.error('Error fetching comments:', error.message);
+        console.error('fetchComments: Error fetching comments:', error.message);
         if (error.message.includes('index')) {
-          console.log('Missing index for comments collection group. Please create it in Firebase Console.');
+          console.log('fetchComments: Missing index for comments collection group. Please create it in Firebase Console.');
+          toast.error('Komentar membutuhkan indeks. Periksa Firebase Console.');
+        } else {
+          toast.error('Gagal memuat komentar.');
         }
-        toast.error('Gagal memuat komentar.');
       }
     }, (error) => {
-      console.error('Error in comments snapshot:', error);
+      console.error('fetchComments: Error in comments snapshot:', error);
       toast.error('Gagal memuat pembaruan komentar.');
     });
 
@@ -274,14 +310,14 @@ const AdminDashboard = () => {
         const totalNotifications = snapshot.size;
         setStats(prev => ({
           ...prev,
-          totalNotifications
+          totalNotifications,
         }));
       } catch (error) {
-        console.error('Error fetching notifications:', error);
+        console.error('fetchNotifications: Error fetching notifications:', error);
         toast.error('Gagal memuat notifikasi.');
       }
     }, (error) => {
-      console.error('Error in notifications snapshot:', error);
+      console.error('fetchNotifications: Error in notifications snapshot:', error);
       toast.error('Gagal memuat pembaruan notifikasi.');
     });
 
@@ -294,14 +330,14 @@ const AdminDashboard = () => {
         const totalBreakingNews = snapshot.size;
         setStats(prev => ({
           ...prev,
-          totalBreakingNews
+          totalBreakingNews,
         }));
       } catch (error) {
-        console.error('Error fetching breaking news:', error);
+        console.error('fetchBreakingNews: Error fetching breaking news:', error);
         toast.error('Gagal memuat breaking news.');
       }
     }, (error) => {
-      console.error('Error in breaking news snapshot:', error);
+      console.error('fetchBreakingNews: Error in breaking news snapshot:', error);
       toast.error('Gagal memuat pembaruan breaking news.');
     });
 
@@ -309,27 +345,50 @@ const AdminDashboard = () => {
   };
 
   const fetchReports = () => {
-    const unsubscribe = onSnapshot(collection(db, 'reports'), (snapshot) => {
+    const unsubscribe = onSnapshot(collection(db, 'reports'), async (snapshot) => {
       try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (!userDoc.exists() || userDoc.data().isAdmin !== true) {
+          console.warn('fetchReports: User lacks admin privileges', {
+            userId: user.uid,
+            userEmail: user.email,
+          });
+          toast.error('Akses ke laporan ditolak. Pastikan Anda memiliki izin admin.');
+          setShowUnauthorizedModal(true);
+          await logActivity('REPORTS_ACCESS_DENIED', { userEmail: user.email, error: 'Missing admin privileges' });
+          return;
+        }
+
         const totalReports = snapshot.size;
         setStats(prev => ({
           ...prev,
-          totalReports
+          totalReports,
         }));
       } catch (error) {
-        console.error('Error fetching reports:', error);
-        toast.error('Gagal memuat laporan.');
+        console.error('fetchReports: Error fetching reports:', error);
+        if (error.code === 'permission-denied') {
+          console.warn('fetchReports: Permission denied for reports collection. Verify admin status.');
+          toast.error('Akses ke laporan ditolak. Pastikan Anda memiliki izin admin.');
+          await logActivity('REPORTS_ACCESS_DENIED', { userEmail: user.email, error: error.message });
+        } else {
+          toast.error('Gagal memuat laporan.');
+        }
       }
     }, (error) => {
-      console.error('Error in reports snapshot:', error);
-      toast.error('Gagal memuat pembaruan laporan.');
+      console.error('fetchReports: Error in reports snapshot:', error);
+      if (error.code === 'permission-denied') {
+        console.warn('fetchReports: Permission denied for reports snapshot. Verify admin status.');
+        toast.error('Akses ke pembaruan laporan ditolak. Pastikan Anda memiliki izin admin.');
+        logActivity('REPORTS_SNAPSHOT_DENIED', { userEmail: user.email, error: error.message });
+      } else {
+        toast.error('Gagal memuat pembaruan laporan.');
+      }
     });
 
     return unsubscribe;
   };
 
   const handleViewsUpdated = async () => {
-    console.log('Views updated, refreshing data...');
     await logActivity('VIEWS_UPDATED', { totalViews: stats.totalViews || null });
   };
 
@@ -337,8 +396,7 @@ const AdminDashboard = () => {
     let unsubscribeNews, unsubscribeUsers, unsubscribeComments, unsubscribeNotifications, unsubscribeBreakingNews, unsubscribeReports;
 
     if (isAuthorized) {
-      // Fetch all stats immediately when the dashboard loads
-      unsubscribeNews = fetchNews(); // Added to fetch news and views
+      unsubscribeNews = fetchNews();
       unsubscribeUsers = fetchUsers();
       unsubscribeComments = fetchComments();
       unsubscribeNotifications = fetchNotifications();
@@ -347,7 +405,6 @@ const AdminDashboard = () => {
     }
 
     return () => {
-      // Cleanup all listeners to prevent memory leaks
       if (unsubscribeNews) unsubscribeNews();
       if (unsubscribeUsers) unsubscribeUsers();
       if (unsubscribeComments) unsubscribeComments();
@@ -360,12 +417,12 @@ const AdminDashboard = () => {
   const tabVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } },
-    exit: { opacity: 0, y: -20, transition: { duration: 0.3 } }
+    exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
   };
 
   const cardVariants = {
     hidden: { opacity: 0, scale: 0.95 },
-    visible: { opacity: 1, scale: 1, transition: { duration: 0.4, ease: 'easeOut' } }
+    visible: { opacity: 1, scale: 1, transition: { duration: 0.4, ease: 'easeOut' } },
   };
 
   const navButtonVariants = {
@@ -373,8 +430,8 @@ const AdminDashboard = () => {
     visible: (index) => ({
       opacity: 1,
       x: 0,
-      transition: { duration: 0.3, ease: 'easeOut', delay: index * 0.1 }
-    })
+      transition: { duration: 0.3, ease: 'easeOut', delay: index * 0.1 },
+    }),
   };
 
   if (loading) {
@@ -411,7 +468,6 @@ const AdminDashboard = () => {
       <header className="bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 text-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0 animate-slideRight">
-            {/* Logo dan Title */}
             <div className="flex items-center space-x-3 sm:space-x-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 rounded-2xl flex items-center justify-center">
                 <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -421,17 +477,11 @@ const AdminDashboard = () => {
                 <span className="text-indigo-100 text-xs sm:text-sm">Neswara News</span>
               </div>
             </div>
-
-            {/* User Info dan Logout */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 w-full sm:w-auto">
-              {/* User Info - Responsive layout */}
               <div className="text-xs sm:text-sm text-indigo-100 truncate max-w-full sm:max-w-none">
                 Selamat datang, {user?.displayName || user?.email}
               </div>
-              
-              {/* Avatar and Logout Container */}
               <div className="flex items-center space-x-3 sm:space-x-4 w-full sm:w-auto justify-between sm:justify-end">
-                {/* User Avatar */}
                 <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-500 rounded-full flex items-center justify-center overflow-hidden">
                   {user?.photoURL ? (
                     <img
@@ -443,8 +493,6 @@ const AdminDashboard = () => {
                     <User className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                   )}
                 </div>
-
-                {/* Logout Button */}
                 <button
                   onClick={handleAdminLogout}
                   className="flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-2 rounded-xl bg-white/20 hover:bg-white/30 transition-all duration-200 hover:scale-105"
@@ -470,7 +518,7 @@ const AdminDashboard = () => {
               { id: 'notifications', label: 'Kelola Notifikasi', icon: Bell },
               { id: 'views', label: 'Kelola Views', icon: Eye },
               { id: 'reports', label: 'Kelola Laporan', icon: Flag },
-              { id: 'logs', label: 'Kelola Log', icon: FileText }
+              { id: 'logs', label: 'Kelola Log', icon: FileText },
             ].map((tab, index) => (
               <motion.button
                 key={tab.id}
@@ -493,8 +541,6 @@ const AdminDashboard = () => {
           </nav>
         </div>
 
-        {/* Explanatory Comment for Admins */}
-        {/* Penjelasan untuk Admin: Bagian ini menampilkan kartu statistik (StatCard) untuk total berita, komentar, tayangan, pengguna, notifikasi, breaking news, dan laporan. Semua data diambil secara real-time menggunakan onSnapshot dari Firestore untuk memastikan angka selalu terbaru tanpa perlu navigasi ke tab lain (misalnya, "Kelola Berita"). Fungsi fetchNews, fetchUsers, dll., dijalankan saat dashboard dimuat (isAuthorized=true) untuk sinkronisasi data langsung. */}
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -513,7 +559,7 @@ const AdminDashboard = () => {
                     { icon: Users, title: 'Total Pengguna', value: stats.totalUsers, color: '#EF4444' },
                     { icon: Bell, title: 'Total Notifikasi', value: stats.totalNotifications, color: '#8B5CF6' },
                     { icon: RadioTower, title: 'Total Breaking News', value: stats.totalBreakingNews, color: '#EC4899' },
-                    { icon: Flag, title: 'Total Laporan', value: stats.totalReports, color: '#F97316' }
+                    { icon: Flag, title: 'Total Laporan', value: stats.totalReports, color: '#F97316' },
                   ].map((stat, index) => (
                     <motion.div
                       key={stat.title}
@@ -543,7 +589,7 @@ const AdminDashboard = () => {
               <NewsManagement logActivity={logActivity} setStats={setStats} />
             )}
 
-            {activeTab === 'users' && <UserManagement adminEmails={ADMIN_EMAILS} logActivity={logActivity} />}
+            {activeTab === 'users' && <UserManagement logActivity={logActivity} />}
 
             {activeTab === 'comments' && <CommentManagement logActivity={logActivity} />}
 

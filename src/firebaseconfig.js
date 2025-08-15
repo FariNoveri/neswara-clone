@@ -10,8 +10,49 @@ import {
   getFirestore,
   collection,
   onSnapshot,
+  setLogLevel,
+  connectFirestoreEmulator,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+
+// ========= COMPLETE LOG SUPPRESSION =========
+
+// 1. Set Firebase log level to silent (paling efektif)
+setLogLevel('silent');
+
+// 2. Override console methods untuk filter Firebase logs
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+const originalConsoleError = console.error;
+
+console.warn = (...args) => {
+  const message = args.join(' ');
+  if (!message.includes('@firebase/firestore')) {
+    originalConsoleWarn.apply(console, args);
+  }
+};
+
+console.error = (...args) => {
+  const message = args.join(' ');
+  if (!message.includes('@firebase/firestore')) {
+    originalConsoleError.apply(console, args);
+  }
+};
+
+// 3. Disable Firebase debug mode
+if (typeof window !== 'undefined') {
+  window.FIREBASE_APPCHECK_DEBUG_TOKEN = false;
+  
+  // Override Firebase internal logger
+  window.addEventListener('load', () => {
+    setLogLevel('silent');
+    
+    // Additional suppression
+    if (window.firebase) {
+      window.firebase.firestore.setLogLevel('silent');
+    }
+  });
+}
 
 // Load dotenv (for SSR or Node.js environments)
 if (typeof window === 'undefined') {
@@ -59,6 +100,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+
+// Set log level again after initialization
+setLogLevel('silent');
 
 // Providers
 const googleProvider = new GoogleAuthProvider();

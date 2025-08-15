@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../firebaseconfig';
-import { collection, query, orderBy, onSnapshot, limit, doc, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, limit, doc, getDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { ChevronDown, ChevronUp, Eye, EyeOff, Trash, Search, X, Filter, Calendar, Activity, Users, AlertCircle, Clock, User, MessageSquare, Heart, Bookmark, BookmarkX, PlusCircle, Edit3, Trash2, MessageCircle } from 'lucide-react';
-import { ADMIN_EMAILS } from '../config/Constants';
 import { toast } from 'react-toastify';
 
 // Custom date formatting function
@@ -59,15 +59,39 @@ const ACTION_LABELS = {
   UNSAVE_NEWS: 'Berita Dihapus dari Tersimpan'
 };
 
-// Utility function to check if user is admin
-const isAdminUser = (userEmail, details) => {
-  if (ADMIN_EMAILS.includes(userEmail)) {
-    return true;
-  }
-  if (details && (details.isAdmin === true || details.adminStatus === true || details.admin === true)) {
-    return true;
-  }
-  return false;
+// Hook to fetch and monitor user role in real-time
+const useUserRole = (userId) => {
+  const [isAdmin, setIsAdmin] = useState(null); // null = loading, true = admin, false = user
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setIsAdmin(false);
+      return;
+    }
+
+    // Check Firestore users/{userId} for isAdmin field
+    const userRef = doc(db, 'users', userId);
+    const unsubscribeFirestore = onSnapshot(
+      userRef,
+      (docSnap) => {
+        if (docSnap.exists() && docSnap.data().isAdmin === true) {
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false); // Default to user if no admin status in Firestore
+        }
+      },
+      (err) => {
+        console.warn(`Error fetching user ${userId} from Firestore:`, err);
+        setIsAdmin(false); // Default to user if Firestore fetch fails
+        setError('Gagal memverifikasi status admin.');
+      }
+    );
+
+    return () => unsubscribeFirestore();
+  }, [userId]);
+
+  return { isAdmin, error };
 };
 
 // Utility function to format timestamp
@@ -183,6 +207,7 @@ const LogActivity = () => {
   const [error, setError] = useState(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, type: '', id: null });
+  const { isAdmin, error: roleError } = useUserRole(getAuth().currentUser?.uid);
 
   useEffect(() => {
     const q = query(
@@ -216,6 +241,10 @@ const LogActivity = () => {
   };
 
   const handleDeleteLog = async (logId) => {
+    if (!isAdmin) {
+      toast.error('Hanya admin yang dapat menghapus log.');
+      return;
+    }
     setDeleteModal({
       isOpen: true,
       type: 'single',
@@ -234,13 +263,17 @@ const LogActivity = () => {
     } catch (error) {
       console.error('Error deleting log:', error);
       setError('Gagal menghapus log.');
-      toast.error('Gagal menghapus log.');
+      toast.error(`Gagal menghapus log: ${error.message}`);
     } finally {
       setDeleteModal({ isOpen: false, type: '', id: null });
     }
   };
 
   const handleDeleteAllLogs = async () => {
+    if (!isAdmin) {
+      toast.error('Hanya admin yang dapat menghapus semua log.');
+      return;
+    }
     setDeleteModal({
       isOpen: true,
       type: 'all',
@@ -255,15 +288,20 @@ const LogActivity = () => {
     try {
       const logsQuery = query(collection(db, 'logs'));
       const logsSnapshot = await getDocs(logsQuery);
-      const batch = logsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(batch);
+      const batch = writeBatch(db);
+      logsSnapshot.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
       setLogs([]);
       setError(null);
       toast.success('Semua log berhasil dihapus!');
     } catch (error) {
-      console.error('Error deleting all logs:', error);
+      console.error('Error deleting all logs:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
       setError('Gagal menghapus semua log.');
-      toast.error('Gagal menghapus semua log.');
+      toast.error(`Gagal menghapus semua log: ${error.message}`);
     } finally {
       setIsDeletingAll(false);
       setDeleteModal({ isOpen: false, type: '', id: null });
@@ -436,9 +474,9 @@ const LogActivity = () => {
               
               <button
                 onClick={handleDeleteAllLogs}
-                disabled={isDeletingAll || logs.length === 0}
+                disabled={isDeletingAll || logs.length === 0 || !isAdmin}
                 className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-medium transition-all duration-200 transform hover:scale-105 ${
-                  isDeletingAll || logs.length === 0
+                  isDeletingAll || logs.length === 0 || !isAdmin
                     ? 'bg-gray-300 cursor-not-allowed text-gray-500'
                     : 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-lg hover:shadow-xl'
                 }`}
@@ -456,7 +494,7 @@ const LogActivity = () => {
             <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <Activity className="w-12 h-12 text-gray-400" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2already">Tidak Ada Log</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Tidak Ada Log</h3>
             <p className="text-gray-600">Belum ada log aktivitas yang cocok dengan filter yang dipilih.</p>
           </div>
         ) : (
@@ -492,12 +530,19 @@ const LogActivity = () => {
 
 const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
   const { title, loading: titleLoading } = useNewsTitle(log.details?.newsId || log.details?.articleId);
+  const { isAdmin, error: roleError } = useUserRole(log.details?.userId || log.userId);
+
+  useEffect(() => {
+    if (roleError) {
+      console.error('Role fetch error:', roleError);
+      toast.error(roleError);
+    }
+  }, [roleError]);
 
   const getActionDescription = () => {
     const actionLabel = ACTION_LABELS[log.action] || log.action;
     const userEmail = log.userEmail || 'Pengguna tidak diketahui';
-    const isAdmin = isAdminUser(log.userEmail, log.details);
-    const adminLabel = isAdmin ? ' (Admin)' : '';
+    const adminLabel = isAdmin === null ? '' : isAdmin ? ' (Admin)' : ' (User)';
 
     switch (log.action) {
       case 'PROFILE_UPDATE':
@@ -653,11 +698,13 @@ const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
                 {ACTION_LABELS[log.action] || log.action}
               </h3>
               <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                isAdminUser(log.userEmail, log.details) 
-                  ? 'bg-amber-100 text-amber-800' 
-                  : 'bg-blue-100 text-blue-800'
+                isAdmin === null 
+                  ? 'bg-gray-100 text-gray-600' 
+                  : isAdmin 
+                    ? 'bg-amber-100 text-amber-800' 
+                    : 'bg-blue-100 text-blue-800'
               }`}>
-                {isAdminUser(log.userEmail, log.details) ? 'Admin' : 'User'}
+                {isAdmin === null ? 'Memuat...' : isAdmin ? 'Admin' : 'User'}
               </span>
             </div>
             
@@ -693,10 +740,13 @@ const LogItem = ({ log, expanded, toggleExpand, onDelete, index }) => {
           
           <button
             onClick={onDelete}
-            className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 group"
-            title="Hapus log ini"
+            disabled={!isAdmin}
+            className={`p-2 rounded-lg transition-all duration-200 group ${
+              !isAdmin ? 'cursor-not-allowed opacity-50' : 'hover:bg-red-50'
+            }`}
+            title={isAdmin ? 'Hapus log ini' : 'Hanya admin yang dapat menghapus log'}
           >
-            <Trash className="w-5 h-5 text-gray-400 group-hover:text-red-600 transition-colors" />
+            <Trash className={`w-5 h-5 transition-colors ${isAdmin ? 'text-gray-400 group-hover:text-red-600' : 'text-gray-400'}`} />
           </button>
         </div>
       </div>

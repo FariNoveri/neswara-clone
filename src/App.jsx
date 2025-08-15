@@ -31,6 +31,7 @@ import Wisata from "./component/Navigation/Wisata";
 import Kuliner from "./component/Navigation/Kuliner";
 import Entertainment from "./component/Navigation/Entertainment";
 import Liked from "./component/Pages/Liked";
+import CommentHistory from "./component/Pages/CommentHistory";
 
 const App = () => {
   return (
@@ -39,6 +40,7 @@ const App = () => {
       <Navbar />
       <main className="flex-grow">
         <Routes>
+          {/* Homepage with multiple sections */}
           <Route
             path="/"
             element={
@@ -53,6 +55,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* All news page */}
           <Route
             path="/allnews"
             element={
@@ -61,6 +64,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* News detail page */}
           <Route
             path="/berita/:slug"
             element={
@@ -69,6 +73,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Profile page */}
           <Route
             path="/profile"
             element={
@@ -77,6 +82,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Admin dashboard */}
           <Route
             path="/admin"
             element={
@@ -85,6 +91,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Saved news page */}
           <Route
             path="/saved"
             element={
@@ -93,6 +100,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Search results page */}
           <Route
             path="/search"
             element={
@@ -101,6 +109,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Category pages */}
           <Route
             path="/nasional"
             element={
@@ -205,6 +214,7 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Liked news page */}
           <Route
             path="/liked"
             element={
@@ -213,6 +223,16 @@ const App = () => {
               </ErrorBoundary>
             }
           />
+          {/* Comment history page */}
+          <Route
+            path="/comment-history"
+            element={
+              <ErrorBoundary>
+                <CommentHistory />
+              </ErrorBoundary>
+            }
+          />
+          {/* 404 Not Found page */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

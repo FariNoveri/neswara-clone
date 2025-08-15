@@ -20,7 +20,8 @@ import {
   FaShieldAlt,
   FaChartBar,
   FaHeart,
-  FaBookmark
+  FaBookmark,
+  FaComment,
 } from "react-icons/fa";
 import { toast } from "react-toastify";
 import {
@@ -49,7 +50,9 @@ import {
   query,
   where,
   getDocs,
-  deleteDoc
+  deleteDoc,
+  Timestamp,
+  serverTimestamp,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
@@ -61,7 +64,6 @@ const sanitizeInput = (input, maxLength) => {
     .replace(new RegExp('script', 'gi'), '') // Prevent script injection
     .replace(new RegExp('[\\x00-\\x1F\\x7F]', 'g'), '') // Remove control characters
     .trim();
-  // Truncate to maxLength if specified
   if (maxLength && sanitized.length > maxLength) {
     sanitized = sanitized.substring(0, maxLength);
   }
@@ -111,7 +113,7 @@ const generateNameSuggestions = (baseName) => {
   suggestions.push(`${baseName}_user`);
   suggestions.push(`${baseName}${Math.random().toString(36).substring(2, 8)}`);
   suggestions.push(`${baseName}_x`);
-  return suggestions.map(name => sanitizeInput(name, 50)); // Apply 50-character limit
+  return suggestions.map(name => sanitizeInput(name, 50));
 };
 
 const Profile = () => {
@@ -223,10 +225,9 @@ const Profile = () => {
     }
   };
 
-  // Check edit count for the current day
   const checkEditLimit = async (userId) => {
     try {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
       const editsQuery = query(
         collection(db, "profile_edits"),
         where("userId", "==", userId),
@@ -254,7 +255,6 @@ const Profile = () => {
     }
   };
 
-  // Delete all previous edits of the same type for the user (across all days)
   const deletePreviousEdits = async (userId, type) => {
     try {
       const editsQuery = query(
@@ -265,7 +265,7 @@ const Profile = () => {
       const editsSnapshot = await getDocs(editsQuery);
       const deletePromises = editsSnapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
-      await checkEditLimit(userId); // Re-check edit count after deletion
+      await checkEditLimit(userId);
     } catch (error) {
       console.error(`Error deleting previous ${type} edits:`, error);
       toast.error(`Gagal menghapus log edit ${type} sebelumnya: ${error.message}`, {
@@ -275,45 +275,117 @@ const Profile = () => {
     }
   };
 
-  // Log profile edit with beforeName and newName for displayName changes
-  const logProfileEdit = async (userId, type, beforeName, newName) => {
-    try {
-      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // YYYY-MM-DD in WIB
-      const { canEdit } = await checkEditLimit(userId);
-      if (!canEdit) {
-        toast.error("Batas pengeditan harian telah tercapai. Silakan coba lagi besok.", {
-          position: "top-center",
-          autoClose: 5000,
-        });
-        return false;
-      }
+const logProfileEdit = async (userId, type, beforeName, newName) => {
+  try {
+    // Validate inputs first
+    if (!userId || typeof userId !== 'string' || userId.length === 0 || userId.length > 128) {
+      throw new Error('Invalid userId');
+    }
+    
+    if (!type || typeof type !== 'string' || !['displayName', 'email', 'password', 'photoURL', 'auth_profile'].includes(type)) {
+      throw new Error('Invalid type. Must be one of: displayName, email, password, photoURL, auth_profile');
+    }
 
-      // Delete previous edits of the same type
-      await deletePreviousEdits(userId, type);
-
-      const logData = {
-        userId,
-        type,
-        date: today,
-        timestamp: new Date().toISOString()
-      };
-
-      if (type === "displayName" && beforeName && newName) {
-        logData.beforeName = sanitizeInput(beforeName, 50);
-        logData.newName = sanitizeInput(newName, 50);
-      }
-
-      await addDoc(collection(db, "profile_edits"), logData);
-      await checkEditLimit(userId); // Update edit count after adding new edit
-      return true;
-    } catch (error) {
-      console.error("Error logging profile edit:", error);
-      setError("Gagal mencatat perubahan profil: " + error.message);
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format (exactly 10 chars)
+    
+    const { canEdit } = await checkEditLimit(userId);
+    if (!canEdit) {
+      toast.error("Batas pengeditan harian telah tercapai. Silakan coba lagi besok.", {
+        position: "top-center",
+        autoClose: 5000,
+      });
       return false;
     }
-  };
 
-  // Check if display name is unique
+    await deletePreviousEdits(userId, type);
+
+    // Fetch IP or use valid fallback
+    let ipAddress = "127.0.0.1"; // Valid fallback IP
+    try {
+      const response = await fetch('https://api.ipify.org?format=json', { 
+        signal: AbortSignal.timeout(5000) 
+      });
+      if (!response.ok) throw new Error('IP fetch failed');
+      const data = await response.json();
+      // Validate IP format and length (0-45 characters as per security rules)
+      if (data.ip && data.ip.match(/^(\d{1,3}\.){3}\d{1,3}$/) && data.ip.length <= 45) {
+        ipAddress = data.ip;
+      }
+    } catch (error) {
+      console.warn("IP fetch failed, using fallback:", error.message);
+    }
+
+    // Build the base log data with REQUIRED fields
+    const logData = {
+      userId: userId.trim(), // Required: string 1-128 chars
+      type: type.trim(), // Required: string 1-50 chars, must be valid type
+      timestamp: serverTimestamp(), // Required: Firestore timestamp (not ISO string!)
+      editedBy: userId.trim(), // Required: string 1-128 chars, must match userId
+      date: today, // Optional: string exactly 10 chars (YYYY-MM-DD)
+      ipAddress: ipAddress.trim() // Optional: string 0-45 chars
+    };
+
+    // Add conditional fields based on type
+    if (type === "displayName" && beforeName && newName) {
+      // Validate display name lengths (0-50 chars as per security rules)
+      if (beforeName.length <= 50 && newName.length <= 50) {
+        logData.beforeName = beforeName.trim();
+        logData.newName = newName.trim();
+      }
+    } else if (type === "email" && beforeName && newName) {
+      // Validate email format and length (0-254 chars as per security rules)
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (beforeName.length <= 254 && newName.length <= 254 && 
+          (beforeName === 'anonymous' || emailRegex.test(beforeName)) &&
+          (newName === 'anonymous' || emailRegex.test(newName))) {
+        logData.emailBefore = beforeName.trim();
+        logData.emailAfter = newName.trim();
+      }
+    }
+
+    console.log("logProfileEdit data being sent:", {
+      ...logData,
+      timestamp: 'serverTimestamp()' // Don't log the actual timestamp object
+    });
+
+    // Create the document
+    await addDoc(collection(db, "profile_edits"), logData);
+    await checkEditLimit(userId);
+    
+    console.log("Profile edit logged successfully");
+    return true;
+    
+  } catch (error) {
+    console.error("Error logging profile edit:", error);
+    console.error("Error details:", {
+      code: error.code,
+      message: error.message,
+      userId: userId,
+      type: type
+    });
+    
+    let errorMessage = "Gagal mencatat perubahan profil";
+    if (error.code === 'permission-denied') {
+      errorMessage = "Tidak memiliki izin untuk mencatat perubahan profil";
+    } else if (error.code === 'invalid-argument') {
+      errorMessage = "Data yang dikirim tidak valid";
+    }
+    
+    setError(errorMessage + ": " + error.message);
+    toast.error(errorMessage + ": " + error.message, {
+      position: "top-center",
+      autoClose: 5000,
+    });
+    return false;
+  }
+};
+
+// Helper function to sanitize input (if you don't have it)
+const sanitizeInput = (input, maxLength) => {
+  if (!input || typeof input !== 'string') return '';
+  return input.trim().substring(0, maxLength);
+};
+
   const checkDisplayNameUnique = async (name) => {
     try {
       const usersQuery = query(
@@ -561,169 +633,174 @@ const Profile = () => {
     });
   };
 
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    clearMessages();
+const handleSaveProfile = async (e) => {
+  e.preventDefault();
+  clearMessages();
 
-    const { canEdit } = await checkEditLimit(user.uid);
-    if (!canEdit) {
-      return;
-    }
+  const { canEdit } = await checkEditLimit(user.uid);
+  if (!canEdit) {
+    return;
+  }
 
-    const sanitizedDisplayName = sanitizeInput(displayName, 50);
-    const sanitizedEmail = sanitizeInput(email, 50);
-    const sanitizedNewPassword = sanitizeInput(newPassword, 20);
-    const sanitizedConfirmPassword = sanitizeInput(confirmPassword, 20);
+  const sanitizedDisplayName = sanitizeInput(displayName, 50);
+  const sanitizedEmail = sanitizeInput(email, 50);
+  const sanitizedNewPassword = sanitizeInput(newPassword, 20);
+  const sanitizedConfirmPassword = sanitizeInput(confirmPassword, 20);
 
-    // Validate input lengths
-    if (sanitizedDisplayName.length > 50) {
-      setError("Nama tampilan tidak boleh melebihi 50 karakter.");
-      return;
-    }
-    if (sanitizedEmail.length > 50) {
-      setError("Email tidak boleh melebihi 50 karakter.");
-      return;
-    }
-    if (sanitizedNewPassword && sanitizedNewPassword.length > 20) {
-      setError("Kata sandi baru tidak boleh melebihi 20 karakter.");
-      return;
-    }
-    if (sanitizedConfirmPassword && sanitizedConfirmPassword.length > 20) {
-      setError("Konfirmasi kata sandi tidak boleh melebihi 20 karakter.");
-      return;
-    }
+  if (sanitizedDisplayName.length > 50) {
+    setError("Nama tampilan tidak boleh melebihi 50 karakter.");
+    return;
+  }
+  if (sanitizedEmail.length > 50) {
+    setError("Email tidak boleh melebihi 50 karakter.");
+    return;
+  }
+  if (sanitizedNewPassword && sanitizedNewPassword.length > 20) {
+    setError("Kata sandi baru tidak boleh melebihi 20 karakter.");
+    return;
+  }
+  if (sanitizedConfirmPassword && sanitizedConfirmPassword.length > 20) {
+    setError("Konfirmasi kata sandi tidak boleh melebihi 20 karakter.");
+    return;
+  }
+  if (!sanitizedDisplayName.trim()) {
+    setError("Nama tampilan wajib diisi.");
+    return;
+  }
 
-    if (!sanitizedDisplayName.trim()) {
-      setError("Nama tampilan wajib diisi.");
-      return;
-    }
+  try {
+    const originalDisplayName = user.displayName || "";
+    const originalEmail = user.email;
 
-    try {
-      const originalDisplayName = user.displayName || "";
-      const originalEmail = user.email;
-
-      if (sanitizedDisplayName !== originalDisplayName) {
-        const isUnique = await checkDisplayNameUnique(sanitizedDisplayName);
-        if (!isUnique) {
-          const suggestions = generateNameSuggestions(sanitizedDisplayName);
-          setNameSuggestions(suggestions);
-          setError(`Nama tampilan "${sanitizedDisplayName}" sudah digunakan. Coba salah satu dari: ${suggestions.join(', ')}`);
-          return;
-        }
+    if (sanitizedDisplayName !== originalDisplayName) {
+      const isUnique = await checkDisplayNameUnique(sanitizedDisplayName);
+      if (!isUnique) {
+        const suggestions = generateNameSuggestions(sanitizedDisplayName);
+        setNameSuggestions(suggestions);
+        setError(`Nama tampilan "${sanitizedDisplayName}" sudah digunakan. Coba salah satu dari: ${suggestions.join(', ')}`);
+        return;
       }
+      const logged = await logProfileEdit(user.uid, "displayName", originalDisplayName, sanitizedDisplayName);
+      if (!logged) return;
+      await updateProfile(user, { displayName: sanitizedDisplayName });
+      // Log auth profile update
+      await logProfileEdit(user.uid, "auth_profile", originalDisplayName, sanitizedDisplayName);
+    }
 
-      if (sanitizedDisplayName !== originalDisplayName) {
-        const logged = await logProfileEdit(user.uid, "displayName", originalDisplayName, sanitizedDisplayName);
-        if (!logged) return;
-        await updateProfile(user, { displayName: sanitizedDisplayName });
-      }
-
-      if (sanitizedEmail !== originalEmail) {
-        if (!currentPassword) {
-          setError(isSocialLogin
-            ? "Kata sandi saat ini diperlukan untuk mengubah email. Jika Anda login dengan Google/Facebook, gunakan kata sandi dari akun tersebut atau atur kata sandi baru terlebih dahulu."
-            : "Kata sandi saat ini diperlukan untuk mengubah email.");
-          return;
-        }
-
-        const credential = EmailAuthProvider.credential(user.email, currentPassword);
-        await reauthenticateWithCredential(user, credential);
-
-        const logged = await logProfileEdit(user.uid, "email");
-        if (!logged) return;
-        await updateEmail(user, sanitizedEmail);
-        await sendEmailVerification(user);
-
-        await setDoc(doc(db, "users", user.uid), {
-          displayName: sanitizedDisplayName,
-          email: user.email,
-          pendingEmail: sanitizedEmail,
-          photoURL: profileImageURL,
-          role: userRole,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-
-        setEmailVerificationSent(true);
-        setSuccess("Email verifikasi telah dikirim ke alamat email baru Anda. Silakan verifikasi untuk menyelesaikan perubahan email.");
-        toast.success("Email verifikasi telah dikirim ke alamat email baru Anda.", {
-          position: "top-center",
-          autoClose: 5000,
-        });
-      } else {
-        await setDoc(doc(db, "users", user.uid), {
-          displayName: sanitizedDisplayName,
-          email: sanitizedEmail,
-          photoURL: profileImageURL,
-          role: userRole,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
-
-      if (sanitizedNewPassword) {
-        if (!currentPassword) {
-          setError(isSocialLogin
-            ? "Kata sandi saat ini diperlukan untuk mengubah kata sandi. Jika Anda login dengan Google/Facebook, masukkan kata sandi dari akun tersebut."
-            : "Kata sandi saat ini diperlukan untuk mengubah kata sandi.");
-          return;
-        }
-
-        if (sanitizedNewPassword !== sanitizedConfirmPassword) {
-          setError("Kata sandi baru tidak cocok.");
-          return;
-        }
-
-        if (sanitizedNewPassword.length < 6) {
-          setError("Kata sandi baru harus minimal 6 karakter.");
-          return;
-        }
-
-        const credential = EmailAuthProvider.credential(user.email, currentPassword);
-        await reauthenticateWithCredential(user, credential);
-
-        const logged = await logProfileEdit(user.uid, "password");
-        if (!logged) return;
-        await updatePassword(user, sanitizedNewPassword);
-      }
-
-      setSuccess("Profil berhasil diperbarui!");
-      toast.success("Profil berhasil diperbarui!", {
-        position: "top-center",
-        autoClose: 5000,
-      });
-      setIsEditing(false);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (error) {
-      if (error.code === 'auth/wrong-password') {
+    if (sanitizedEmail !== originalEmail) {
+      if (!currentPassword) {
         setError(isSocialLogin
-          ? "Kata sandi saat ini salah. Silakan gunakan kata sandi dari akun Google/Facebook Anda atau atur kata sandi baru terlebih dahulu."
-          : "Kata sandi saat ini salah.");
-      } else if (error.code === 'auth/email-already-in-use') {
-        setError("Email ini sudah digunakan oleh akun lain.");
-      } else if (error.code === 'auth/invalid-email') {
-        setError("Alamat email tidak valid.");
-      } else {
-        setError("Gagal memperbarui profil: " + error.message);
+          ? "Kata sandi saat ini diperlukan untuk mengubah email. Jika Anda login dengan Google/Facebook, gunakan kata sandi dari akun tersebut atau atur kata sandi baru terlebih dahulu."
+          : "Kata sandi saat ini diperlukan untuk mengubah email.");
+        return;
       }
-      toast.error(error.message, {
+
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+
+      const logged = await logProfileEdit(user.uid, "email", originalEmail, sanitizedEmail);
+      if (!logged) return;
+      await updateEmail(user, sanitizedEmail);
+      await sendEmailVerification(user);
+
+      await setDoc(doc(db, "users", user.uid), {
+        displayName: sanitizedDisplayName,
+        email: user.email,
+        pendingEmail: sanitizedEmail,
+        photoURL: profileImageURL,
+        role: userRole,
+        updatedAt: serverTimestamp(), // Use serverTimestamp
+      }, { merge: true });
+
+      setEmailVerificationSent(true);
+      setSuccess("Email verifikasi telah dikirim ke alamat email baru Anda. Silakan verifikasi untuk menyelesaikan perubahan email.");
+      toast.success("Email verifikasi telah dikirim ke alamat email baru Anda.", {
         position: "top-center",
         autoClose: 5000,
       });
+    } else {
+      await setDoc(doc(db, "users", user.uid), {
+        displayName: sanitizedDisplayName,
+        email: sanitizedEmail,
+        photoURL: profileImageURL,
+        role: userRole,
+        updatedAt: serverTimestamp(), // Use serverTimestamp
+      }, { merge: true });
     }
-  };
 
-  const handleCancelEdit = () => {
+    if (sanitizedNewPassword) {
+      if (!currentPassword) {
+        setError(isSocialLogin
+          ? "Kata sandi saat ini diperlukan untuk mengubah kata sandi. Jika Anda login dengan Google/Facebook, masukkan kata sandi dari akun tersebut."
+          : "Kata sandi saat ini diperlukan untuk mengubah kata sandi.");
+        return;
+      }
+
+      if (sanitizedNewPassword !== sanitizedConfirmPassword) {
+        setError("Kata sandi baru tidak cocok.");
+        return;
+      }
+
+      if (sanitizedNewPassword.length < 6) {
+        setError("Kata sandi baru harus minimal 6 karakter.");
+        return;
+      }
+
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+
+      const logged = await logProfileEdit(user.uid, "password");
+      if (!logged) return;
+      await updatePassword(user, sanitizedNewPassword);
+    }
+
+    setSuccess("Profil berhasil diperbarui!");
+    toast.success("Profil berhasil diperbarui!", {
+      position: "top-center",
+      autoClose: 5000,
+    });
     setIsEditing(false);
-    setDisplayName(sanitizeInput(user?.displayName || "", 50));
-    setEmail(sanitizeInput(user?.email || "", 50));
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
-    setEmailVerificationSent(false);
-    setNameSuggestions([]);
-    clearMessages();
-  };
+  } catch (error) {
+    console.error("Error saving profile:", error, {
+      code: error.code,
+      message: error.message,
+      displayName: sanitizedDisplayName,
+      email: sanitizedEmail,
+    });
+    if (error.code === 'auth/wrong-password') {
+      setError(isSocialLogin
+        ? "Kata sandi saat ini salah. Silakan gunakan kata sandi dari akun Google/Facebook Anda atau atur kata sandi baru terlebih dahulu."
+        : "Kata sandi saat ini salah.");
+    } else if (error.code === 'auth/email-already-in-use') {
+      setError("Email ini sudah digunakan oleh akun lain.");
+    } else if (error.code === 'auth/invalid-email') {
+      setError("Alamat email tidak valid.");
+    } else {
+      setError("Gagal memperbarui profil: " + error.message);
+    }
+    toast.error(error.message, {
+      position: "top-center",
+      autoClose: 5000,
+    });
+  }
+};
+
+const handleCancelEdit = async () => {
+  setIsEditing(false);
+  setDisplayName(sanitizeInput(user?.displayName || "", 50));
+  setEmail(sanitizeInput(user?.email || "", 50));
+  setCurrentPassword("");
+  setNewPassword("");
+  setConfirmPassword("");
+  setEmailVerificationSent(false);
+  setNameSuggestions([]);
+  clearMessages();
+  // Ensure no Firestore write on cancel
+  console.log("Cancel edit triggered, no Firestore write performed");
+};
 
   const handleDeleteAccount = async () => {
     if (!user) {
@@ -731,13 +808,21 @@ const Profile = () => {
       return;
     }
 
-    const confirmed = window.confirm("Ini akan menghapus akun Anda dan semua data terkait secara permanen. Apakah Anda yakin?");
+    const confirmed = window.confirm("Ini akan menghapus akun Anda dan semua data terkait secara permanen, termasuk komentar Anda. Apakah Anda yakin?");
     if (!confirmed) return;
 
     setDeleting(true);
     clearMessages();
 
     try {
+      const commentsQuery = query(
+        collection(db, "comments"),
+        where("userId", "==", user.uid)
+      );
+      const commentsSnapshot = await getDocs(commentsQuery);
+      const deleteCommentPromises = commentsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deleteCommentPromises);
+
       await deleteDoc(doc(db, "users", user.uid));
       await user.delete();
 
@@ -886,8 +971,6 @@ const Profile = () => {
           </div>
         )}
 
-        {/* Explanatory Comment for Admins */}
-        {/* Penjelasan untuk Admin: Bagian ini menampilkan formulir pengeditan profil pengguna (nama, email, kata sandi, foto profil). Setiap perubahan disimpan di Firestore dan Firebase Authentication. Log perubahan disimpan di koleksi 'profile_edits', dengan hanya log terbaru untuk setiap tipe (displayName, email, password, photoURL) yang dipertahankan, karena log sebelumnya dihapus secara otomatis. Batas panjang input diterapkan: nama (50 karakter), email (50 karakter), kata sandi (20 karakter). Batas 5 pengeditan per hari tetap diberlakukan. */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
             <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 border border-white/20 hover:border-white/30 transition-all duration-500">
@@ -910,8 +993,8 @@ const Profile = () => {
                   </div>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="absolute -bottom-2 -right-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white p-3 rounded-full hover:scale-110 transition-all duration-300 shadow-lg hover:shadow-xl group-hover:animate-bounce"
                     disabled={uploading || editLimitReached}
+                    className="absolute -bottom-2 -right-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white p-3 rounded-full hover:scale-110 transition-all duration-300 shadow-lg hover:shadow-xl group-hover:animate-bounce disabled:opacity-50"
                   >
                     {uploading ? (
                       <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
@@ -1002,6 +1085,14 @@ const Profile = () => {
                   >
                     <span className="font-medium">Ke Berita yang Disimpan</span>
                     <FaBookmark className="text-lg group-hover:animate-bounce" />
+                  </button>
+
+                  <button
+                    onClick={() => navigate('../comment-history')}
+                    className="group w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-2xl hover:scale-105 hover:shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-200"
+                  >
+                    <span className="font-medium">Riwayat Komentar</span>
+                    <FaComment className="text-lg group-hover:animate-bounce" />
                   </button>
                 </div>
               </div>
@@ -1100,7 +1191,7 @@ const Profile = () => {
                           type={showCurrentPassword ? "text" : "password"}
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full px-4 py-3 pr-12 bg-white/10Backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
+                          className="w-full px-4 py-3 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all duration-300"
                           placeholder="Masukkan kata sandi saat ini"
                           disabled={editLimitReached}
                         />
