@@ -48,30 +48,6 @@ const useUserRole = (userId) => {
   return { isAdmin, error };
 };
 
-// Helper function to fetch user admin status
-const fetchUserAdminStatus = async (userId) => {
-  if (!userId) return false;
-  try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    return userDoc.exists() && userDoc.data().isAdmin === true;
-  } catch (error) {
-    console.warn(`Error fetching admin status for user ${userId}:`, error);
-    return false;
-  }
-};
-
-// Helper function to fetch user display name
-const fetchUserDisplayName = async (userId, fallbackName = 'Unknown') => {
-  if (!userId) return fallbackName;
-  try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    return userDoc.exists() ? userDoc.data().displayName || fallbackName : fallbackName;
-  } catch (error) {
-    console.warn(`Error fetching display name for user ${userId}:`, error);
-    return fallbackName;
-  }
-};
-
 const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
@@ -86,9 +62,9 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const [reportModal, setReportModal] = useState({ isOpen: false, commentId: '', newsId: '' });
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, commentId: '', newsId: '' });
   const prevCommentCount = useRef(0);
-  const seenIds = useRef(new Set());
-  const spamTimestamps = useRef([]);
   const unsubscribeRef = useRef({});
+  const spamTimestamps = useRef([]);
+  const userCache = useRef(new Map());
 
   // Get current user's admin status
   const { isAdmin: currentUserIsAdmin } = useUserRole(currentUser?.uid);
@@ -99,19 +75,46 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     return comments.reduce((total, comment) => total + 1 + (comment.replies?.length || 0), 0);
   }, []);
 
+  // Optimized user data fetching with caching
+  const fetchUserData = useCallback(async (userId) => {
+    if (!userId) return { displayName: 'Unknown', isAdmin: false };
+    
+    // Check cache first
+    if (userCache.current.has(userId)) {
+      return userCache.current.get(userId);
+    }
+
+    try {
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      const userData = {
+        displayName: userDoc.exists() ? userDoc.data().displayName || 'Unknown' : 'Unknown',
+        isAdmin: userDoc.exists() && userDoc.data().isAdmin === true
+      };
+      
+      // Cache the result
+      userCache.current.set(userId, userData);
+      return userData;
+    } catch (error) {
+      console.warn(`Error fetching user data for ${userId}:`, error);
+      const fallbackData = { displayName: 'Unknown', isAdmin: false };
+      userCache.current.set(userId, fallbackData);
+      return fallbackData;
+    }
+  }, []);
+
   useEffect(() => {
-    if (!newsId || !currentUser || !currentUser.uid) {
+    if (!newsId || !currentUser?.uid) {
       setError('ID berita atau autentikasi pengguna tidak valid.');
       setLoading(false);
       return;
     }
 
-    const fetchCommentsData = async () => {
+    const setupRealTimeComments = async () => {
       setLoading(true);
       setError(null);
-      seenIds.current.clear();
 
       try {
+        // Verify news document exists
         const newsRef = doc(db, 'news', newsId);
         const newsDoc = await getDoc(newsRef);
         if (!newsDoc.exists()) {
@@ -120,109 +123,118 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           return;
         }
 
-        const rootQuery = query(
+        // Query for root comments (parentId is null)
+        const rootCommentsQuery = query(
           collection(db, 'news', newsId, 'comments'),
           where('parentId', '==', null),
           orderBy('createdAt', 'desc')
         );
 
-        const unsubscribeComments = onSnapshot(rootQuery, async (rootSnapshot) => {
+        // Set up real-time listener for root comments
+        const unsubscribeComments = onSnapshot(rootCommentsQuery, async (rootSnapshot) => {
           try {
-            const commentsData = await Promise.all(rootSnapshot.docs.map(async (rootDoc) => {
-              const rootComment = { id: rootDoc.id, ...rootDoc.data() };
-              let displayName = rootComment.author || 'Unknown';
-              const userId = rootComment.userId || rootDoc.id;
-              
-              // Fetch user data without using hooks
-              let isAdmin = false;
-              if (userId) {
-                displayName = await fetchUserDisplayName(userId, displayName);
-                isAdmin = await fetchUserAdminStatus(userId);
-              }
+            const commentsData = [];
 
+            for (const rootDoc of rootSnapshot.docs) {
+              const rootCommentData = { id: rootDoc.id, ...rootDoc.data() };
+              
+              // Fetch user data for root comment
+              const userData = await fetchUserData(rootCommentData.userId);
+              rootCommentData.displayName = userData.displayName;
+              rootCommentData.isAdmin = userData.isAdmin;
+
+              // Set up real-time listener for replies
               const repliesQuery = query(
                 collection(db, 'news', newsId, 'comments'),
                 where('parentId', '==', rootDoc.id),
                 orderBy('createdAt', 'asc')
               );
 
-              return new Promise((resolve) => {
+              // Use a promise to handle the async nature of onSnapshot
+              const commentWithReplies = await new Promise((resolve) => {
                 const unsubscribeReplies = onSnapshot(repliesQuery, async (repliesSnapshot) => {
-                  // Process replies
-                  const repliesData = await Promise.all(repliesSnapshot.docs.map(async (reply) => {
-                    const replyData = {
-                      id: reply.id,
-                      ...reply.data(),
-                      displayName: reply.data().author || 'Unknown'
-                    };
-                    
-                    // Fetch reply user data
-                    if (reply.data().userId) {
-                      replyData.displayName = await fetchUserDisplayName(reply.data().userId, replyData.displayName);
-                      replyData.isAdmin = await fetchUserAdminStatus(reply.data().userId);
-                    }
-                    
-                    return replyData;
-                  }));
+                  const repliesData = [];
 
-                  // Setup real-time like monitoring for main comment
-                  const likesQuery = query(
-                    collection(db, 'news', newsId, 'likes'),
-                    where('commentId', '==', rootDoc.id)
-                  );
+                  for (const replyDoc of repliesSnapshot.docs) {
+                    const replyData = { id: replyDoc.id, ...replyDoc.data() };
+                    const replyUserData = await fetchUserData(replyData.userId);
+                    replyData.displayName = replyUserData.displayName;
+                    replyData.isAdmin = replyUserData.isAdmin;
 
-                  const unsubscribeLikes = onSnapshot(likesQuery, (likesSnapshot) => {
-                    const likeCount = likesSnapshot.size;
-                    const userHasLiked = currentUser
-                      ? likesSnapshot.docs.some(doc => doc.data().userId === currentUser.uid)
-                      : false;
+                    // Set up real-time likes for reply
+                    const replyLikesQuery = query(
+                      collection(db, 'news', newsId, 'likes'),
+                      where('commentId', '==', replyDoc.id)
+                    );
 
-                    // Setup real-time like monitoring for replies
-                    const replyLikePromises = repliesData.map(reply => {
-                      return new Promise((resolveReply) => {
-                        const replyLikesQuery = query(
-                          collection(db, 'news', newsId, 'likes'),
-                          where('commentId', '==', reply.id)
-                        );
-                        
-                        const unsubscribeReplyLikes = onSnapshot(replyLikesQuery, (replyLikesSnapshot) => {
-                          const replyLikeCount = replyLikesSnapshot.size;
-                          const replyUserHasLiked = currentUser
-                            ? replyLikesSnapshot.docs.some(doc => doc.data().userId === currentUser.uid)
-                            : false;
-                          
-                          resolveReply({
-                            ...reply,
-                            likeCount: replyLikeCount,
-                            userHasLiked: replyUserHasLiked
-                          });
-                        });
-                        
-                        unsubscribeRef.current[`replyLikes_${reply.id}`] = unsubscribeReplyLikes;
-                      });
+                    const unsubscribeReplyLikes = onSnapshot(replyLikesQuery, (likesSnapshot) => {
+                      const likeCount = likesSnapshot.size;
+                      const userHasLiked = currentUser
+                        ? likesSnapshot.docs.some(doc => doc.data().userId === currentUser.uid)
+                        : false;
+                      
+                      replyData.likeCount = likeCount;
+                      replyData.userHasLiked = userHasLiked;
+
+                      // Update the state with the new reply data
+                      setComments(prevComments => 
+                        prevComments.map(comment => 
+                          comment.id === rootDoc.id
+                            ? {
+                                ...comment,
+                                replies: comment.replies?.map(reply => 
+                                  reply.id === replyDoc.id ? replyData : reply
+                                ) || []
+                              }
+                            : comment
+                        )
+                      );
                     });
 
-                    Promise.all(replyLikePromises).then((updatedReplies) => {
-                      resolve({
-                        ...rootComment,
-                        displayName,
-                        replies: updatedReplies,
-                        likeCount,
-                        userHasLiked,
-                        isEdited: rootComment.isEdited || false,
-                        replyToAuthor: rootComment.replyToAuthor || null,
-                        originalText: rootComment.originalText || null,
-                        isAdmin
-                      });
-                    });
-                  });
+                    unsubscribeRef.current[`replyLikes_${replyDoc.id}`] = unsubscribeReplyLikes;
+                    repliesData.push(replyData);
+                  }
 
-                  unsubscribeRef.current[`likes_${rootDoc.id}`] = unsubscribeLikes;
+                  // Store unsubscribe function
                   unsubscribeRef.current[`replies_${rootDoc.id}`] = unsubscribeReplies;
+                  
+                  resolve({
+                    ...rootCommentData,
+                    replies: repliesData
+                  });
                 });
               });
-            }));
 
+              // Set up real-time likes for root comment
+              const likesQuery = query(
+                collection(db, 'news', newsId, 'likes'),
+                where('commentId', '==', rootDoc.id)
+              );
+
+              const unsubscribeLikes = onSnapshot(likesQuery, (likesSnapshot) => {
+                const likeCount = likesSnapshot.size;
+                const userHasLiked = currentUser
+                  ? likesSnapshot.docs.some(doc => doc.data().userId === currentUser.uid)
+                  : false;
+
+                commentWithReplies.likeCount = likeCount;
+                commentWithReplies.userHasLiked = userHasLiked;
+
+                // Update the state with the new like data
+                setComments(prevComments => 
+                  prevComments.map(comment => 
+                    comment.id === rootDoc.id 
+                      ? { ...comment, likeCount, userHasLiked }
+                      : comment
+                  )
+                );
+              });
+
+              unsubscribeRef.current[`likes_${rootDoc.id}`] = unsubscribeLikes;
+              commentsData.push(commentWithReplies);
+            }
+
+            // Update comments state
             setComments(commentsData);
             setLoading(false);
           } catch (error) {
@@ -234,21 +246,27 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         });
 
         unsubscribeRef.current.comments = unsubscribeComments;
+
       } catch (error) {
-        console.error('Error verifying news document:', error);
-        setError('Gagal memverifikasi dokumen berita: ' + error.message);
+        console.error('Error setting up real-time comments:', error);
+        setError('Gagal mengatur pemantauan real-time: ' + error.message);
         setLoading(false);
-        toast.error('Gagal memverifikasi dokumen berita.');
+        toast.error('Gagal mengatur pemantauan real-time.');
       }
     };
 
-    fetchCommentsData();
+    setupRealTimeComments();
 
+    // Cleanup function
     return () => {
-      Object.values(unsubscribeRef.current).forEach(unsubscribe => unsubscribe && unsubscribe());
+      Object.values(unsubscribeRef.current).forEach(unsubscribe => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      });
       unsubscribeRef.current = {};
     };
-  }, [newsId, currentUser]);
+  }, [newsId, currentUser, fetchUserData]);
 
   useEffect(() => {
     const totalComments = countAllComments(memoizedComments);
@@ -295,7 +313,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
 
   const handleSubmit = async (e, parentId = null, replyToAuthor = null) => {
     e.preventDefault();
-    if (!currentUser || !currentUser.uid) {
+    if (!currentUser?.uid) {
       toast.warn('Silakan masuk untuk menambahkan komentar.');
       return;
     }
@@ -329,7 +347,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         text: sanitizedText,
         author: displayName,
         userId: currentUser.uid,
-        userEmail: currentUser.email && currentUser.email.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)
+        userEmail: currentUser.email?.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)
           ? currentUser.email
           : 'anonymous',
         createdAt: serverTimestamp(),
@@ -341,9 +359,12 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       };
 
       await addDoc(collection(db, 'news', newsId, 'comments'), commentData);
+      
+      // Clear form
       if (!parentId) setNewComment('');
       else setReplyComment('');
       setReplyTo(null);
+      
       toast.success('Komentar berhasil ditambahkan!');
     } catch (error) {
       console.error('Error adding comment:', error, { newsId, parentId, text: sanitizedText });
@@ -399,7 +420,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   };
 
   const handleDelete = async (commentId) => {
-    if (!currentUser || !currentUser.uid) {
+    if (!currentUser?.uid) {
       toast.warn('Silakan masuk untuk menghapus komentar.');
       return;
     }
@@ -421,7 +442,21 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         toast.warn('Anda tidak memiliki izin untuk menghapus komentar ini.');
         return;
       }
+      
+      // Delete the comment
       await deleteDoc(commentRef);
+      
+      // Also delete all replies if this is a parent comment
+      if (!commentDoc.data().parentId) {
+        const repliesQuery = query(
+          collection(db, 'news', newsId, 'comments'),
+          where('parentId', '==', commentId)
+        );
+        const repliesSnapshot = await getDocs(repliesQuery);
+        const deletePromises = repliesSnapshot.docs.map(replyDoc => deleteDoc(replyDoc.ref));
+        await Promise.all(deletePromises);
+      }
+      
       toast.success('Komentar berhasil dihapus!');
     } catch (error) {
       console.error('Error deleting comment:', error, { commentId, newsId });
@@ -453,7 +488,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
 
       await addDoc(collection(db, 'reports'), {
         userId: currentUser.uid,
-        userEmail: currentUser.email && currentUser.email.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)
+        userEmail: currentUser.email?.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)
           ? currentUser.email
           : 'anonymous',
         reason: sanitizedReason,
@@ -478,7 +513,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   };
 
   const handleReport = (commentId) => {
-    if (!currentUser || !currentUser.uid) {
+    if (!currentUser?.uid) {
       toast.warn('Silakan masuk untuk melaporkan komentar.');
       return;
     }
@@ -490,7 +525,7 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   };
 
   const handleLike = async (commentId) => {
-    if (!currentUser || !currentUser.uid) {
+    if (!currentUser?.uid) {
       toast.warn('Silakan masuk untuk menyukai komentar.');
       return;
     }
@@ -504,7 +539,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       const likeDoc = await getDoc(likeRef);
       if (likeDoc.exists()) {
         await deleteDoc(likeRef);
-        toast.success('Like dihapus!');
       } else {
         await setDoc(likeRef, {
           userId: currentUser.uid,
@@ -512,7 +546,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           newsId,
           commentId
         });
-        toast.success('Komentar disukai!');
       }
     } catch (error) {
       console.error('Error toggling like:', error, { commentId, newsId });
@@ -598,23 +631,23 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
     );
   };
 
-if (error) {
-  return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
-      <p className="text-red-600">Gagal memuat data: {error}</p>
-      <button
-        onClick={() => window.location.reload()}
-        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors"
-      >
-        Coba Lagi
-      </button>
-    </div>
-  );
-}
+  if (error) {
+    return (
+      <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
+        <p className="text-red-600">Gagal memuat data: {error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors"
+        >
+          Coba Lagi
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {currentUser && currentUser.uid && (
+      {currentUser?.uid && (
         <form onSubmit={(e) => handleSubmit(e)} className="bg-gray-50 rounded-2xl p-6 border border-gray-200">
           <div className="flex items-center space-x-3 mb-4">
             <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center">
@@ -660,28 +693,28 @@ if (error) {
         </div>
       ) : (
         memoizedComments.map((comment) => (
-  <CommentItem
-    key={comment.id}
-    comment={comment}
-    currentUser={currentUser}
-    currentUserIsAdmin={currentUserIsAdmin}
-    newsId={newsId}
-    handleLike={handleLike}
-    handleReport={handleReport}
-    handleDelete={handleDelete}
-    handleEdit={handleEdit}
-    editingComment={editingComment}
-    setEditingComment={setEditingComment} // Add this prop
-    editText={editText}
-    setEditText={setEditText}
-    handleSaveEdit={handleSaveEdit}
-    setReplyTo={setReplyTo}
-    replyTo={replyTo}
-    replyComment={replyComment}
-    setReplyComment={setReplyComment}
-    handleSubmit={handleSubmit}
-  />
-))
+          <CommentItem
+            key={comment.id}
+            comment={comment}
+            currentUser={currentUser}
+            currentUserIsAdmin={currentUserIsAdmin}
+            newsId={newsId}
+            handleLike={handleLike}
+            handleReport={handleReport}
+            handleDelete={handleDelete}
+            handleEdit={handleEdit}
+            editingComment={editingComment}
+            setEditingComment={setEditingComment}
+            editText={editText}
+            setEditText={setEditText}
+            handleSaveEdit={handleSaveEdit}
+            setReplyTo={setReplyTo}
+            replyTo={replyTo}
+            replyComment={replyComment}
+            setReplyComment={setReplyComment}
+            handleSubmit={handleSubmit}
+          />
+        ))
       )}
 
       <DeleteModal
@@ -728,7 +761,7 @@ const CommentItem = ({
   handleDelete,
   handleEdit,
   editingComment,
-  setEditingComment, // Add this to props
+  setEditingComment,
   editText,
   setEditText,
   handleSaveEdit,
@@ -802,10 +835,10 @@ const CommentItem = ({
               }`}
             >
               <Heart className={`w-5 h-5 ${comment.userHasLiked ? 'fill-red-500' : ''}`} />
-              <span>{comment.likeCount} Like{comment.likeCount !== 1 ? 's' : ''}</span>
+              <span>{comment.likeCount || 0} Like{(comment.likeCount || 0) !== 1 ? 's' : ''}</span>
             </button>
             {/* Only show reply button for root comments (not replies) */}
-            {!comment.parentId && currentUser && currentUser.uid && (
+            {!comment.parentId && currentUser?.uid && (
               <button
                 onClick={() => setReplyTo({ id: comment.id, author: comment.displayName })}
                 className="flex items-center space-x-2 text-gray-500 hover:text-cyan-500 transition-colors duration-200"
@@ -814,7 +847,7 @@ const CommentItem = ({
                 <span>Balas</span>
               </button>
             )}
-            {currentUser && currentUser.uid && comment.userId === currentUser.uid && isEditable && (
+            {currentUser?.uid && comment.userId === currentUser.uid && isEditable && (
               <button
                 onClick={() => handleEdit(comment)}
                 className="flex items-center space-x-2 text-gray-500 hover:text-blue-500 transition-colors duration-200"
@@ -823,7 +856,7 @@ const CommentItem = ({
                 <span>Edit</span>
               </button>
             )}
-            {currentUser && currentUser.uid && (
+            {currentUser?.uid && (
               <button
                 onClick={() => handleReport(comment.id)}
                 className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"
@@ -832,7 +865,7 @@ const CommentItem = ({
                 <span>Lapor</span>
               </button>
             )}
-            {(currentUser && currentUser.uid && (comment.userId === currentUser.uid || currentUserIsAdmin)) && (
+            {(currentUser?.uid && (comment.userId === currentUser.uid || currentUserIsAdmin)) && (
               <button
                 onClick={() => handleDelete(comment.id)}
                 className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"
@@ -911,10 +944,10 @@ const CommentItem = ({
                           }`}
                         >
                           <Heart className={`w-5 h-5 ${reply.userHasLiked ? 'fill-red-500' : ''}`} />
-                          <span>{reply.likeCount} Like{reply.likeCount !== 1 ? 's' : ''}</span>
+                          <span>{reply.likeCount || 0} Like{(reply.likeCount || 0) !== 1 ? 's' : ''}</span>
                         </button>
                         {/* NO REPLY BUTTON FOR REPLIES - keeps it flat */}
-                        {currentUser && currentUser.uid && (
+                        {currentUser?.uid && (
                           <button
                             onClick={() => handleReport(reply.id)}
                             className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"
@@ -923,7 +956,7 @@ const CommentItem = ({
                             <span>Lapor</span>
                           </button>
                         )}
-                        {(currentUser && currentUser.uid && (reply.userId === currentUser.uid || currentUserIsAdmin)) && (
+                        {(currentUser?.uid && (reply.userId === currentUser.uid || currentUserIsAdmin)) && (
                           <button
                             onClick={() => handleDelete(reply.id)}
                             className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"

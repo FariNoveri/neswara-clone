@@ -22,28 +22,39 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
     return email && email.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/);
   };
 
+  const resetForm = () => {
+    setSelectedReason('');
+    setCustomReason('');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validation checks
     if (!currentUser || !currentUser.uid || !currentUser.getIdToken) {
       toast.warn('Silakan masuk untuk melaporkan berita.');
       console.error('Invalid user object:', { uid: currentUser?.uid, hasGetIdToken: !!currentUser?.getIdToken });
       return;
     }
+    
     if (!newsId) {
       toast.error('ID berita tidak valid.');
       console.error('Invalid newsId:', newsId);
       return;
     }
+    
     if (!selectedReason) {
       toast.error('Harap pilih alasan pelaporan.');
       return;
     }
+    
     if (selectedReason === 'other' && !customReason.trim()) {
       toast.error('Harap masukkan alasan lainnya.');
       return;
     }
 
     setIsSubmitting(true);
+    
     try {
       // Force refresh the user's ID token
       await currentUser.getIdToken(true);
@@ -51,6 +62,19 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
       // Validate userEmail
       const userEmail = isValidEmail(currentUser.email) ? currentUser.email : 'anonymous';
       
+      // Check for existing report by the same user for this news article
+      const q = query(
+        collection(db, 'reports'),
+        where('newsId', '==', newsId),
+        where('userId', '==', currentUser.uid)
+      );
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        toast.warn('Anda sudah melaporkan berita ini.');
+        return; // Exit early, but modal will still close in finally block
+      }
+
       // Log the report data for debugging
       const reportData = {
         newsId,
@@ -63,19 +87,6 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
         status: 'pending',
       };
       console.log('Submitting report with data:', reportData);
-
-      // Check for existing report by the same user for this news article
-      const q = query(
-        collection(db, 'reports'),
-        where('newsId', '==', newsId),
-        where('userId', '==', currentUser.uid)
-      );
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        toast.warn('Anda sudah melaporkan berita ini.');
-        setIsSubmitting(false);
-        return;
-      }
 
       // Submit new report
       await addDoc(collection(db, 'reports'), reportData);
@@ -94,9 +105,7 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
       });
       
       toast.success('Laporan berhasil dikirim!');
-      setSelectedReason('');
-      setCustomReason('');
-      onClose();
+      
     } catch (error) {
       console.error('Error submitting report:', error, {
         code: error.code,
@@ -104,15 +113,29 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
         details: error.details,
       });
       toast.error('Gagal mengirim laporan: ' + error.message);
-      await addDoc(collection(db, 'logs'), {
-        action: 'REPORT_NEWS_ERROR',
-        userEmail: isValidEmail(currentUser.email) ? currentUser.email : 'anonymous',
-        details: { newsId, title: newsTitle, error: error.message },
-        timestamp: serverTimestamp(),
-      });
+      
+      // Log error
+      try {
+        await addDoc(collection(db, 'logs'), {
+          action: 'REPORT_NEWS_ERROR',
+          userEmail: isValidEmail(currentUser?.email) ? currentUser.email : 'anonymous',
+          details: { newsId, title: newsTitle, error: error.message },
+          timestamp: serverTimestamp(),
+        });
+      } catch (logError) {
+        console.error('Failed to log error:', logError);
+      }
     } finally {
       setIsSubmitting(false);
+      // Always reset form and close modal regardless of success or failure
+      resetForm();
+      onClose();
     }
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   return (
@@ -138,7 +161,7 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
                 <h2 className="text-xl font-bold text-slate-800">Laporkan Berita</h2>
               </div>
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 transition-all"
               >
                 <X className="w-5 h-5" />
@@ -157,6 +180,7 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
                         checked={selectedReason === reason.value}
                         onChange={(e) => setSelectedReason(e.target.value)}
                         className="h-4 w-4 text-cyan-600 focus:ring-cyan-500"
+                        disabled={isSubmitting}
                       />
                       <span className="text-sm text-slate-700">{reason.label}</span>
                     </label>
@@ -175,14 +199,18 @@ const ReportModal = ({ isOpen, onClose, newsId, currentUser, newsTitle }) => {
                     className="mt-1 w-full p-2 border border-slate-300 rounded-lg focus:ring-cyan-500 focus:border-cyan-500 text-sm"
                     rows="4"
                     placeholder="Masukkan alasan lainnya..."
+                    disabled={isSubmitting}
                   />
                 </div>
               )}
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-all"
+                  onClick={handleClose}
+                  disabled={isSubmitting}
+                  className={`px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-all ${
+                    isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
                   Batal
                 </button>

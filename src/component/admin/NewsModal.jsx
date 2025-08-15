@@ -1,11 +1,12 @@
-import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, Camera, Eye, EyeOff, RefreshCw } from 'lucide-react';
-import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import { X, Save, Upload, Image, FileText, User, Tag, Globe, Edit3, Camera, Eye, EyeOff, RefreshCw, Shield, Link } from 'lucide-react';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, getDoc, orderBy, onSnapshot } from "firebase/firestore";
 import { db, auth } from "../../firebaseconfig";
 import { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, getIdTokenResult } from "firebase/auth";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import ImageExtension from '@tiptap/extension-image';
+import LinkExtension from '@tiptap/extension-link'; // Import the Link extension
 import 'react-image-crop/dist/ReactCrop.css';
 import ReactCrop from 'react-image-crop';
 
@@ -35,20 +36,26 @@ const NewsModal = ({
   const [cropKey, setCropKey] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [originalAuthorData, setOriginalAuthorData] = useState(null);
+  const [relatedNews, setRelatedNews] = useState([]);
+  const [isAuthorOverridden, setIsAuthorOverridden] = useState(false);
+  const [newsSearchModalOpen, setNewsSearchModalOpen] = useState(false);
+  const [newsSearchQuery, setNewsSearchQuery] = useState('');
+  const [newsSearchResults, setNewsSearchResults] = useState([]);
+  const [allNewsArticles, setAllNewsArticles] = useState([]); // State untuk menyimpan semua artikel
   const imgRef = useRef(null);
   const canvasRef = useRef(null);
   const [crop, setCrop] = useState({ unit: '%', x: 0, y: 0, width: 100, height: 100 * (9 / 16), aspect: 16 / 9 });
   const [completedCrop, setCompletedCrop] = useState(null);
   const [zoom, setZoom] = useState(1);
-  const loggedLegacyArticles = useRef(new Set()); // Track logged legacy articles
+  const loggedLegacyArticles = useRef(new Set());
 
   const TITLE_MAX_LENGTH = 200;
 
-  // Define isOriginalAuthor before any hooks
   const isOriginalAuthor = !editingNews || 
     (editingNews && (
       (editingNews.authorId && editingNews.authorId === currentUser?.uid) || 
-      (!editingNews.authorId && isAdmin)
+      (!editingNews.authorId && isAdmin) || 
+      isAuthorOverridden
     ));
 
   const editor = useEditor({
@@ -58,6 +65,12 @@ const NewsModal = ({
         inline: true,
         allowBase64: true,
       }),
+      LinkExtension.configure({
+        openOnClick: false,
+        HTMLAttributes: {
+          class: 'text-blue-600 underline hover:text-blue-800',
+        },
+      }),
     ],
     content: formData.konten,
     onUpdate: ({ editor }) => {
@@ -65,7 +78,63 @@ const NewsModal = ({
     },
   });
 
-  // Monitor auth state and admin status
+  // Fetch semua artikel berita untuk pencarian dan tautan
+  useEffect(() => {
+    const fetchAllNews = async () => {
+      try {
+        const q = query(collection(db, "news"), orderBy("createdAt", "desc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          const newsData = [];
+          snapshot.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const slug = data.slug || createSlug(data.judul || `berita-${docSnap.id}`);
+            
+            newsData.push({
+              id: docSnap.id,
+              judul: data.judul || 'Tanpa Judul',
+              slug: slug,
+              ringkasan: data.ringkasan || '',
+              kategori: data.kategori || '',
+              createdAt: data.createdAt,
+              ...data
+            });
+          });
+          
+          setAllNewsArticles(newsData);
+          console.log('[NewsModal] Loaded news articles:', newsData.length);
+        });
+        
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('[NewsModal] Error fetching all news:', error);
+      }
+    };
+
+    if (showModal) {
+      fetchAllNews();
+    }
+  }, [showModal]);
+
+  useEffect(() => {
+    const fetchRelatedNews = async () => {
+      if (formData.kategori && allNewsArticles.length > 0) {
+        try {
+          const related = allNewsArticles
+            .filter(article => 
+              article.kategori === formData.kategori && 
+              article.id !== editingNews?.id
+            )
+            .slice(0, 3);
+          
+          setRelatedNews(related);
+        } catch (error) {
+          console.error('[NewsModal] Error fetching related news:', error);
+        }
+      }
+    };
+    fetchRelatedNews();
+  }, [formData.kategori, editingNews, allNewsArticles]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -73,8 +142,6 @@ const NewsModal = ({
           const tokenResult = await getIdTokenResult(user, true);
           setCurrentUser({ ...user, displayName: user.displayName, email: user.email });
           setIsAdmin(tokenResult.claims.isAdmin === true);
-          console.log('[NewsModal] Admin status:', tokenResult.claims.isAdmin);
-          console.log('[NewsModal] User:', { uid: user.uid, displayName: user.displayName, email: user.email });
         } catch (error) {
           console.error('[NewsModal] Error checking admin status:', error);
           setErrorMessage('Gagal memverifikasi status admin.');
@@ -88,12 +155,10 @@ const NewsModal = ({
     return () => unsubscribe();
   }, []);
 
-  // Fetch original author data from Firestore
   useEffect(() => {
     const fetchAuthorData = async () => {
       if (editingNews && editingNews.authorId) {
         try {
-          // Try fetching from users collection
           const userDoc = await getDoc(doc(db, "users", editingNews.authorId));
           if (userDoc.exists()) {
             const userData = userDoc.data();
@@ -102,19 +167,12 @@ const NewsModal = ({
               email: userData.email || 'Tidak tersedia',
               photoURL: userData.photoURL || null,
             });
-            console.log('[NewsModal] Original author data fetched:', {
-              uid: editingNews.authorId,
-              displayName: userData.displayName,
-              email: userData.email,
-            });
           } else {
-            // Fallback to news document data or defaults
             setOriginalAuthorData({
               displayName: editingNews.author || 'Tanpa Nama',
               email: editingNews.authorEmail || 'Tidak tersedia',
               photoURL: editingNews.authorPhotoURL || null,
             });
-            console.warn('[NewsModal] No user document found for authorId:', editingNews.authorId);
           }
         } catch (error) {
           console.error('[NewsModal] Error fetching original author data:', error);
@@ -125,29 +183,24 @@ const NewsModal = ({
           });
         }
       } else if (editingNews && !editingNews.authorId) {
-        // Legacy article
         setOriginalAuthorData({
           displayName: editingNews.author || 'Tanpa Nama',
           email: editingNews.authorEmail || 'Tidak tersedia',
           photoURL: editingNews.authorPhotoURL || null,
         });
       } else {
-        // New article
         setOriginalAuthorData(null);
       }
     };
     fetchAuthorData();
   }, [editingNews]);
 
-  // Manual refresh for user data
   const refreshUserData = async () => {
     if (auth.currentUser) {
       try {
         await auth.currentUser.getIdToken(true);
         const user = auth.currentUser;
         setCurrentUser({ ...user, displayName: user.displayName, email: user.email });
-        console.log('[NewsModal] User data refreshed:', { uid: user.uid, displayName: user.displayName, email: user.email });
-        // Refresh original author data if editing a modern article
         if (editingNews && editingNews.authorId) {
           const userDoc = await getDoc(doc(db, "users", editingNews.authorId));
           if (userDoc.exists()) {
@@ -172,7 +225,6 @@ const NewsModal = ({
     }
   };
 
-  // Initialize formData.author and UI state
   useEffect(() => {
     if (showModal && editingNews) {
       setIsAnimating(true);
@@ -185,12 +237,13 @@ const NewsModal = ({
       if (editor) {
         editor.commands.setContent(formData.konten);
       }
-      // Ensure formData.author is set to editingNews.author
       setFormData(prev => ({ ...prev, author: editingNews.author || '' }));
       setUseUserName(editingNews.author === currentUser?.displayName);
+      setIsAuthorOverridden(false);
     } else if (showModal) {
       setIsAnimating(true);
       setUseUserName(false);
+      setIsAuthorOverridden(false);
     } else {
       setIsAnimating(false);
       setImagePreview('');
@@ -204,13 +257,16 @@ const NewsModal = ({
       setImageError('');
       setErrorMessage('');
       setCropKey(prev => prev + 1);
+      setIsAuthorOverridden(false);
+      setNewsSearchModalOpen(false);
+      setNewsSearchQuery('');
+      setNewsSearchResults([]);
       if (editor) {
         editor.commands.setContent('');
       }
     }
   }, [showModal, editingNews, formData.gambar, formData.konten, editor, currentUser, setFormData]);
 
-  // Update hideProfilePicture in formData
   useEffect(() => {
     if (!editingNews || isOriginalAuthor) {
       setFormData(prev => ({
@@ -220,7 +276,6 @@ const NewsModal = ({
     }
   }, [showProfilePicture, setFormData, editingNews, isOriginalAuthor]);
 
-  // Validate image URL
   useEffect(() => {
     if (formData.gambar && formData.gambar.startsWith('https://')) {
       const cacheBustedUrl = `${formData.gambar}?t=${Date.now()}`;
@@ -250,7 +305,6 @@ const NewsModal = ({
     }
   }, [formData.gambar, setFormData]);
 
-  // Update cropped image canvas
   useEffect(() => {
     if (!completedCrop || !imgRef.current || !canvasRef.current) return;
 
@@ -282,17 +336,15 @@ const NewsModal = ({
     );
   }, [completedCrop]);
 
-  // Manage body overflow for crop modal
   useEffect(() => {
-    if (cropModalOpen) {
+    if (cropModalOpen || newsSearchModalOpen) {
       document.body.classList.add('overflow-hidden');
     } else {
       document.body.classList.remove('overflow-hidden');
     }
     return () => document.body.classList.remove('overflow-hidden');
-  }, [cropModalOpen]);
+  }, [cropModalOpen, newsSearchModalOpen]);
 
-  // Log warning for legacy articles
   useEffect(() => {
     if (editingNews && !editingNews.authorId && !loggedLegacyArticles.current.has(editingNews.id)) {
       console.warn(
@@ -573,6 +625,81 @@ const NewsModal = ({
     }
   };
 
+  const handleOverrideAuthor = async () => {
+    if (isAdmin && editingNews && editingNews.authorId) {
+      try {
+        await logActivity('AUTHOR_OVERRIDE', {
+          newsId: editingNews.id,
+          originalAuthorId: editingNews.authorId,
+          originalAuthor: editingNews.author,
+          newAuthorId: currentUser.uid,
+          newAuthor: currentUser.displayName,
+          userId: currentUser.uid
+        });
+        setIsAuthorOverridden(true);
+        setFormData(prev => ({
+          ...prev,
+          author: currentUser.displayName,
+          authorId: currentUser.uid,
+          authorEmail: currentUser.email || 'Tidak tersedia',
+          authorPhotoURL: currentUser.photoURL || ''
+        }));
+        setErrorMessage('');
+      } catch (error) {
+        console.error('[NewsModal] Error overriding author:', error);
+        setErrorMessage('Gagal mengambil alih kepemilikan artikel.');
+      }
+    }
+  };
+
+  const handleSearchNews = async () => {
+    if (!newsSearchQuery.trim()) {
+      setNewsSearchResults([]);
+      return;
+    }
+    
+    try {
+      // Filter dari allNewsArticles yang sudah dimuat
+      const results = allNewsArticles
+        .filter(article => 
+          article.judul.toLowerCase().includes(newsSearchQuery.toLowerCase()) &&
+          article.id !== editingNews?.id
+        )
+        .slice(0, 5);
+      
+      setNewsSearchResults(results);
+      console.log('[NewsModal] Search results:', results);
+    } catch (error) {
+      console.error('[NewsModal] Error searching news:', error);
+      setErrorMessage('Gagal mencari berita.');
+    }
+  };
+
+  const handleInsertNewsLink = (news) => {
+    if (editor && news.slug) {
+      const url = `/berita/${news.slug}`;
+      // Use the correct TipTap Link extension method
+      editor.chain()
+        .focus()
+        .extendMarkRange('link')
+        .setLink({ href: url })
+        .insertContent(news.judul)
+        .run();
+      setNewsSearchModalOpen(false);
+      setNewsSearchQuery('');
+      setNewsSearchResults([]);
+    }
+  };
+
+  // Update search results ketika query berubah
+  useEffect(() => {
+    if (newsSearchModalOpen && newsSearchQuery.trim()) {
+      handleSearchNews();
+    } else if (!newsSearchQuery.trim()) {
+      setNewsSearchResults([]);
+    }
+  }, [newsSearchQuery, newsSearchModalOpen, allNewsArticles]);
+
   const handleSubmitWithLog = async () => {
     try {
       if (!isAdmin) {
@@ -585,9 +712,9 @@ const NewsModal = ({
         slug: newSlug,
         updatedAt: new Date().toISOString(),
         createdAt: editingNews ? formData.createdAt : new Date().toISOString(),
-        authorId: editingNews ? (editingNews.authorId || currentUser.uid) : currentUser.uid,
-        authorEmail: editingNews ? (editingNews.authorEmail || currentUser.email || 'Tidak tersedia') : currentUser.email || 'Tidak tersedia',
-        authorPhotoURL: editingNews ? (editingNews.authorPhotoURL || currentUser.photoURL || '') : currentUser.photoURL || ''
+        authorId: isAuthorOverridden ? currentUser.uid : (editingNews ? (editingNews.authorId || currentUser.uid) : currentUser.uid),
+        authorEmail: isAuthorOverridden ? (currentUser.email || 'Tidak tersedia') : (editingNews ? (editingNews.authorEmail || currentUser.email || 'Tidak tersedia') : currentUser.email || 'Tidak tersedia'),
+        authorPhotoURL: isAuthorOverridden ? (currentUser.photoURL || '') : (editingNews ? (editingNews.authorPhotoURL || currentUser.photoURL || '') : currentUser.photoURL || '')
       };
 
       if (!updatedFormData.judul || updatedFormData.judul.length > TITLE_MAX_LENGTH) {
@@ -662,6 +789,10 @@ const NewsModal = ({
       setImageError('');
       setErrorMessage('');
       setCropKey(prev => prev + 1);
+      setIsAuthorOverridden(false);
+      setNewsSearchModalOpen(false);
+      setNewsSearchQuery('');
+      setNewsSearchResults([]);
       if (editor) {
         editor.commands.setContent('');
       }
@@ -686,28 +817,28 @@ const NewsModal = ({
     <div className="border-b border-gray-200 bg-gray-50 p-2 rounded-t-xl">
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
-        className={`px-2 py-1 ${editor?.isActive('bold') ? 'bg-purple-100' : ''}`}
+        className={`px-2 py-1 ${editor?.isActive('bold') ? 'bg-purple-100 text-black' : 'text-gray-700'}`}
         title="Bold"
       >
         <strong>B</strong>
       </button>
       <button
         onClick={() => editor.chain().focus().toggleItalic().run()}
-        className={`px-2 py-1 ${editor?.isActive('italic') ? 'bg-purple-100' : ''}`}
+        className={`px-2 py-1 ${editor?.isActive('italic') ? 'bg-purple-100 text-black' : 'text-gray-700'}`}
         title="Italic"
       >
         <i>I</i>
       </button>
       <button
         onClick={() => editor.chain().focus().toggleBulletList().run()}
-        className={`px-2 py-1 ${editor?.isActive('bulletList') ? 'bg-purple-100' : ''}`}
+        className={`px-2 py-1 ${editor?.isActive('bulletList') ? 'bg-purple-100 text-black' : 'text-gray-700'}`}
         title="Bullet List"
       >
         •
       </button>
       <button
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        className={`px-2 py-1 ${editor?.isActive('orderedList') ? 'bg-purple-100' : ''}`}
+        className={`px-2 py-1 ${editor?.isActive('orderedList') ? 'bg-purple-100 text-black' : 'text-gray-700'}`}
         title="Numbered List"
       >
         1.
@@ -721,14 +852,21 @@ const NewsModal = ({
             setErrorMessage('Masukkan URL gambar HTTPS yang valid.');
           }
         }}
-        className="px-2 py-1"
+        className="px-2 py-1 text-gray-700"
         title="Insert Image"
       >
         <Image className="h-4 w-4 inline" />
       </button>
       <button
+        onClick={() => setNewsSearchModalOpen(true)}
+        className="px-2 py-1 text-gray-700"
+        title="Insert News Link"
+      >
+        <Link className="h-4 w-4 inline" />
+      </button>
+      <button
         onClick={() => editor.chain().focus().undo().run()}
-        className="px-2 py-1"
+        className="px-2 py-1 text-gray-700"
         title="Undo"
       >
         ↺
@@ -758,32 +896,117 @@ const NewsModal = ({
     { id: 3, title: "Konten", icon: Globe }
   ];
 
-  // Conditional rendering
   if (!showModal || !currentUser) {
     return null;
   }
 
   if (!isAdmin) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
-        <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Akses Ditolak</h3>
-          <p className="text-sm text-gray-600 mb-6">
-            {errorMessage || 'Hanya admin yang dapat membuat atau mengedit berita.'}
-          </p>
-          <button
-            onClick={() => setShowModal(false)}
-            className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200"
-          >
-            Tutup
-          </button>
+      <>
+        <style jsx>{`
+          .tiptap-editor {
+            color: #1f2937; /* gray-800 */
+          }
+          .tiptap-editor p {
+            margin-bottom: 1rem;
+          }
+          .tiptap-editor strong {
+            font-weight: 700;
+            color: #111827; /* gray-900 */
+          }
+          .tiptap-editor em {
+            font-style: italic;
+          }
+          .tiptap-editor ul,
+          .tiptap-editor ol {
+            margin: 1rem 0;
+            padding-left: 2rem;
+          }
+          .tiptap-editor ul {
+            list-style-type: disc;
+          }
+          .tiptap-editor ol {
+            list-style-type: decimal;
+          }
+          .tiptap-editor li {
+            margin-bottom: 0.5rem;
+          }
+          .tiptap-editor img {
+            max-width: 100%;
+            height: auto;
+            margin: 1rem 0;
+            border-radius: 0.5rem;
+          }
+          .tiptap-editor a {
+            color: #2563eb; /* blue-600 */
+            text-decoration: underline;
+          }
+          .tiptap-editor a:hover {
+            color: #1d4ed8; /* blue-700 */
+          }
+        `}</style>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Akses Ditolak</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              {errorMessage || 'Hanya admin yang dapat membuat atau mengedit berita.'}
+            </p>
+            <button
+              onClick={() => setShowModal(false)}
+              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200"
+            >
+              Tutup
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      <style jsx>{`
+        .tiptap-editor {
+          color: #1f2937; /* gray-800 */
+        }
+        .tiptap-editor p {
+          margin-bottom: 1rem;
+        }
+        .tiptap-editor strong {
+          font-weight: 700;
+          color: #111827; /* gray-900 */
+        }
+        .tiptap-editor em {
+          font-style: italic;
+        }
+        .tiptap-editor ul,
+        .tiptap-editor ol {
+          margin: 1rem 0;
+          padding-left: 2rem;
+        }
+        .tiptap-editor ul {
+          list-style-type: disc;
+        }
+        .tiptap-editor ol {
+          list-style-type: decimal;
+        }
+        .tiptap-editor li {
+          margin-bottom: 0.5rem;
+        }
+        .tiptap-editor img {
+          max-width: 100%;
+          height: auto;
+          margin: 1rem 0;
+          border-radius: 0.5rem;
+        }
+        .tiptap-editor a {
+          color: #2563eb; /* blue-600 */
+          text-decoration: underline;
+        }
+        .tiptap-editor a:hover {
+          color: #1d4ed8; /* blue-700 */
+        }
+      `}</style>
       <div className={`fixed inset-0 z-50 overflow-y-auto transition-all duration-300 ${isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'}`}>
         <div className="flex min-h-full items-center justify-center p-4">
           <div className={`relative w-full max-w-4xl transform transition-all duration-300 ${isAnimating ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-4'}`}>
@@ -944,6 +1167,16 @@ const NewsModal = ({
                             >
                               <RefreshCw className="h-4 w-4" />
                             </button>
+                            {isAdmin && editingNews?.authorId && !isAuthorOverridden && (
+                              <button
+                                type="button"
+                                onClick={handleOverrideAuthor}
+                                className="p-1 rounded-full bg-red-100 text-red-600 hover:bg-red-200"
+                                title="Ambil alih kepemilikan artikel"
+                              >
+                                <Shield className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -1083,6 +1316,11 @@ const NewsModal = ({
                               : 'Sebagai admin, Anda dapat mengedit nama penulis untuk artikel legacy.'}
                           </span>
                         )}
+                        {isAuthorOverridden && (
+                          <span className="block mt-1 text-green-600 font-semibold">
+                            Kepemilikan artikel telah diambil alih.
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1212,9 +1450,38 @@ const NewsModal = ({
                   </label>
                   <div className="border-2 border-gray-200 rounded-xl overflow-hidden">
                     <Toolbar />
-                    <EditorContent className="p-4 min-h-[400px] text-gray-900" editor={editor} />
+                    <EditorContent className="p-4 min-h-[400px] text-gray-900 tiptap-editor" editor={editor} />
                   </div>
                 </div>
+                {relatedNews.length > 0 && (
+                  <div className="mt-6 group">
+                    <label className="flex items-center text-sm font-semibold text-gray-800 mb-3">
+                      <Globe className="h-4 w-4 mr-2 text-blue-500" />
+                      Berita Terkait
+                    </label>
+                    <div className="grid grid-cols-1 gap-4">
+                      {relatedNews.map((news) => (
+                        <a
+                          key={news.id}
+                          href={`/berita/${news.slug}`}
+                          className="flex items-center p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition"
+                        >
+                          {news.gambar && (
+                            <img
+                              src={news.gambar}
+                              alt={news.gambarDeskripsi || news.judul}
+                              className="w-16 h-16 object-cover rounded-lg mr-4"
+                            />
+                          )}
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-800">{news.judul}</h4>
+                            <p className="text-xs text-gray-600">{news.ringkasan}</p>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-200">
                   <button
                     type="button"
@@ -1336,6 +1603,57 @@ const NewsModal = ({
                 {uploading ? 'Uploading...' : 'Konfirmasi'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {newsSearchModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Cari Berita untuk Ditautkan</h3>
+              <button
+                onClick={() => {
+                  setNewsSearchModalOpen(false);
+                  setNewsSearchQuery('');
+                  setNewsSearchResults([]);
+                }}
+                className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
+              >
+                <X className="h-5 w-5 text-gray-600" />
+              </button>
+            </div>
+            <div className="mb-4">
+              <input
+                type="text"
+                value={newsSearchQuery}
+                onChange={(e) => setNewsSearchQuery(e.target.value)}
+                className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-900 placeholder-gray-500"
+                placeholder="Cari judul berita..."
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {newsSearchResults.length > 0 ? (
+                newsSearchResults.map((news) => (
+                  <button
+                    key={news.id}
+                    onClick={() => handleInsertNewsLink(news)}
+                    className="w-full text-left p-3 bg-gray-50 rounded-lg hover:bg-gray-100 mb-2"
+                  >
+                    <span className="text-sm font-medium text-gray-800">{news.judul}</span>
+                    <p className="text-xs text-gray-600">{news.ringkasan}</p>
+                  </button>
+                ))
+              ) : newsSearchQuery.trim() ? (
+                <p className="text-sm text-gray-600">Tidak ada berita ditemukan untuk "{newsSearchQuery}".</p>
+              ) : (
+                <p className="text-sm text-gray-600">Mulai mengetik untuk mencari berita...</p>
+              )}
+            </div>
+            {allNewsArticles.length > 0 && (
+              <div className="mt-4 text-xs text-gray-500 text-center">
+                Total {allNewsArticles.length} artikel tersedia
+              </div>
+            )}
           </div>
         </div>
       )}
