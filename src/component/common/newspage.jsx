@@ -4,9 +4,8 @@ import { db } from "../../firebaseconfig";
 import { collection, onSnapshot, query, orderBy, limit, getDocs, collectionGroup, doc, getDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
-import { useAuth } from "../auth/useAuth"; // Impor useAuth untuk memeriksa autentikasi
+import { useAuth } from "../auth/useAuth";
 
-// Utility function to create a slug from a title
 const createSlug = (title) => {
   if (!title) return "";
   return title
@@ -17,8 +16,6 @@ const createSlug = (title) => {
     .trim("-");
 };
 
-// Function to count comments for a specific news item
-// Fixed version of countCommentsForNews function with proper error handling
 const countCommentsForNews = async (newsId, user) => {
   if (!newsId) {
     console.warn(`News ID is invalid at ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`);
@@ -26,7 +23,6 @@ const countCommentsForNews = async (newsId, user) => {
   }
 
   try {
-    // First, check if the news document exists
     const newsRef = doc(db, "news", newsId);
     const newsDoc = await getDoc(newsRef);
     if (!newsDoc.exists()) {
@@ -34,24 +30,19 @@ const countCommentsForNews = async (newsId, user) => {
       return 0;
     }
 
-    // Try to get comments count from the news document itself (if you store it there)
     const newsData = newsDoc.data();
     if (newsData.comments && typeof newsData.comments === 'number') {
-      return newsData.comments;
+      return newsData.comments; // Use stored comment count if available
     }
 
-    // If not available in the news doc, try to count from subcollection
-    // But first check if user is authenticated for better error handling
     if (!user || !user.uid) {
-      console.warn(`User not authenticated, returning 0 comments for news ${newsId}`);
-      return 0;
+      return 0; // Return 0 for unauthenticated users to avoid permission issues
     }
 
     const commentsRef = collection(db, `news/${newsId}/comments`);
     const snapshot = await getDocs(commentsRef);
     let total = snapshot.size;
 
-    // Count replies for each comment
     const replyPromises = snapshot.docs.map(async (docSnapshot) => {
       try {
         const repliesRef = collection(db, `news/${newsId}/comments/${docSnapshot.id}/replies`);
@@ -65,45 +56,30 @@ const countCommentsForNews = async (newsId, user) => {
 
     const repliesCounts = await Promise.all(replyPromises);
     total += repliesCounts.reduce((sum, count) => sum + count, 0);
-
     return total;
   } catch (error) {
-    console.error(`Error counting comments for news ${newsId} at ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}:`, error);
-    
-    // More specific error handling
+    console.error(`Error counting comments for news ${newsId}:`, error);
     if (error.code === "permission-denied") {
-      console.warn(`Permission denied for comments in news ${newsId}. This might be due to Firestore rules or authentication issues.`);
-      
-      // Don't show toast for every permission error as it can be annoying
-      // Only show it once per session using a Set to track shown errors
-      if (!window.shownPermissionErrors) {
-        window.shownPermissionErrors = new Set();
-      }
-      
-      if (!window.shownPermissionErrors.has(newsId)) {
-        toast.warn(`Tidak dapat mengakses komentar untuk berita ini. Coba refresh halaman.`, {
+      if (!window.shownPermissionErrors?.has(newsId)) {
+        window.shownPermissionErrors = window.shownPermissionErrors || new Set();
+        toast.warn(`Tidak dapat mengakses komentar. Silakan login untuk melihat komentar.`, {
           position: "top-center",
           autoClose: 5000,
           toastId: `comment-permission-error-${newsId}`,
         });
         window.shownPermissionErrors.add(newsId);
       }
-    } else if (error.code === "unavailable") {
-      toast.error("Layanan sementara tidak tersedia. Coba lagi nanti.", {
+    } else {
+      toast.error("Gagal memuat jumlah komentar.", {
         position: "top-center",
         autoClose: 3000,
-        toastId: `service-unavailable-${newsId}`,
+        toastId: `comment-error-${newsId}`,
       });
-    } else {
-      // For other errors, just log them without showing toast to avoid spam
-      console.error("Unexpected error while counting comments:", error);
     }
-    
     return 0;
   }
 };
 
-// Debug function to check all comments via collectionGroup (manual trigger)
 const debugComments = async () => {
   try {
     const commentsQuery = query(collectionGroup(db, "comments"));
@@ -123,16 +99,16 @@ const debugComments = async () => {
     });
 
     await Promise.all(replyPromises);
-    console.log("Debug comments result at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", commentsByNews);
+    console.log("Debug comments result:", commentsByNews);
     return commentsByNews;
   } catch (error) {
-    console.error("Error debugging comments at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", error);
+    console.error("Error debugging comments:", error);
     return {};
   }
 };
 
 const NewsPage = () => {
-  const { currentUser, loading: authLoading } = useAuth();
+  const { currentUser } = useAuth();
   const [newsData, setNewsData] = useState([]);
   const [popularNews, setPopularNews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -142,12 +118,6 @@ const NewsPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (authLoading || !currentUser) {
-      setLoading(true);
-      console.log("Waiting for authentication at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }));
-      return; // Tunggu autentikasi selesai
-    }
-
     setLoading(true);
     setError(null);
 
@@ -187,7 +157,7 @@ const NewsPage = () => {
           setNewsData(posts);
           setLoading(false);
         } catch (err) {
-          console.error("Error fetching posts at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
+          console.error("Error fetching posts:", err);
           setError("Gagal memuat berita");
           setLoading(false);
           toast.error("Gagal memuat berita.", {
@@ -198,7 +168,7 @@ const NewsPage = () => {
         }
       },
       (err) => {
-        console.error("Error in posts snapshot at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
+        console.error("Error in posts snapshot:", err);
         setError("Gagal memuat pembaruan berita");
         setLoading(false);
         toast.error("Gagal memuat pembaruan berita.", {
@@ -228,7 +198,7 @@ const NewsPage = () => {
           const popular = await Promise.all(popularPromises);
           setPopularNews(popular);
         } catch (err) {
-          console.error("Error fetching popular news at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
+          console.error("Error fetching popular news:", err);
           toast.error("Gagal memuat berita populer.", {
             position: "top-center",
             autoClose: 3000,
@@ -237,7 +207,7 @@ const NewsPage = () => {
         }
       },
       (err) => {
-        console.error("Error in popular news snapshot at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err);
+        console.error("Error in popular news snapshot:", err);
         toast.error("Gagal memuat pembaruan berita populer.", {
           position: "top-center",
           autoClose: 3000,
@@ -250,7 +220,7 @@ const NewsPage = () => {
       unsubscribePosts();
       unsubscribePopular();
     };
-  }, [authLoading, currentUser]);
+  }, []); // No dependencies to ensure immediate fetch
 
   const formatTimeAgo = (date) => {
     const now = new Date();
@@ -304,7 +274,7 @@ const NewsPage = () => {
   };
 
   const handleDebugComments = () => {
-    debugComments().catch((err) => console.error("Failed to debug comments at", new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }), ":", err));
+    debugComments().catch((err) => console.error("Failed to debug comments:", err));
   };
 
   if (loading) {
