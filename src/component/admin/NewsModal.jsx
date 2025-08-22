@@ -6,7 +6,7 @@ import { onAuthStateChanged, getIdTokenResult } from "firebase/auth";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import ImageExtension from '@tiptap/extension-image';
-import LinkExtension from '@tiptap/extension-link'; // Import the Link extension
+import LinkExtension from '@tiptap/extension-link';
 import 'react-image-crop/dist/ReactCrop.css';
 import ReactCrop from 'react-image-crop';
 
@@ -41,7 +41,7 @@ const NewsModal = ({
   const [newsSearchModalOpen, setNewsSearchModalOpen] = useState(false);
   const [newsSearchQuery, setNewsSearchQuery] = useState('');
   const [newsSearchResults, setNewsSearchResults] = useState([]);
-  const [allNewsArticles, setAllNewsArticles] = useState([]); // State untuk menyimpan semua artikel
+  const [allNewsArticles, setAllNewsArticles] = useState([]);
   const imgRef = useRef(null);
   const canvasRef = useRef(null);
   const [crop, setCrop] = useState({ unit: '%', x: 0, y: 0, width: 100, height: 100 * (9 / 16), aspect: 16 / 9 });
@@ -70,15 +70,24 @@ const NewsModal = ({
         HTMLAttributes: {
           class: 'text-blue-600 underline hover:text-blue-800',
         },
+        protocols: ['https'],
+        validate: href => /^https?:\/\//.test(href),
       }),
     ],
-    content: formData.konten,
+    content: formData.konten || '<p></p>',
     onUpdate: ({ editor }) => {
-      setFormData(prev => ({ ...prev, konten: editor.getHTML() }));
+      const html = editor.getHTML();
+      setFormData(prev => ({ ...prev, konten: html }));
     },
+    immediatelyRender: false,
   });
 
-  // Fetch semua artikel berita untuk pencarian dan tautan
+  useEffect(() => {
+    if (editor && formData.konten && editor.getHTML() !== formData.konten) {
+      editor.commands.setContent(formData.konten);
+    }
+  }, [editor, formData.konten]);
+
   useEffect(() => {
     const fetchAllNews = async () => {
       try {
@@ -88,7 +97,6 @@ const NewsModal = ({
           snapshot.docs.forEach(docSnap => {
             const data = docSnap.data();
             const slug = data.slug || createSlug(data.judul || `berita-${docSnap.id}`);
-            
             newsData.push({
               id: docSnap.id,
               judul: data.judul || 'Tanpa Judul',
@@ -99,11 +107,9 @@ const NewsModal = ({
               ...data
             });
           });
-          
           setAllNewsArticles(newsData);
           console.log('[NewsModal] Loaded news articles:', newsData.length);
         });
-        
         return () => unsubscribe();
       } catch (error) {
         console.error('[NewsModal] Error fetching all news:', error);
@@ -125,7 +131,6 @@ const NewsModal = ({
               article.id !== editingNews?.id
             )
             .slice(0, 3);
-          
           setRelatedNews(related);
         } catch (error) {
           console.error('[NewsModal] Error fetching related news:', error);
@@ -234,9 +239,6 @@ const NewsModal = ({
       if (editingNews.hideProfilePicture !== undefined) {
         setShowProfilePicture(!editingNews.hideProfilePicture);
       }
-      if (editor) {
-        editor.commands.setContent(formData.konten);
-      }
       setFormData(prev => ({ ...prev, author: editingNews.author || '' }));
       setUseUserName(editingNews.author === currentUser?.displayName);
       setIsAuthorOverridden(false);
@@ -265,7 +267,7 @@ const NewsModal = ({
         editor.commands.setContent('');
       }
     }
-  }, [showModal, editingNews, formData.gambar, formData.konten, editor, currentUser, setFormData]);
+  }, [showModal, editingNews, formData.gambar, editor, currentUser, setFormData]);
 
   useEffect(() => {
     if (!editingNews || isOriginalAuthor) {
@@ -659,14 +661,12 @@ const NewsModal = ({
     }
     
     try {
-      // Filter dari allNewsArticles yang sudah dimuat
       const results = allNewsArticles
         .filter(article => 
           article.judul.toLowerCase().includes(newsSearchQuery.toLowerCase()) &&
           article.id !== editingNews?.id
         )
         .slice(0, 5);
-      
       setNewsSearchResults(results);
       console.log('[NewsModal] Search results:', results);
     } catch (error) {
@@ -678,12 +678,12 @@ const NewsModal = ({
   const handleInsertNewsLink = (news) => {
     if (editor && news.slug) {
       const url = `/berita/${news.slug}`;
-      // Use the correct TipTap Link extension method
+      const selectedText = editor.state.selection.empty ? news.judul : editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to);
       editor.chain()
         .focus()
         .extendMarkRange('link')
         .setLink({ href: url })
-        .insertContent(news.judul)
+        .insertContent(selectedText)
         .run();
       setNewsSearchModalOpen(false);
       setNewsSearchQuery('');
@@ -691,7 +691,6 @@ const NewsModal = ({
     }
   };
 
-  // Update search results ketika query berubah
   useEffect(() => {
     if (newsSearchModalOpen && newsSearchQuery.trim()) {
       handleSearchNews();
@@ -862,14 +861,15 @@ const NewsModal = ({
         className="px-2 py-1 text-gray-700"
         title="Insert News Link"
       >
-        <Link className="h-4 w-4 inline" />
+        <Link className="h-4 w-4 inline" />📰
       </button>
       <button
-        onClick={() => editor.chain().focus().undo().run()}
-        className="px-2 py-1 text-gray-700"
-        title="Undo"
+        onClick={() => editor.chain().focus().unsetLink().run()}
+        className={`px-2 py-1 ${editor?.isActive('link') ? 'bg-purple-100 text-black' : 'text-gray-700'}`}
+        title="Remove Link"
+        disabled={!editor?.isActive('link')}
       >
-        ↺
+        <Link className="h-4 w-4 inline" />✗
       </button>
     </div>
   );
@@ -905,14 +905,14 @@ const NewsModal = ({
       <>
         <style jsx>{`
           .tiptap-editor {
-            color: #1f2937; /* gray-800 */
+            color: #1f2937;
           }
           .tiptap-editor p {
             margin-bottom: 1rem;
           }
           .tiptap-editor strong {
             font-weight: 700;
-            color: #111827; /* gray-900 */
+            color: #111827;
           }
           .tiptap-editor em {
             font-style: italic;
@@ -938,11 +938,11 @@ const NewsModal = ({
             border-radius: 0.5rem;
           }
           .tiptap-editor a {
-            color: #2563eb; /* blue-600 */
+            color: #2563eb;
             text-decoration: underline;
           }
           .tiptap-editor a:hover {
-            color: #1d4ed8; /* blue-700 */
+            color: #1d4ed8;
           }
         `}</style>
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
@@ -967,14 +967,14 @@ const NewsModal = ({
     <>
       <style jsx>{`
         .tiptap-editor {
-          color: #1f2937; /* gray-800 */
+          color: #1f2937;
         }
         .tiptap-editor p {
           margin-bottom: 1rem;
         }
         .tiptap-editor strong {
           font-weight: 700;
-          color: #111827; /* gray-900 */
+          color: #111827;
         }
         .tiptap-editor em {
           font-style: italic;
@@ -1000,11 +1000,11 @@ const NewsModal = ({
           border-radius: 0.5rem;
         }
         .tiptap-editor a {
-          color: #2563eb; /* blue-600 */
+          color: #2563eb;
           text-decoration: underline;
         }
         .tiptap-editor a:hover {
-          color: #1d4ed8; /* blue-700 */
+          color: #1d4ed8;
         }
       `}</style>
       <div className={`fixed inset-0 z-50 overflow-y-auto transition-all duration-300 ${isAnimating ? 'bg-black/60 backdrop-blur-sm' : 'bg-black/0'}`}>
@@ -1388,8 +1388,7 @@ const NewsModal = ({
                         placeholder="https://example.com/image.jpg"
                         onFocus={() => setActiveStep(2)}
                       />
-                      <div
-                        className={`relative border-2 border-dashed rounded-xl p-6 ${dragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-300 hover:border-gray-400'}`}
+                      <div className={`relative border-2 border-dashed rounded-xl p-6 ${dragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-300 hover:border-gray-400'}`}
                         onDragEnter={handleDrag}
                         onDragLeave={handleDrag}
                         onDragOver={handleDrag}

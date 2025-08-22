@@ -79,7 +79,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
   const fetchUserData = useCallback(async (userId) => {
     if (!userId) return { displayName: 'Unknown', isAdmin: false };
     
-    // Check cache first
     if (userCache.current.has(userId)) {
       return userCache.current.get(userId);
     }
@@ -91,7 +90,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         isAdmin: userDoc.exists() && userDoc.data().isAdmin === true
       };
       
-      // Cache the result
       userCache.current.set(userId, userData);
       return userData;
     } catch (error) {
@@ -114,7 +112,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
       setError(null);
 
       try {
-        // Verify news document exists
         const newsRef = doc(db, 'news', newsId);
         const newsDoc = await getDoc(newsRef);
         if (!newsDoc.exists()) {
@@ -123,14 +120,13 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
           return;
         }
 
-        // Query for root comments (parentId is null)
+        // Query untuk semua komentar root (tidak mengecualikan yang dihapus)
         const rootCommentsQuery = query(
           collection(db, 'news', newsId, 'comments'),
           where('parentId', '==', null),
           orderBy('createdAt', 'desc')
         );
 
-        // Set up real-time listener for root comments
         const unsubscribeComments = onSnapshot(rootCommentsQuery, async (rootSnapshot) => {
           try {
             const commentsData = [];
@@ -138,19 +134,17 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
             for (const rootDoc of rootSnapshot.docs) {
               const rootCommentData = { id: rootDoc.id, ...rootDoc.data() };
               
-              // Fetch user data for root comment
               const userData = await fetchUserData(rootCommentData.userId);
               rootCommentData.displayName = userData.displayName;
               rootCommentData.isAdmin = userData.isAdmin;
 
-              // Set up real-time listener for replies
+              // Query untuk semua replies (tidak mengecualikan yang dihapus)
               const repliesQuery = query(
                 collection(db, 'news', newsId, 'comments'),
                 where('parentId', '==', rootDoc.id),
                 orderBy('createdAt', 'asc')
               );
 
-              // Use a promise to handle the async nature of onSnapshot
               const commentWithReplies = await new Promise((resolve) => {
                 const unsubscribeReplies = onSnapshot(repliesQuery, async (repliesSnapshot) => {
                   const repliesData = [];
@@ -161,7 +155,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
                     replyData.displayName = replyUserData.displayName;
                     replyData.isAdmin = replyUserData.isAdmin;
 
-                    // Set up real-time likes for reply
                     const replyLikesQuery = query(
                       collection(db, 'news', newsId, 'likes'),
                       where('commentId', '==', replyDoc.id)
@@ -176,7 +169,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
                       replyData.likeCount = likeCount;
                       replyData.userHasLiked = userHasLiked;
 
-                      // Update the state with the new reply data
                       setComments(prevComments => 
                         prevComments.map(comment => 
                           comment.id === rootDoc.id
@@ -195,7 +187,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
                     repliesData.push(replyData);
                   }
 
-                  // Store unsubscribe function
                   unsubscribeRef.current[`replies_${rootDoc.id}`] = unsubscribeReplies;
                   
                   resolve({
@@ -205,7 +196,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
                 });
               });
 
-              // Set up real-time likes for root comment
               const likesQuery = query(
                 collection(db, 'news', newsId, 'likes'),
                 where('commentId', '==', rootDoc.id)
@@ -220,7 +210,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
                 commentWithReplies.likeCount = likeCount;
                 commentWithReplies.userHasLiked = userHasLiked;
 
-                // Update the state with the new like data
                 setComments(prevComments => 
                   prevComments.map(comment => 
                     comment.id === rootDoc.id 
@@ -234,7 +223,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
               commentsData.push(commentWithReplies);
             }
 
-            // Update comments state
             setComments(commentsData);
             setLoading(false);
           } catch (error) {
@@ -257,7 +245,6 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
 
     setupRealTimeComments();
 
-    // Cleanup function
     return () => {
       Object.values(unsubscribeRef.current).forEach(unsubscribe => {
         if (typeof unsubscribe === 'function') {
@@ -354,16 +341,19 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         parentId,
         replyToAuthor,
         isEdited: false,
+        isDeleted: false,
         isAdmin,
         photoURL: currentUser.photoURL || null
       };
 
       await addDoc(collection(db, 'news', newsId, 'comments'), commentData);
       
-      // Clear form
-      if (!parentId) setNewComment('');
-      else setReplyComment('');
-      setReplyTo(null);
+      if (!parentId) {
+        setNewComment('');
+      } else {
+        setReplyComment('');
+        setReplyTo(null);
+      }
       
       toast.success('Komentar berhasil ditambahkan!');
     } catch (error) {
@@ -443,23 +433,23 @@ const CommentBox = ({ newsId, currentUser, onCommentCountChange }) => {
         return;
       }
       
-      // Delete the comment
-      await deleteDoc(commentRef);
+      await setDoc(commentRef, { isDeleted: true }, { merge: true });
       
-      // Also delete all replies if this is a parent comment
       if (!commentDoc.data().parentId) {
         const repliesQuery = query(
           collection(db, 'news', newsId, 'comments'),
           where('parentId', '==', commentId)
         );
         const repliesSnapshot = await getDocs(repliesQuery);
-        const deletePromises = repliesSnapshot.docs.map(replyDoc => deleteDoc(replyDoc.ref));
-        await Promise.all(deletePromises);
+        const updatePromises = repliesSnapshot.docs.map(replyDoc =>
+          setDoc(replyDoc.ref, { isDeleted: true }, { merge: true })
+        );
+        await Promise.all(updatePromises);
       }
       
       toast.success('Komentar berhasil dihapus!');
     } catch (error) {
-      console.error('Error deleting comment:', error, { commentId, newsId });
+      console.error('Error soft-deleting comment:', error, { commentId, newsId });
       toast.error('Gagal menghapus komentar: ' + error.message);
     } finally {
       setDeleteModal({ isOpen: false, commentId: '', newsId: '' });
@@ -773,6 +763,7 @@ const CommentItem = ({
 }) => {
   const createdAt = comment.createdAt?.toDate();
   const isEditable = createdAt && (Date.now() - createdAt.getTime()) <= 5 * 60 * 1000;
+  const isReplying = replyTo?.id === comment.id;
 
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
@@ -791,7 +782,7 @@ const CommentItem = ({
               {comment.isAdmin && (
                 <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">Admin</span>
               )}
-              {comment.isEdited && (
+              {comment.isEdited && !comment.isDeleted && (
                 <span className="text-gray-500 text-xs flex items-center">
                   <Edit2 className="w-3 h-3 mr-1" /> Diedit
                 </span>
@@ -801,7 +792,9 @@ const CommentItem = ({
               {comment.createdAt?.toDate().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) || 'N/A'}
             </span>
           </div>
-          {editingComment === comment.id ? (
+          {comment.isDeleted ? (
+            <p className="text-gray-500 italic mb-4">[KOMENTAR INI TELAH DIHAPUS]</p>
+          ) : editingComment === comment.id ? (
             <form onSubmit={handleSaveEdit} className="mb-4">
               <textarea
                 value={editText}
@@ -827,6 +820,8 @@ const CommentItem = ({
           ) : (
             <p className="text-gray-700 mb-4">{comment.text}</p>
           )}
+          
+          {/* Action buttons */}
           <div className="flex items-center space-x-4">
             <button
               onClick={() => handleLike(comment.id)}
@@ -837,7 +832,7 @@ const CommentItem = ({
               <Heart className={`w-5 h-5 ${comment.userHasLiked ? 'fill-red-500' : ''}`} />
               <span>{comment.likeCount || 0} Like{(comment.likeCount || 0) !== 1 ? 's' : ''}</span>
             </button>
-            {/* Only show reply button for root comments (not replies) */}
+            
             {!comment.parentId && currentUser?.uid && (
               <button
                 onClick={() => setReplyTo({ id: comment.id, author: comment.displayName })}
@@ -847,7 +842,8 @@ const CommentItem = ({
                 <span>Balas</span>
               </button>
             )}
-            {currentUser?.uid && comment.userId === currentUser.uid && isEditable && (
+            
+            {!comment.isDeleted && currentUser?.uid && comment.userId === currentUser.uid && isEditable && (
               <button
                 onClick={() => handleEdit(comment)}
                 className="flex items-center space-x-2 text-gray-500 hover:text-blue-500 transition-colors duration-200"
@@ -856,6 +852,7 @@ const CommentItem = ({
                 <span>Edit</span>
               </button>
             )}
+            
             {currentUser?.uid && (
               <button
                 onClick={() => handleReport(comment.id)}
@@ -865,7 +862,8 @@ const CommentItem = ({
                 <span>Lapor</span>
               </button>
             )}
-            {(currentUser?.uid && (comment.userId === currentUser.uid || currentUserIsAdmin)) && (
+            
+            {!comment.isDeleted && (currentUser?.uid && (comment.userId === currentUser.uid || currentUserIsAdmin)) && (
               <button
                 onClick={() => handleDelete(comment.id)}
                 className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"
@@ -875,8 +873,9 @@ const CommentItem = ({
               </button>
             )}
           </div>
-          {/* Reply form - only show for root comments */}
-          {!comment.parentId && replyTo?.id === comment.id && (
+          
+          {/* Reply form */}
+          {isReplying && (
             <form onSubmit={(e) => handleSubmit(e, comment.id, comment.displayName)} className="mt-4 bg-gray-50 rounded-xl p-4">
               <div className="flex items-center space-x-2 mb-2">
                 <span className="text-gray-500 text-sm">Membalas {comment.displayName}</span>
@@ -905,7 +904,8 @@ const CommentItem = ({
               </div>
             </form>
           )}
-          {/* Replies section - flat structure, no nested replies */}
+          
+          {/* Replies section */}
           {comment.replies?.length > 0 && (
             <div className="mt-6 space-y-4">
               {comment.replies.map((reply) => (
@@ -925,7 +925,7 @@ const CommentItem = ({
                           {reply.isAdmin && (
                             <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">Admin</span>
                           )}
-                          {reply.isEdited && (
+                          {reply.isEdited && !reply.isDeleted && (
                             <span className="text-gray-500 text-xs flex items-center">
                               <Edit2 className="w-3 h-3 mr-1" /> Diedit
                             </span>
@@ -935,7 +935,13 @@ const CommentItem = ({
                           {reply.createdAt?.toDate().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }) || 'N/A'}
                         </span>
                       </div>
-                      <p className="text-gray-700 mb-4">{reply.text}</p>
+                      {reply.isDeleted ? (
+                        <p className="text-gray-500 italic mb-4">[KOMENTAR INI TELAH DIHAPUS]</p>
+                      ) : (
+                        <p className="text-gray-700 mb-4">{reply.text}</p>
+                      )}
+                      
+                      {/* Reply action buttons */}
                       <div className="flex items-center space-x-4">
                         <button
                           onClick={() => handleLike(reply.id)}
@@ -946,7 +952,17 @@ const CommentItem = ({
                           <Heart className={`w-5 h-5 ${reply.userHasLiked ? 'fill-red-500' : ''}`} />
                           <span>{reply.likeCount || 0} Like{(reply.likeCount || 0) !== 1 ? 's' : ''}</span>
                         </button>
-                        {/* NO REPLY BUTTON FOR REPLIES - keeps it flat */}
+                        
+                        {currentUser?.uid && (
+                          <button
+                            onClick={() => setReplyTo({ id: comment.id, author: comment.displayName })}
+                            className="flex items-center space-x-2 text-gray-500 hover:text-cyan-500 transition-colors duration-200"
+                          >
+                            <Reply className="w-5 h-5" />
+                            <span>Balas</span>
+                          </button>
+                        )}
+                        
                         {currentUser?.uid && (
                           <button
                             onClick={() => handleReport(reply.id)}
@@ -956,7 +972,8 @@ const CommentItem = ({
                             <span>Lapor</span>
                           </button>
                         )}
-                        {(currentUser?.uid && (reply.userId === currentUser.uid || currentUserIsAdmin)) && (
+                        
+                        {!reply.isDeleted && (currentUser?.uid && (reply.userId === currentUser.uid || currentUserIsAdmin)) && (
                           <button
                             onClick={() => handleDelete(reply.id)}
                             className="flex items-center space-x-2 text-gray-500 hover:text-red-500 transition-colors duration-200"
